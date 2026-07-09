@@ -1,0 +1,58 @@
+import { Badge } from "@/components/ui/badge"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { prisma } from "@/lib/db"
+import { formatRub } from "@/lib/pricing"
+
+export default async function AdminUsersPage() {
+  const users = await prisma.user.findMany({
+    include: {
+      subscriptions: {
+        orderBy: { createdAt: "desc" },
+        take: 1,
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  })
+
+  return (
+    <Card className="glass-card rounded-3xl">
+      <CardHeader>
+        <CardTitle>Users</CardTitle>
+      </CardHeader>
+      <CardContent className="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Email</TableHead>
+              <TableHead>Telegram</TableHead>
+              <TableHead>Role</TableHead>
+              <TableHead>Balance</TableHead>
+              <TableHead>Subscription</TableHead>
+              <TableHead>Created</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {users.map((user) => (
+              <TableRow key={user.id}>
+                <TableCell>{user.email ?? "—"}</TableCell>
+                <TableCell>{user.telegramId ?? "—"}</TableCell>
+                <TableCell><Badge>{user.role}</Badge></TableCell>
+                <TableCell>{formatRub(user.balanceRub)}</TableCell>
+                <TableCell>{user.subscriptions[0]?.status ?? "NONE"}</TableCell>
+                <TableCell>{user.createdAt.toLocaleDateString("ru-RU")}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  )
+}

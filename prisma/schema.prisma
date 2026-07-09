@@ -1,0 +1,532 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum AuthIdentityType {
+  EMAIL
+  TELEGRAM
+}
+
+enum LoginChallengeType {
+  EMAIL_OTP
+  TELEGRAM
+}
+
+enum LoginChallengeStatus {
+  PENDING
+  COMPLETED
+  EXPIRED
+  CANCELED
+}
+
+enum SubscriptionStatus {
+  NONE
+  TRIAL
+  ACTIVE
+  EXPIRED
+  CANCELED
+}
+
+enum SubscriptionSyncStatus {
+  NOT_SYNCED
+  PENDING
+  SYNCED
+  FAILED
+}
+
+enum SubscriptionFeatureType {
+  REGULAR_ACCESS
+  LTE_ACCESS
+  GAMING_ACCESS
+}
+
+enum PaymentStatus {
+  PENDING
+  CONFIRMED
+  CANCELED
+  FAILED
+  CHARGEBACKED
+}
+
+enum PaymentProviderType {
+  MOCK
+  PLATEGA
+}
+
+enum WalletLedgerDirection {
+  CREDIT
+  DEBIT
+}
+
+enum WalletLedgerType {
+  TOPUP
+  SUBSCRIPTION_PAYMENT
+  REFERRAL_REWARD
+  PAYOUT_RESERVE
+  PAYOUT_PAID
+  PAYOUT_REFUND
+  ADMIN_ADJUSTMENT
+}
+
+enum WalletLedgerStatus {
+  PENDING
+  POSTED
+  VOIDED
+}
+
+enum ReferralInviteStatus {
+  REGISTERED
+  PAID
+  CANCELED
+}
+
+enum ReferralRewardStatus {
+  PENDING
+  AVAILABLE
+  RESERVED
+  PAID
+  CANCELED
+}
+
+enum PayoutRequestStatus {
+  PENDING
+  APPROVED
+  PAID
+  REJECTED
+}
+
+enum SupportConversationStatus {
+  OPEN
+  CLOSED
+}
+
+enum SupportMessageAuthorRole {
+  USER
+  ADMIN
+  SYSTEM
+}
+
+enum NodeType {
+  REGULAR
+  LTE
+  GAMING
+}
+
+enum NodeProtocol {
+  VLESS_REALITY
+  HYSTERIA
+  VLESS_XHTTP_TLS
+}
+
+enum NodeStatus {
+  ACTIVE
+  MAINTENANCE
+  DISABLED
+}
+
+enum IntegrationProvider {
+  REMNAWAVE
+  PLATEGA
+  TELEGRAM
+  SYSTEM
+}
+
+enum IntegrationLogStatus {
+  SUCCESS
+  PENDING
+  FAILED
+}
+
+model User {
+  id         String   @id @default(cuid())
+  email      String?  @unique
+  telegramId String?  @unique
+  role       UserRole @default(USER)
+  balanceRub Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  identities                AuthIdentity[]
+  sessions                  Session[]
+  loginChallenges           LoginChallenge[]
+  subscriptions             Subscription[]
+  payments                  Payment[]
+  walletLedgerEntries       WalletLedgerEntry[]
+  referralProfile           ReferralProfile?
+  referralInvitesSent       ReferralInvite[]       @relation("ReferralInviteInviter")
+  referralInviteReceived    ReferralInvite?        @relation("ReferralInviteInvited")
+  referralRewardsIssued     ReferralReward[]       @relation("ReferralRewardInviter")
+  referralRewardsReceived   ReferralReward[]       @relation("ReferralRewardInvited")
+  payoutRequests            PayoutRequest[]
+  supportConversations      SupportConversation[]
+  supportMessages           SupportMessage[]
+  auditLogs                 AuditLog[]             @relation("AuditActor")
+  deviceLimitChanges        DeviceLimitChange[]    @relation("DeviceLimitChangeActor")
+  approvedPayoutRequests    PayoutRequest[]        @relation("PayoutApprovedBy")
+  paidPayoutRequests        PayoutRequest[]        @relation("PayoutPaidBy")
+  rejectedPayoutRequests    PayoutRequest[]        @relation("PayoutRejectedBy")
+}
+
+model AuthIdentity {
+  id         String           @id @default(cuid())
+  userId     String
+  type       AuthIdentityType
+  identifier String
+  verifiedAt DateTime?
+  createdAt  DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([type, identifier])
+  @@index([userId])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  userAgent String?
+  ipAddress String?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model EmailOtp {
+  id         String    @id @default(cuid())
+  email      String
+  codeHash   String
+  attempts   Int       @default(0)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([email])
+  @@index([expiresAt])
+}
+
+model LoginChallenge {
+  id              String               @id @default(cuid())
+  userId          String?
+  type            LoginChallengeType
+  status          LoginChallengeStatus @default(PENDING)
+  email           String?
+  telegramPayload Json?
+  nonce           String               @unique
+  expiresAt       DateTime
+  completedAt     DateTime?
+  createdAt       DateTime             @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([type, status])
+}
+
+model Subscription {
+  id                    String                 @id @default(cuid())
+  userId                String
+  status                SubscriptionStatus     @default(NONE)
+  startsAt              DateTime?
+  expiresAt             DateTime?
+  deviceLimit           Int                    @default(1)
+  lteEnabled            Boolean                @default(false)
+  subscriptionUrl       String?
+  remnawaveUserId       String?
+  syncStatus            SubscriptionSyncStatus @default(NOT_SYNCED)
+  lastUserFriendlyError String?
+  lastTechnicalError    String?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+
+  user               User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  features           SubscriptionFeature[]
+  deviceLimitChanges DeviceLimitChange[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([syncStatus])
+}
+
+model SubscriptionFeature {
+  id             String                  @id @default(cuid())
+  subscriptionId String
+  type           SubscriptionFeatureType
+  label          String
+  enabled        Boolean                 @default(true)
+  metadata       Json?
+  createdAt      DateTime                @default(now())
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@unique([subscriptionId, type])
+  @@index([subscriptionId])
+}
+
+model DeviceLimitChange {
+  id             String   @id @default(cuid())
+  subscriptionId String
+  fromLimit      Int
+  toLimit        Int
+  actorUserId    String?
+  paymentId      String?
+  createdAt      DateTime @default(now())
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  actor        User?        @relation("DeviceLimitChangeActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  payment      Payment?     @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  @@index([subscriptionId])
+  @@index([actorUserId])
+}
+
+model Payment {
+  id                String              @id @default(cuid())
+  userId            String
+  provider          PaymentProviderType @default(MOCK)
+  status            PaymentStatus       @default(PENDING)
+  amountRub         Int
+  durationMonths    Int
+  deviceLimit       Int
+  lteEnabled        Boolean             @default(false)
+  externalPaymentId String?
+  checkoutUrl       String?
+  metadata          Json?
+  confirmedAt       DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  webhookLogs        PaymentWebhookLog[]
+  referralRewards    ReferralReward[]
+  deviceLimitChanges DeviceLimitChange[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([provider])
+}
+
+model PaymentWebhookLog {
+  id              String              @id @default(cuid())
+  paymentId       String?
+  provider        PaymentProviderType
+  status          IntegrationLogStatus
+  eventId         String?
+  requestPayload  Json?
+  responsePayload Json?
+  error           String?
+  createdAt       DateTime            @default(now())
+
+  payment Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  @@index([paymentId])
+  @@index([provider])
+}
+
+model WalletLedgerEntry {
+  id             String                @id @default(cuid())
+  userId         String
+  direction      WalletLedgerDirection
+  amountRub      Int
+  type           WalletLedgerType
+  status         WalletLedgerStatus    @default(POSTED)
+  idempotencyKey String?               @unique
+  metadata       Json?
+  createdAt      DateTime              @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([type])
+  @@index([status])
+}
+
+model ReferralProfile {
+  userId    String   @id
+  inviteCode String  @unique
+  inviteUrl  String
+  isEnabled  Boolean @default(false)
+  enabledAt  DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ReferralInvite {
+  id            String               @id @default(cuid())
+  inviterId     String
+  invitedUserId String               @unique
+  status        ReferralInviteStatus @default(REGISTERED)
+  createdAt     DateTime             @default(now())
+  convertedAt   DateTime?
+
+  inviter User @relation("ReferralInviteInviter", fields: [inviterId], references: [id], onDelete: Cascade)
+  invited User @relation("ReferralInviteInvited", fields: [invitedUserId], references: [id], onDelete: Cascade)
+
+  @@index([inviterId])
+  @@index([status])
+}
+
+model ReferralReward {
+  id            String               @id @default(cuid())
+  inviterId     String
+  invitedUserId String
+  paymentId     String?
+  amountRub     Int
+  status        ReferralRewardStatus @default(PENDING)
+  createdAt     DateTime             @default(now())
+  availableAt   DateTime?
+  paidAt        DateTime?
+
+  inviter User     @relation("ReferralRewardInviter", fields: [inviterId], references: [id], onDelete: Cascade)
+  invited User     @relation("ReferralRewardInvited", fields: [invitedUserId], references: [id], onDelete: Cascade)
+  payment Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  @@index([inviterId])
+  @@index([invitedUserId])
+  @@index([status])
+}
+
+model PayoutRequest {
+  id              String              @id @default(cuid())
+  userId          String
+  amountRub       Int
+  status          PayoutRequestStatus @default(PENDING)
+  payoutDetails   String
+  adminNote       String?
+  approvedById    String?
+  paidById        String?
+  rejectedById    String?
+  createdAt       DateTime            @default(now())
+  approvedAt      DateTime?
+  paidAt          DateTime?
+  rejectedAt      DateTime?
+
+  user       User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  approvedBy User? @relation("PayoutApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  paidBy     User? @relation("PayoutPaidBy", fields: [paidById], references: [id], onDelete: SetNull)
+  rejectedBy User? @relation("PayoutRejectedBy", fields: [rejectedById], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([status])
+}
+
+model SupportConversation {
+  id            String                    @id @default(cuid())
+  userId        String
+  status        SupportConversationStatus @default(OPEN)
+  subject       String?
+  lastMessageAt DateTime?
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+
+  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages SupportMessage[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+model SupportMessage {
+  id             String                   @id @default(cuid())
+  conversationId String
+  senderId       String?
+  authorRole     SupportMessageAuthorRole
+  body           String
+  createdAt      DateTime                 @default(now())
+
+  conversation SupportConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User?               @relation(fields: [senderId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId])
+  @@index([senderId])
+}
+
+model LegalDocument {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  title       String
+  content     String
+  isPublished Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Node {
+  id        String       @id @default(cuid())
+  name      String
+  country   String
+  city      String
+  type      NodeType
+  protocol  NodeProtocol
+  domain    String
+  status    NodeStatus   @default(ACTIVE)
+  capacity  Int
+  sortOrder Int          @default(0)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@index([type])
+  @@index([status])
+  @@index([sortOrder])
+}
+
+model IntegrationLog {
+  id              String              @id @default(cuid())
+  provider        IntegrationProvider
+  action          String
+  status          IntegrationLogStatus
+  requestPayload  Json?
+  responsePayload Json?
+  error           String?
+  createdAt       DateTime            @default(now())
+
+  @@index([provider])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  actorUserId    String?
+  action         String
+  entityType     String
+  entityId       String?
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  actor User? @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([actorUserId])
+  @@index([action])
+  @@index([entityType])
+}
+
+model PricingSettings {
+  id                         String   @id @default("default")
+  baseMonthlyPriceRub        Int      @default(119)
+  extraDeviceMonthlyPriceRub Int      @default(15)
+  minDeviceLimit             Int      @default(1)
+  maxDeviceLimit             Int      @default(5)
+  lteMonthlyPriceRub         Int      @default(50)
+  durationDiscounts          Json
+  referralFriendDiscountPct  Int      @default(50)
+  referralRewardRub          Int      @default(75)
+  minimalPayoutRub           Int      @default(150)
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+}

@@ -1,0 +1,45 @@
+import { updatePricingSettingsAction } from "@/app/admin/actions"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
+import { prisma } from "@/lib/db"
+
+export default async function AdminSettingsPage() {
+  const [settings, legalDocuments] = await Promise.all([
+    prisma.pricingSettings.findUniqueOrThrow({ where: { id: "default" } }),
+    prisma.legalDocument.findMany({ orderBy: { title: "asc" } }),
+  ])
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-2">
+      <Card className="glass-card rounded-3xl">
+        <CardHeader><CardTitle>Pricing Settings</CardTitle></CardHeader>
+        <CardContent>
+          <form action={updatePricingSettingsAction} className="flex flex-col gap-3">
+            <FieldGroup>
+              <Field><FieldLabel>Base monthly price</FieldLabel><Input name="baseMonthlyPriceRub" type="number" defaultValue={settings.baseMonthlyPriceRub} /></Field>
+              <Field><FieldLabel>Extra device monthly price</FieldLabel><Input name="extraDeviceMonthlyPriceRub" type="number" defaultValue={settings.extraDeviceMonthlyPriceRub} /></Field>
+              <Field><FieldLabel>LTE monthly price</FieldLabel><Input name="lteMonthlyPriceRub" type="number" defaultValue={settings.lteMonthlyPriceRub} /></Field>
+              <Field><FieldLabel>Friend discount %</FieldLabel><Input name="referralFriendDiscountPct" type="number" defaultValue={settings.referralFriendDiscountPct} /></Field>
+              <Field><FieldLabel>Referral reward RUB</FieldLabel><Input name="referralRewardRub" type="number" defaultValue={settings.referralRewardRub} /></Field>
+              <Field><FieldLabel>Minimal payout RUB</FieldLabel><Input name="minimalPayoutRub" type="number" defaultValue={settings.minimalPayoutRub} /></Field>
+            </FieldGroup>
+            <Button type="submit">Save settings</Button>
+          </form>
+        </CardContent>
+      </Card>
+      <Card className="glass-card rounded-3xl">
+        <CardHeader><CardTitle>Legal Documents</CardTitle></CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          {legalDocuments.map((doc) => (
+            <div key={doc.id} className="soft-panel p-4">
+              <p className="font-medium">{doc.title}</p>
+              <p className="text-sm text-muted-foreground">/legal/{doc.slug}</p>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
