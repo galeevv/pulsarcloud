@@ -46,4 +46,14 @@ test("baseline migration builds every foundation table from an empty database", 
     assert.equal(names.has(table), true, `missing table ${table}`)
   }
   assert.equal(names.has("_prisma_migrations"), true)
+
+  const pricing = await database.client.pricingVersion.findMany({
+    where: { status: "ACTIVE" },
+  })
+  assert.equal(pricing.length, 1)
+  assert.equal(pricing[0]?.baseMonthlyPriceRub, 119)
+  assert.equal(pricing[0]?.extraDeviceMonthlyPriceRub, 50)
+  assert.equal(pricing[0]?.lteMonthlyPriceRub, 50)
+  assert.equal(pricing[0]?.referralRewardRub, 75)
+  assert.equal(pricing[0]?.minimalPayoutRub, 150)
 })

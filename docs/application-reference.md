@@ -56,6 +56,11 @@ should be held behind antifraud or first live payment before public launch.
 
 ## Billing
 
+Migrations install one production-safe active pricing baseline: 119 RUB per
+month, 50 RUB per additional device, 50 RUB for LTE, and the configured duration
+discounts. It contains no demo users or financial records. Every later admin
+change retires the active version and creates a new immutable version.
+
 The browser never supplies a trusted final amount. The server reads the active
 `PricingVersion`, validates duration/device/LTE selections, calculates a total,
 and stores an immutable `PriceQuote` snapshot. A payment copies the quote terms.
@@ -130,4 +135,3 @@ and maintenance. Job idempotency keys prevent duplicate domain effects.
 - Payment and Telegram callbacks authenticate before mutation.
 - Test payments require an explicit server flag and authenticated ownership.
 - Secrets belong in `/etc/pulsar/pulsar.env`, never Git.
-

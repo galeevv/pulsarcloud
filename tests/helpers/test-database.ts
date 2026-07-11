@@ -14,10 +14,7 @@ const workspaceRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../.."
 )
-const prismaCli = path.join(
-  workspaceRoot,
-  "node_modules/prisma/build/index.js"
-)
+const prismaCli = path.join(workspaceRoot, "node_modules/prisma/build/index.js")
 
 export type TestDatabase = {
   client: PrismaClient
@@ -26,8 +23,12 @@ export type TestDatabase = {
   close(): Promise<void>
 }
 
-export async function createTestDatabase(suiteName: string): Promise<TestDatabase> {
-  const directory = mkdtempSync(path.join(tmpdir(), `pulsar-${slug(suiteName)}-`))
+export async function createTestDatabase(
+  suiteName: string
+): Promise<TestDatabase> {
+  const directory = mkdtempSync(
+    path.join(tmpdir(), `pulsar-${slug(suiteName)}-`)
+  )
   const filePath = path.join(directory, "suite.db")
   const url = `file:${filePath.replaceAll("\\", "/")}`
 
@@ -55,29 +56,46 @@ export async function createTestDatabase(suiteName: string): Promise<TestDatabas
 }
 
 export async function createPricingVersion(client: PrismaClient, version = 1) {
+  const data = {
+    status: "ACTIVE" as const,
+    baseMonthlyPriceRub: 119,
+    extraDeviceMonthlyPriceRub: 15,
+    minDeviceLimit: 1,
+    maxDeviceLimit: 5,
+    lteMonthlyPriceRub: 50,
+    durationDiscounts: [
+      { months: 1, discountPct: 0 },
+      { months: 3, discountPct: 10 },
+      { months: 6, discountPct: 15 },
+      { months: 12, discountPct: 30 },
+    ],
+    referralFriendDiscountPct: 50,
+    referralRewardRub: 75,
+    minimalPayoutRub: 150,
+    effectiveAt: new Date(),
+  }
+  const existing = await client.pricingVersion.findUnique({
+    where: { version },
+  })
+
+  if (existing) {
+    return client.pricingVersion.update({
+      where: { id: existing.id },
+      data,
+    })
+  }
+
   return client.pricingVersion.create({
     data: {
       version,
-      status: "ACTIVE",
-      baseMonthlyPriceRub: 119,
-      extraDeviceMonthlyPriceRub: 15,
-      minDeviceLimit: 1,
-      maxDeviceLimit: 5,
-      lteMonthlyPriceRub: 50,
-      durationDiscounts: [
-        { months: 1, discountPct: 0 },
-        { months: 3, discountPct: 10 },
-        { months: 6, discountPct: 15 },
-        { months: 12, discountPct: 30 },
-      ],
-      referralFriendDiscountPct: 50,
-      referralRewardRub: 75,
-      minimalPayoutRub: 150,
-      effectiveAt: new Date(),
+      ...data,
     },
   })
 }
 
 function slug(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 30)
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .slice(0, 30)
 }
