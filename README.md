@@ -112,18 +112,18 @@ Admin routes:
 
 Admin is protected by `role ADMIN`. Regular users are redirected to `/home`.
 
-## Current Mock Boundaries
+## Integration modes
 
-- Payments use `MockPaymentProvider`; admin manually confirms pending payments.
-- Provisioning uses `MockRemnawaveClient`; subscription changes go through `SubscriptionProvisioningService`.
-- Telegram login has UI, `LoginChallenge`, and `MockTelegramAuthService`, but no real bot yet.
-- VPN nodes are admin-managed database rows only.
+- Payments use Platega in production. `TEST` is an explicit self-service
+  acceptance mode and `MOCK` remains available only for development/admin tests.
+- Provisioning uses the Remnawave HTTP adapter in production and a mock adapter
+  in automated tests.
+- Email delivery uses Resend; Telegram login and profile binding use the bot
+  webhook and durable update jobs.
+- External calls run outside SQL transactions and are retried by the worker.
 
-## Future Integrations
-
-- Platega: implement a real provider behind `PaymentProvider`, use `PaymentWebhookLog`, and confirm payments through webhook route handlers.
-- Remnawave: implement a real `RemnawaveClient` without touching UI or server actions.
-- Telegram bot: implement `TelegramAuthService`, store Telegram identities in `AuthIdentity`, and complete `LoginChallenge`.
+Production migrations create an active pricing baseline but never demo users.
+Run `npm run db:seed` only for a disposable development database.
 
 See `/docs/architecture.md`, `/docs/auth.md`,
 `/docs/billing.md`, `/docs/integration-handoff.md`, and `/docs/seed.md`.
