@@ -1,3 +1,5 @@
+ARCHIVED: документ описывает удаленную реализацию backend и не является актуальной архитектурой Pulsar 2.0.
+
 # Production integration operations
 
 Pulsar commits domain state and durable `Job` records before any external I/O.

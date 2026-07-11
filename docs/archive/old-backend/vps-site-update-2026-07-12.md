@@ -1,3 +1,5 @@
+ARCHIVED: документ описывает удаленную реализацию backend и не является актуальной архитектурой Pulsar 2.0.
+
 # Обновление Pulsar 2.0 на dev/test VPS
 
 Дата: 2026-07-12 (Asia/Yekaterinburg).

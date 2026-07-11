@@ -1,3 +1,5 @@
+ARCHIVED: документ описывает удаленную реализацию backend и не является актуальной архитектурой Pulsar 2.0.
+
 # Billing and subscription state machine
 
 The browser submits only plan inputs (`months`, `deviceLimit`, `lteEnabled`) and

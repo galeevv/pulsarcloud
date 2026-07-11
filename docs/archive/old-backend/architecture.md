@@ -1,3 +1,5 @@
+ARCHIVED: документ описывает удаленную реализацию backend и не является актуальной архитектурой Pulsar 2.0.
+
 # Architecture
 
 Pulsar 2.0 runs as one Next.js App Router web process and one background worker.

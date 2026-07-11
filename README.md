@@ -1,111 +1,45 @@
-# Pulsar 2.0
+# Pulsar 2.0 frontend
 
-Pulsar 2.0 is a Next.js App Router application for VPN subscription billing,
-authentication, referrals, support, and Remnawave provisioning.
+Pulsar 2.0 currently contains the preserved Next.js App Router frontend for a
+commercial VPN service. The previous backend and business logic were removed
+and will be rebuilt separately.
 
-Documentation index:
+## What is available
 
-- [Application reference](docs/application-reference.md)
-- [Architecture](docs/architecture.md)
-- [Authentication](docs/auth.md)
-- [Billing](docs/billing.md)
-- [Integration operations](docs/integration-handoff.md)
-- [Remnawave test environment](docs/remnawave-test-environment.md)
-- [Repository and VPS audit](docs/audit-2026-07-12.md)
-- [Testing](docs/test.md)
+- User routes: `/`, `/auth/verify`, `/home`, `/subscription`, `/referrals`,
+  `/profile`, `/support`, and `/legal`.
+- Existing admin routes under `/admin`.
+- The original responsive layout, navigation, shadcn/Base UI components,
+  forms, dialogs, drawers, styles, animations, and public assets.
+- Read-only fixtures under `src/frontend-preview` for visual review.
 
-Clean Next.js foundation for the commercial PulsarVPN cabinet. This is a new project, not a refactor of Pulsar 1.0. Legacy backend terms, promo codes, credits, username/password auth, Marzban/x-ui artifacts, and old project structure are intentionally absent.
+Preview actions never send HTTP requests, set cookies, write data, or call an
+external provider. They display a message that the action will become available
+after the new backend is connected.
 
-## Stack
-
-- Next.js App Router, TypeScript, Tailwind v4
-- shadcn/ui preset `b1VlIttI`, Base UI primitives, Lucide icons
-- SQLite + Prisma 7 + `@prisma/adapter-better-sqlite3`
-- Cookie-based sessions
-- Server actions and route handlers
-- Mobile-first dark premium UI
-
-## Setup
-
-1. Install dependencies:
+## Local development
 
 ```bash
-npm install
-```
-
-2. Create `.env` from `.env.example`:
-
-```bash
-cp .env.example .env
-```
-
-3. Apply migrations and generate Prisma Client:
-
-```bash
-npm run db:deploy
-npm run db:generate
-```
-
-4. Start the web process:
-
-```bash
+npm ci
 npm run dev
 ```
 
-Open `http://localhost:3000`.
+`PULSAR_FRONTEND_PREVIEW=true` is optional in development and documents the
+intended local mode. Production builds remain safe: they use read-only display
+fixtures and do not imitate working authentication, payments, provisioning, or
+support persistence.
 
-5. Start the single background worker in another terminal:
+## Checks
 
 ```bash
-npm run worker
+npm run format:check
+npm run typecheck
+npm run lint
+npm test
+npm run build
 ```
 
-Both processes use the same local `pulsar.db`. Startup enables WAL, foreign
-keys, full synchronous durability, a 5-second busy timeout, and in-memory temp
-storage. SQLite versions without the WAL-reset fix are rejected.
-
-## Login
-
-No passwords exist. Users authenticate with a Resend-delivered email OTP or a
-Telegram deep link. OTP values and magic links are never shown or logged.
-
-## Routes
-
-User routes:
-
-- `/` auth/register
-- `/home`
-- `/subscription`
-- `/referrals`
-- `/profile`
-- `/support`
-- `/legal`
-
-Admin routes:
-
-- `/admin`
-- `/admin/users`
-- `/admin/subscriptions`
-- `/admin/payments`
-- `/admin/wallet`
-- `/admin/referrals`
-- `/admin/payouts`
-- `/admin/support`
-- `/admin/nodes`
-- `/admin/integration-logs`
-- `/admin/settings`
-
-Admin is protected by `role ADMIN`. Regular users are redirected to `/home`.
-
-## Integration modes
-
-- Payments use Platega.
-- Provisioning uses the Remnawave HTTP adapter.
-- Email delivery uses Resend; Telegram login and profile binding use the bot
-  webhook and durable update jobs.
-- External calls run outside SQL transactions and are retried by the worker.
-
-Migrations create an active pricing baseline but never demo users.
-
-See `/docs/architecture.md`, `/docs/auth.md`, `/docs/billing.md`, and
-`/docs/integration-handoff.md`.
+See [Backend reset report](docs/BACKEND_RESET_REPORT.md) and
+[New backend starting point](docs/NEW_BACKEND_STARTING_POINT.md). Historical
+backend documents are retained in `docs/archive/old-backend` and are explicitly
+marked as archived.
