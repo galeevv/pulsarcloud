@@ -17,51 +17,11 @@ const workerId = `${hostname()}:${process.pid}`
 const pollIntervalMs = 1_000
 let stopping = false
 let nextExpiryScanAt = 0
-
-process.once("SIGINT", stop)
-process.once("SIGTERM", stop)
-
-while (!stopping) {
-  await maybeEnqueueExpiryNotices()
-  const job = await claimNextJob()
-
-  if (!job) {
-    await delay(pollIntervalMs)
-    continue
-  }
-
-  try {
-    await handleJob(job)
-    await prisma.job.update({
-      where: { id: job.id },
-      data: {
-        status: JobStatus.SUCCEEDED,
-        completedAt: new Date(),
-        lockedAt: null,
-        lockedBy: null,
-        lastError: null,
-      },
-    })
-  } catch (error) {
-    const attemptCount = job.attemptCount + 1
-    await prisma.job.update({
-      where: { id: job.id },
-      data: {
-        attemptCount,
-        status:
-          attemptCount >= job.maxAttempts
-            ? JobStatus.FAILED
-            : JobStatus.PENDING,
-        runAt: new Date(Date.now() + retryDelay(attemptCount)),
-        lockedAt: null,
-        lockedBy: null,
-        lastError: error instanceof Error ? error.message : "Unknown job error",
-      },
-    })
-  }
-}
-
-await prisma.$disconnect()
+const sealedSchema = z.object({
+  iv: z.string(),
+  tag: z.string(),
+  ciphertext: z.string(),
+})
 
 function claimNextJob() {
   return runInTransaction(prisma, async (tx) => {
@@ -156,12 +116,6 @@ async function handleJob(job: Job) {
       )
   }
 }
-
-const sealedSchema = z.object({
-  iv: z.string(),
-  tag: z.string(),
-  ciphertext: z.string(),
-})
 
 async function handleAuthEmail(job: Job) {
   const payload = z
@@ -312,3 +266,53 @@ function delay(milliseconds: number) {
 function stop() {
   stopping = true
 }
+
+async function runWorker() {
+  process.once("SIGINT", stop)
+  process.once("SIGTERM", stop)
+
+  while (!stopping) {
+    await maybeEnqueueExpiryNotices()
+    const job = await claimNextJob()
+
+    if (!job) {
+      await delay(pollIntervalMs)
+      continue
+    }
+
+    try {
+      await handleJob(job)
+      await prisma.job.update({
+        where: { id: job.id },
+        data: {
+          status: JobStatus.SUCCEEDED,
+          completedAt: new Date(),
+          lockedAt: null,
+          lockedBy: null,
+          lastError: null,
+        },
+      })
+    } catch (error) {
+      const attemptCount = job.attemptCount + 1
+      await prisma.job.update({
+        where: { id: job.id },
+        data: {
+          attemptCount,
+          status:
+            attemptCount >= job.maxAttempts
+              ? JobStatus.FAILED
+              : JobStatus.PENDING,
+          runAt: new Date(Date.now() + retryDelay(attemptCount)),
+          lockedAt: null,
+          lockedBy: null,
+          lastError:
+            error instanceof Error ? error.message : "Unknown job error",
+        },
+      })
+    }
+  }
+
+  await prisma.$disconnect()
+}
+
+await runWorker()
