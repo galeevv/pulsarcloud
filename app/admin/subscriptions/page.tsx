@@ -47,10 +47,15 @@ export default async function AdminSubscriptionsPage() {
           <TableBody>
             {subscriptions.map((subscription) => (
               <TableRow key={subscription.id}>
-                <TableCell>{getUserLabel(subscription.user.authIdentities)}</TableCell>
-                <TableCell><Badge>{subscription.status}</Badge></TableCell>
                 <TableCell>
-                  {subscription.startsAt?.toLocaleDateString("ru-RU") ?? "—"} → {subscription.expiresAt?.toLocaleDateString("ru-RU") ?? "—"}
+                  {getUserLabel(subscription.user.authIdentities)}
+                </TableCell>
+                <TableCell>
+                  <Badge>{subscription.status}</Badge>
+                </TableCell>
+                <TableCell>
+                  {subscription.startsAt?.toLocaleDateString("ru-RU") ?? "—"} →{" "}
+                  {subscription.expiresAt?.toLocaleDateString("ru-RU") ?? "—"}
                 </TableCell>
                 <TableCell>{subscription.deviceLimit}</TableCell>
                 <TableCell>{subscription.lteEnabled ? "yes" : "no"}</TableCell>
@@ -64,31 +69,79 @@ export default async function AdminSubscriptionsPage() {
                 </TableCell>
                 <TableCell>
                   <div className="flex min-w-80 flex-col gap-2">
-                    <form action={extendSubscriptionAction} className="flex gap-2">
-                      <input type="hidden" name="subscriptionId" value={subscription.id} />
-                      <Input name="months" type="number" defaultValue={1} className="w-24" />
-                      <Button type="submit" size="sm">Продлить</Button>
+                    <form
+                      action={extendSubscriptionAction}
+                      className="flex gap-2"
+                    >
+                      <input
+                        type="hidden"
+                        name="subscriptionId"
+                        value={subscription.id}
+                      />
+                      <Input
+                        name="months"
+                        type="number"
+                        defaultValue={1}
+                        className="w-24"
+                      />
+                      <Button type="submit" size="sm">
+                        Продлить
+                      </Button>
                     </form>
-                    <form action={changeSubscriptionDeviceLimitAction} className="flex gap-2">
-                      <input type="hidden" name="subscriptionId" value={subscription.id} />
-                      <Input name="deviceLimit" type="number" defaultValue={subscription.deviceLimit} className="w-24" />
-                      <Button type="submit" size="sm" variant="outline">Лимит</Button>
+                    <form
+                      action={changeSubscriptionDeviceLimitAction}
+                      className="flex gap-2"
+                    >
+                      <input
+                        type="hidden"
+                        name="subscriptionId"
+                        value={subscription.id}
+                      />
+                      <Input
+                        name="deviceLimit"
+                        type="number"
+                        defaultValue={subscription.deviceLimit}
+                        className="w-24"
+                      />
+                      <Button type="submit" size="sm" variant="outline">
+                        Лимит
+                      </Button>
                     </form>
                     <div className="flex flex-wrap gap-2">
                       <form action={toggleSubscriptionLteAction}>
-                        <input type="hidden" name="subscriptionId" value={subscription.id} />
-                        <input type="hidden" name="enabled" value={String(!subscription.lteEnabled)} />
+                        <input
+                          type="hidden"
+                          name="subscriptionId"
+                          value={subscription.id}
+                        />
+                        <input
+                          type="hidden"
+                          name="enabled"
+                          value={String(!subscription.lteEnabled)}
+                        />
                         <Button type="submit" size="sm" variant="outline">
                           {subscription.lteEnabled ? "LTE off" : "LTE on"}
                         </Button>
                       </form>
                       <form action={regenerateAdminSubscriptionUrlAction}>
-                        <input type="hidden" name="subscriptionId" value={subscription.id} />
-                        <Button type="submit" size="sm" variant="outline">Новая ссылка</Button>
+                        <input
+                          type="hidden"
+                          name="subscriptionId"
+                          value={subscription.id}
+                        />
+                        <Button type="submit" size="sm" variant="outline">
+                          Новая ссылка
+                        </Button>
                       </form>
                       <form action={syncAdminSubscriptionAction}>
-                        <input type="hidden" name="subscriptionId" value={subscription.id} />
-                        <Button type="submit" size="sm" variant="outline">Mock sync</Button>
+                        <input
+                          type="hidden"
+                          name="subscriptionId"
+                          value={subscription.id}
+                        />
+                        <Button type="submit" size="sm" variant="outline">
+                          Sync
+                        </Button>
                       </form>
                     </div>
                   </div>

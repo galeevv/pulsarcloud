@@ -32,6 +32,7 @@ export default async function AdminPaymentsPage() {
               <TableHead>User</TableHead>
               <TableHead>Amount</TableHead>
               <TableHead>Status</TableHead>
+              <TableHead>Provider</TableHead>
               <TableHead>Plan</TableHead>
               <TableHead>Created</TableHead>
               <TableHead>Action</TableHead>
@@ -40,16 +41,37 @@ export default async function AdminPaymentsPage() {
           <TableBody>
             {payments.map((payment) => (
               <TableRow key={payment.id}>
-                <TableCell>{getUserLabel(payment.user.authIdentities)}</TableCell>
+                <TableCell>
+                  {getUserLabel(payment.user.authIdentities)}
+                </TableCell>
                 <TableCell>{formatRub(payment.amountRub)}</TableCell>
-                <TableCell><Badge>{payment.status}</Badge></TableCell>
-                <TableCell>{payment.durationMonths} mo · {payment.deviceLimit} dev · LTE {payment.lteEnabled ? "yes" : "no"}</TableCell>
-                <TableCell>{payment.createdAt.toLocaleDateString("ru-RU")}</TableCell>
+                <TableCell>
+                  <Badge>{payment.status}</Badge>
+                </TableCell>
+                <TableCell>
+                  <Badge variant={payment.isTest ? "secondary" : "outline"}>
+                    {payment.provider}
+                    {payment.isTest ? " · TEST" : ""}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  {payment.durationMonths} mo · {payment.deviceLimit} dev · LTE{" "}
+                  {payment.lteEnabled ? "yes" : "no"}
+                </TableCell>
+                <TableCell>
+                  {payment.createdAt.toLocaleDateString("ru-RU")}
+                </TableCell>
                 <TableCell>
                   {payment.status === "PENDING" ? (
                     <form action={confirmPaymentAction}>
-                      <input type="hidden" name="paymentId" value={payment.id} />
-                      <Button type="submit" size="sm">Confirm payment</Button>
+                      <input
+                        type="hidden"
+                        name="paymentId"
+                        value={payment.id}
+                      />
+                      <Button type="submit" size="sm">
+                        Confirm payment
+                      </Button>
                     </form>
                   ) : (
                     "—"

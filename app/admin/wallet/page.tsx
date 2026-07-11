@@ -42,7 +42,9 @@ export default async function AdminWalletPage() {
                 <TableCell>{getUserLabel(entry.user.authIdentities)}</TableCell>
                 <TableCell>{entry.direction}</TableCell>
                 <TableCell>{formatRub(entry.amountRub)}</TableCell>
-                <TableCell><Badge variant="secondary">{entry.type}</Badge></TableCell>
+                <TableCell>
+                  <Badge variant="secondary">{entry.type}</Badge>
+                </TableCell>
                 <TableCell>{entry.status}</TableCell>
                 <TableCell>{entry.createdAt.toLocaleString("ru-RU")}</TableCell>
               </TableRow>

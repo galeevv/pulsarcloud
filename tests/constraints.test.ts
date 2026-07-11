@@ -2,7 +2,10 @@ import assert from "node:assert/strict"
 import { after, before, test } from "node:test"
 
 import type { TestDatabase } from "./helpers/test-database"
-import { createPricingVersion, createTestDatabase } from "./helpers/test-database"
+import {
+  createPricingVersion,
+  createTestDatabase,
+} from "./helpers/test-database"
 
 let database: TestDatabase
 

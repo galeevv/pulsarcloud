@@ -8,7 +8,10 @@ import {
   RadioIcon,
   SmartphoneIcon,
 } from "lucide-react"
-import { SubscriptionStatus, type Subscription } from "@/generated/prisma/client"
+import {
+  SubscriptionStatus,
+  type Subscription,
+} from "@/generated/prisma/client"
 
 import { changeOwnDeviceLimitAction } from "@/app/(dashboard)/actions"
 import { CopyButton } from "@/components/app/copy-button"
@@ -37,6 +40,7 @@ import { requireUser } from "@/lib/auth"
 import { prisma } from "@/lib/db"
 import { formatRub } from "@/lib/pricing"
 import { getEffectiveSubscriptionStatus } from "@/lib/subscription"
+import { areTestPaymentsEnabled } from "@/lib/test-payments"
 
 export default async function SubscriptionPage({
   searchParams,
@@ -98,7 +102,10 @@ export default async function SubscriptionPage({
         ) : null}
 
         {!hasSubscriptionRecord ? (
-          <SubscriptionEmptyState settings={settings} />
+          <SubscriptionEmptyState
+            settings={settings}
+            testPaymentsEnabled={areTestPaymentsEnabled()}
+          />
         ) : subscription ? (
           <>
             <SubscriptionUrlCard url={subscription.subscriptionUrl} />
@@ -141,12 +148,16 @@ export default async function SubscriptionPage({
             ) : (
               <SubscriptionPaymentAction
                 settings={settings}
+                testPaymentsEnabled={areTestPaymentsEnabled()}
                 triggerLabel="Продлить подписку"
               />
             )}
           </>
         ) : (
-          <SubscriptionEmptyState settings={settings} />
+          <SubscriptionEmptyState
+            settings={settings}
+            testPaymentsEnabled={areTestPaymentsEnabled()}
+          />
         )}
       </PulsarAssetCard>
 
@@ -163,8 +174,10 @@ export default async function SubscriptionPage({
 
 function SubscriptionEmptyState({
   settings,
+  testPaymentsEnabled,
 }: {
   settings: ComponentProps<typeof SubscriptionPaymentAction>["settings"]
+  testPaymentsEnabled: boolean
 }) {
   return (
     <Empty>
@@ -180,6 +193,7 @@ function SubscriptionEmptyState({
       <EmptyContent className="w-full">
         <SubscriptionPaymentAction
           settings={settings}
+          testPaymentsEnabled={testPaymentsEnabled}
           triggerLabel="Оплатить подписку"
         />
       </EmptyContent>

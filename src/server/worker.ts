@@ -140,6 +140,15 @@ async function handleJob(job: Job) {
       await processTelegramUpdate(BigInt(payload.updateId))
       return
     }
+    case JobType.REGENERATE_SUBSCRIPTION_URL: {
+      const payload = z
+        .object({ subscriptionId: z.string() })
+        .parse(job.payload)
+      await createSubscriptionProvisioningService().regenerateSubscriptionUrl(
+        payload.subscriptionId
+      )
+      return
+    }
     case JobType.PROCESS_PAYMENT_WEBHOOK:
       throw new IntegrationError(
         `Job ${job.type} requires credentials and a production integration adapter.`,
@@ -171,15 +180,24 @@ async function handleAuthEmail(job: Job) {
     challenge.expiresAt <= new Date()
   )
     return
-  const delivery = openJobPayload<{ code: string; magicLink: string }>(
-    payload.delivery
-  )
+  const delivery = openJobPayload<{
+    code: string
+    magicLink?: string
+    purpose?: "bind"
+  }>(payload.delivery)
+  const isBinding = delivery.purpose === "bind"
+  const linkText = delivery.magicLink
+    ? `\nСсылка для входа: ${delivery.magicLink}`
+    : ""
+  const linkHtml = delivery.magicLink
+    ? `<p><a href="${escapeHtml(delivery.magicLink)}">Войти в Pulsar</a></p>`
+    : ""
   await sendTransactionalEmail({
     idempotencyKey: `auth-email/${payload.challengeId}`,
     to: payload.email,
-    subject: "Вход в Pulsar",
-    text: `Код: ${delivery.code}\nСсылка для входа: ${delivery.magicLink}\nДействует 10 минут.`,
-    html: `<h1>Вход в Pulsar</h1><p>Код: <strong>${escapeHtml(delivery.code)}</strong></p><p><a href="${escapeHtml(delivery.magicLink)}">Войти в Pulsar</a></p><p>Код и ссылка действуют 10 минут.</p>`,
+    subject: isBinding ? "Подтверждение email в Pulsar" : "Вход в Pulsar",
+    text: `Код: ${delivery.code}${linkText}\nДействует 10 минут.`,
+    html: `<h1>${isBinding ? "Подтверждение email" : "Вход в Pulsar"}</h1><p>Код: <strong>${escapeHtml(delivery.code)}</strong></p>${linkHtml}<p>Код действует 10 минут.</p>`,
   })
 }
 

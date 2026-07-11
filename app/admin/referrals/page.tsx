@@ -36,16 +36,28 @@ export default async function AdminReferralsPage() {
   return (
     <div className="flex flex-col gap-4">
       <Card className="glass-card rounded-3xl">
-        <CardHeader><CardTitle>Referral Profiles</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle>Referral Profiles</CardTitle>
+        </CardHeader>
         <CardContent className="overflow-x-auto">
           <Table>
-            <TableHeader><TableRow><TableHead>User</TableHead><TableHead>Link</TableHead><TableHead>Enabled</TableHead></TableRow></TableHeader>
+            <TableHeader>
+              <TableRow>
+                <TableHead>User</TableHead>
+                <TableHead>Link</TableHead>
+                <TableHead>Enabled</TableHead>
+              </TableRow>
+            </TableHeader>
             <TableBody>
               {profiles.map((profile) => (
                 <TableRow key={profile.userId}>
-                  <TableCell>{getUserLabel(profile.user.authIdentities)}</TableCell>
+                  <TableCell>
+                    {getUserLabel(profile.user.authIdentities)}
+                  </TableCell>
                   <TableCell>{profile.inviteCode}</TableCell>
-                  <TableCell><Badge>{profile.isEnabled ? "enabled" : "locked"}</Badge></TableCell>
+                  <TableCell>
+                    <Badge>{profile.isEnabled ? "enabled" : "locked"}</Badge>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -53,19 +65,38 @@ export default async function AdminReferralsPage() {
         </CardContent>
       </Card>
       <Card className="glass-card rounded-3xl">
-        <CardHeader><CardTitle>Invites / Rewards</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle>Invites / Rewards</CardTitle>
+        </CardHeader>
         <CardContent className="overflow-x-auto">
           <Table>
-            <TableHeader><TableRow><TableHead>Inviter</TableHead><TableHead>Invited</TableHead><TableHead>Status</TableHead><TableHead>Reward</TableHead></TableRow></TableHeader>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Inviter</TableHead>
+                <TableHead>Invited</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Reward</TableHead>
+              </TableRow>
+            </TableHeader>
             <TableBody>
               {invites.map((invite) => {
-                const reward = rewards.find((item) => item.invitedUserId === invite.invitedUserId)
+                const reward = rewards.find(
+                  (item) => item.invitedUserId === invite.invitedUserId
+                )
                 return (
                   <TableRow key={invite.id}>
-                    <TableCell>{getUserLabel(invite.inviter.authIdentities)}</TableCell>
-                    <TableCell>{getUserLabel(invite.invited.authIdentities)}</TableCell>
+                    <TableCell>
+                      {getUserLabel(invite.inviter.authIdentities)}
+                    </TableCell>
+                    <TableCell>
+                      {getUserLabel(invite.invited.authIdentities)}
+                    </TableCell>
                     <TableCell>{invite.status}</TableCell>
-                    <TableCell>{reward ? `${formatRub(reward.amountRub)} · ${reward.status}` : "—"}</TableCell>
+                    <TableCell>
+                      {reward
+                        ? `${formatRub(reward.amountRub)} · ${reward.status}`
+                        : "—"}
+                    </TableCell>
                   </TableRow>
                 )
               })}

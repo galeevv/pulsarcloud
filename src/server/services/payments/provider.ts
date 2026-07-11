@@ -121,6 +121,21 @@ export class MockPaymentProvider implements PaymentProviderAdapter {
   }
 }
 
+export class TestPaymentProvider implements PaymentProviderAdapter {
+  readonly type = PaymentProviderType.TEST
+
+  async createPayment(input: CreatePaymentInput) {
+    return {
+      providerPaymentId: `test-${input.paymentId}`,
+      checkoutUrl: `${getAppUrl()}/payments/test/${input.paymentId}`,
+    }
+  }
+
+  async verifyWebhook(): Promise<VerifiedPaymentWebhook> {
+    throw new UnauthorizedError("Test payments do not accept webhooks.")
+  }
+}
+
 const plategaCreateResponseSchema = z.object({
   transactionId: z.string().uuid(),
   redirect: z.string().url(),
@@ -253,6 +268,13 @@ export function getPaymentProvider(
 
   if (provider === PaymentProviderType.PLATEGA) {
     return new PlategaPaymentProvider()
+  }
+
+  if (provider === PaymentProviderType.TEST) {
+    if (process.env.ENABLE_TEST_PAYMENTS !== "true") {
+      throw new IntegrationError("Test payment provider is disabled.")
+    }
+    return new TestPaymentProvider()
   }
 
   throw new IntegrationError(`Payment provider ${provider} is not configured.`)

@@ -4,6 +4,7 @@ import { AuthProvider, type Prisma } from "@/generated/prisma/client"
 
 import { prisma } from "@/lib/db"
 import { runInTransaction } from "@/lib/transactions"
+import { applyReferralOnboarding } from "@/src/server/services/referrals/referral-onboarding-service"
 
 export function getOrCreateEmailUser(email: string, invite?: string) {
   return runInTransaction(prisma, (tx) =>
@@ -43,6 +44,8 @@ export async function getOrCreateEmailUserInTransaction(
       referralProfile: {
         create: {
           inviteCode: createInviteCode(),
+          isEnabled: true,
+          enabledAt: new Date(),
         },
       },
       authIdentities: {
@@ -55,35 +58,9 @@ export async function getOrCreateEmailUserInTransaction(
     },
   })
 
-  await captureInvite(tx, user.id, invite)
+  await applyReferralOnboarding(tx, user.id, invite)
 
   return user
-}
-
-async function captureInvite(
-  tx: Prisma.TransactionClient,
-  invitedUserId: string,
-  invite?: string
-) {
-  if (!invite) {
-    return
-  }
-
-  const inviterProfile = await tx.referralProfile.findUnique({
-    where: { inviteCode: invite },
-  })
-
-  if (!inviterProfile?.isEnabled || inviterProfile.userId === invitedUserId) {
-    return
-  }
-
-  await tx.referralInvite.create({
-    data: {
-      inviterId: inviterProfile.userId,
-      invitedUserId,
-      inviteCodeSnapshot: inviterProfile.inviteCode,
-    },
-  })
 }
 
 function createInviteCode() {

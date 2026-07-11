@@ -1,12 +1,9 @@
 import Link from "next/link"
 import {
-  CheckIcon,
   ChevronRightIcon,
   FileTextIcon,
   HeadphonesIcon,
   LogOutIcon,
-  MailIcon,
-  SendIcon,
 } from "lucide-react"
 
 import { logoutAction } from "@/app/(dashboard)/actions"
@@ -21,15 +18,14 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   PulsarActionRow,
   PulsarAssetCard,
-  PulsarIconContainer,
   pulsarCtaClass,
 } from "@/components/app/pulsar-primitives"
 import { requireUser } from "@/lib/auth"
+import { LoginMethodsManager } from "@/components/app/login-methods-manager"
 
 export default async function ProfilePage() {
   const user = await requireUser()
@@ -47,7 +43,7 @@ export default async function ProfilePage() {
           </p>
         </div>
 
-        <LoginMethodsCard email={user.email} telegramId={user.telegramId} />
+        <LoginMethodsManager email={user.email} telegramId={user.telegramId} />
 
         <Link href="/support" className="group block">
           <PulsarActionRow
@@ -107,80 +103,6 @@ function LogoutConfirmDialog() {
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
-  )
-}
-
-function LoginMethodsCard({
-  email,
-  telegramId,
-}: {
-  email: string | null
-  telegramId: string | null
-}) {
-  return (
-    <div className="soft-panel flex flex-col gap-3 p-3">
-      <p className="text-center text-sm font-semibold">Способы входа</p>
-      <LoginMethodRow
-        icon={MailIcon}
-        label="Email"
-        value={email ?? "Не привязан"}
-        connected={Boolean(email)}
-        actionLabel="Привязать"
-        actionDisabled={Boolean(email)}
-      />
-      <LoginMethodRow
-        icon={SendIcon}
-        label="Telegram"
-        value={telegramId ? `id: ${telegramId}` : "Не привязан"}
-        connected={Boolean(telegramId)}
-        actionLabel="Привязать"
-        actionDisabled
-      />
-    </div>
-  )
-}
-
-function LoginMethodRow({
-  actionDisabled,
-  actionLabel,
-  connected,
-  icon: Icon,
-  label,
-  value,
-}: {
-  actionDisabled: boolean
-  actionLabel: string
-  connected: boolean
-  icon: typeof MailIcon
-  label: string
-  value: string
-}) {
-  return (
-    <div className="flex min-h-[52px] items-center justify-between gap-3 rounded-2xl border border-border/70 bg-background/25 p-3">
-      <div className="flex min-w-0 items-center gap-3">
-        <PulsarIconContainer icon={Icon} />
-        <div className="min-w-0">
-          <p className="text-xs text-muted-foreground">{label}</p>
-          <p className="truncate text-sm font-medium">{value}</p>
-        </div>
-      </div>
-      {connected ? (
-        <Badge variant="secondary">
-          <CheckIcon data-icon="inline-start" />
-          Привязан
-        </Badge>
-      ) : (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="rounded-[14px]"
-          disabled={actionDisabled}
-        >
-          {actionLabel}
-        </Button>
-      )}
-    </div>
   )
 }
 

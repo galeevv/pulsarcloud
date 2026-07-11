@@ -28,5 +28,13 @@ export async function GET(request: Request) {
   })
   if (consumed.count !== 1) redirect("/?authError=used")
   await createSession(challenge.userId)
-  redirect("/home")
+  const purpose = readPurpose(challenge.context)
+  redirect(purpose === "bind" ? "/profile" : "/home")
+}
+
+function readPurpose(context: unknown) {
+  if (!context || typeof context !== "object" || !("purpose" in context)) {
+    return undefined
+  }
+  return context.purpose === "bind" ? "bind" : undefined
 }

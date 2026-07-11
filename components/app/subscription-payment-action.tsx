@@ -205,7 +205,13 @@ function PriceBreakdownRow({
   )
 }
 
-function PaymentFlow({ settings }: { settings: PaymentSettings }) {
+function PaymentFlow({
+  settings,
+  testPaymentsEnabled,
+}: {
+  settings: PaymentSettings
+  testPaymentsEnabled: boolean
+}) {
   const durations = React.useMemo(
     () => getDurationOptions(settings),
     [settings]
@@ -434,10 +440,28 @@ function PaymentFlow({ settings }: { settings: PaymentSettings }) {
             >
               <ArrowLeftIcon />
             </Button>
-            <Button type="submit" size="lg" className={pulsarControlClass}>
+            <Button
+              type="submit"
+              name="paymentMode"
+              value="live"
+              size="lg"
+              className={pulsarControlClass}
+            >
               <CheckIcon data-icon="inline-start" />
               Создать платёж
             </Button>
+            {testPaymentsEnabled ? (
+              <Button
+                type="submit"
+                name="paymentMode"
+                value="test"
+                size="lg"
+                variant="outline"
+                className="col-span-2"
+              >
+                Оплатить тестовыми кредитами
+              </Button>
+            ) : null}
           </div>
         )}
       </div>
@@ -447,9 +471,11 @@ function PaymentFlow({ settings }: { settings: PaymentSettings }) {
 
 export function SubscriptionPaymentAction({
   settings,
+  testPaymentsEnabled = false,
   triggerLabel,
 }: {
   settings: PaymentSettings
+  testPaymentsEnabled?: boolean
   triggerLabel: string
 }) {
   const [isDrawerOpen, setIsDrawerOpen] = React.useState(false)
@@ -505,7 +531,10 @@ export function SubscriptionPaymentAction({
               Настройте параметры подписки перед оплатой.
             </DrawerDescription>
           </DrawerHeader>
-          <PaymentFlow settings={settings} />
+          <PaymentFlow
+            settings={settings}
+            testPaymentsEnabled={testPaymentsEnabled}
+          />
         </DrawerContent>
       </Drawer>
 
@@ -529,7 +558,10 @@ export function SubscriptionPaymentAction({
               Настройте параметры подписки перед оплатой.
             </DialogDescription>
           </DialogHeader>
-          <PaymentFlow settings={settings} />
+          <PaymentFlow
+            settings={settings}
+            testPaymentsEnabled={testPaymentsEnabled}
+          />
         </DialogContent>
       </Dialog>
     </>

@@ -2,7 +2,10 @@ import assert from "node:assert/strict"
 import { after, before, test } from "node:test"
 
 import type { TestDatabase } from "./helpers/test-database"
-import { createPricingVersion, createTestDatabase } from "./helpers/test-database"
+import {
+  createPricingVersion,
+  createTestDatabase,
+} from "./helpers/test-database"
 
 let database: TestDatabase
 
@@ -17,7 +20,11 @@ after(async () => {
 test("identity and session cascade when a user is deleted", async () => {
   const user = await database.client.user.create({ data: {} })
   await database.client.authIdentity.create({
-    data: { userId: user.id, provider: "EMAIL", providerSubject: "cascade@example.com" },
+    data: {
+      userId: user.id,
+      provider: "EMAIL",
+      providerSubject: "cascade@example.com",
+    },
   })
   await database.client.session.create({
     data: {

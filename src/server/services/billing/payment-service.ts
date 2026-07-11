@@ -18,13 +18,14 @@ import {
   ValidationError,
 } from "@/lib/application-errors"
 import { prisma } from "@/lib/db"
-import {
-  calculateSubscriptionPrice,
-  getDurationDiscounts,
-} from "@/lib/pricing"
+import { calculateSubscriptionPrice, getDurationDiscounts } from "@/lib/pricing"
 import { getActivePricingVersion } from "@/lib/pricing-data"
 import { runInTransaction } from "@/lib/transactions"
-import { getConfiguredPaymentProvider } from "@/src/server/services/payments/provider"
+import { assertTestPaymentsEnabled } from "@/lib/test-payments"
+import {
+  getConfiguredPaymentProvider,
+  getPaymentProvider,
+} from "@/src/server/services/payments/provider"
 
 const QUOTE_TTL_MS = 15 * 60 * 1000
 
@@ -37,7 +38,8 @@ export type CreateSubscriptionPaymentInput = {
 }
 
 export async function createSubscriptionPayment(
-  input: CreateSubscriptionPaymentInput
+  input: CreateSubscriptionPaymentInput,
+  providerOverride?: Payment["provider"]
 ) {
   const paymentIdempotencyKey = `payment:${input.idempotencyKey}`
   const existing = await prisma.payment.findUnique({
@@ -52,20 +54,32 @@ export async function createSubscriptionPayment(
     }
   }
 
-  const provider = getConfiguredPaymentProvider()
-  const payment = existing ?? (await createQuoteAndPayment(input, provider.type))
+  if (providerOverride === "TEST") {
+    assertTestPaymentsEnabled()
+  }
+  const provider = providerOverride
+    ? getPaymentProvider(providerOverride)
+    : getConfiguredPaymentProvider()
+  const payment =
+    existing ?? (await createQuoteAndPayment(input, provider.type))
   const quote = await prisma.priceQuote.findUniqueOrThrow({
     where: { id: payment.quoteId },
   })
 
-  if (payment.status === PaymentStatus.CREATED && quote.expiresAt <= new Date()) {
+  if (
+    payment.status === PaymentStatus.CREATED &&
+    quote.expiresAt <= new Date()
+  ) {
     await prisma.payment.updateMany({
       where: { id: payment.id, status: PaymentStatus.CREATED },
       data: { status: PaymentStatus.CANCELED, canceledAt: new Date() },
     })
-    throw new ConflictError("Price quote expired before checkout was created.", {
-      quoteId: quote.id,
-    })
+    throw new ConflictError(
+      "Price quote expired before checkout was created.",
+      {
+        quoteId: quote.id,
+      }
+    )
   }
 
   try {
@@ -122,9 +136,12 @@ async function createQuoteAndPayment(
     )
 
     if (!duration) {
-      throw new ValidationError("Selected subscription duration is unavailable.", {
-        months: input.months,
-      })
+      throw new ValidationError(
+        "Selected subscription duration is unavailable.",
+        {
+          months: input.months,
+        }
+      )
     }
 
     if (
@@ -172,8 +189,7 @@ async function createQuoteAndPayment(
           baseMonthlyPriceRub: pricing.baseMonthlyPriceRub,
           extraDeviceMonthlyPriceRub: pricing.extraDeviceMonthlyPriceRub,
           lteMonthlyPriceRub: pricing.lteMonthlyPriceRub,
-          durationDiscounts:
-            pricing.durationDiscounts as Prisma.InputJsonValue,
+          durationDiscounts: pricing.durationDiscounts as Prisma.InputJsonValue,
           durationDiscountPct: price.durationDiscountPct,
           referralDiscountPct,
         },
@@ -187,6 +203,7 @@ async function createQuoteAndPayment(
         userId: input.userId,
         quoteId: quote.id,
         provider,
+        isTest: provider === "TEST",
         status: PaymentStatus.CREATED,
         amountRub: quote.totalRub,
         durationMonths: quote.durationMonths,
@@ -205,6 +222,23 @@ export function confirmMockPayment(paymentId: string, adminUserId: string) {
       source: "admin.mock",
     })
   )
+}
+
+export function confirmTestPayment(paymentId: string, userId: string) {
+  assertTestPaymentsEnabled()
+  return runInTransaction(prisma, async (tx) => {
+    const payment = await tx.payment.findUnique({ where: { id: paymentId } })
+    if (!payment || payment.userId !== userId) {
+      throw new NotFoundError("Test payment not found.", { paymentId })
+    }
+    if (payment.provider !== "TEST" || !payment.isTest) {
+      throw new ConflictError("Payment is not a test payment.", { paymentId })
+    }
+    return confirmPaymentInTransaction(tx, paymentId, {
+      actorUserId: userId,
+      source: "user.test",
+    })
+  })
 }
 
 export async function confirmPaymentInTransaction(
@@ -229,6 +263,12 @@ export async function confirmPaymentInTransaction(
     throw new ConflictError("Only mock payments can be confirmed manually.", {
       paymentId,
       provider: payment.provider,
+    })
+  }
+
+  if (context.source === "user.test" && payment.provider !== "TEST") {
+    throw new ConflictError("Only test payments can use test confirmation.", {
+      paymentId,
     })
   }
 
@@ -301,6 +341,7 @@ export async function confirmPaymentInTransaction(
       deviceLimit: payment.deviceLimit,
       lteEnabled: payment.lteEnabled,
       amountRub: payment.amountRub,
+      isTest: payment.isTest,
     },
   })
   await tx.priceQuote.update({
@@ -309,12 +350,14 @@ export async function confirmPaymentInTransaction(
   })
 
   await createPaymentLedgerEntries(tx, payment, now)
-  await ensureReferralReward(
-    tx,
-    payment.userId,
-    payment.id,
-    payment.quote.pricingVersionId
-  )
+  if (!payment.isTest) {
+    await ensureReferralReward(
+      tx,
+      payment.userId,
+      payment.id,
+      payment.quote.pricingVersionId
+    )
+  }
   await tx.job.create({
     data: {
       type: JobType.PROVISION_SUBSCRIPTION,
@@ -363,6 +406,7 @@ async function createPaymentLedgerEntries(
       amountRub: payment.amountRub,
       type: WalletLedgerType.PAYMENT_CAPTURE,
       status: WalletLedgerStatus.POSTED,
+      isTest: payment.isTest,
       postedAt,
       idempotencyKey: `payment:${payment.id}:capture`,
     },
@@ -375,6 +419,7 @@ async function createPaymentLedgerEntries(
       amountRub: payment.amountRub,
       type: WalletLedgerType.SUBSCRIPTION_CHARGE,
       status: WalletLedgerStatus.POSTED,
+      isTest: payment.isTest,
       postedAt,
       idempotencyKey: `payment:${payment.id}:subscription`,
     },
@@ -455,7 +500,9 @@ function assertSamePaymentRequest(
     payment.deviceLimit !== input.deviceLimit ||
     payment.lteEnabled !== input.lteEnabled
   ) {
-    throw new ConflictError("Payment idempotency key was reused with new input.")
+    throw new ConflictError(
+      "Payment idempotency key was reused with new input."
+    )
   }
 }
 

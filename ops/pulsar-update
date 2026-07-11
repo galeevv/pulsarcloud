@@ -1,0 +1,208 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly app_root=/opt/pulsar
+readonly current_link=${app_root}/current
+readonly releases_dir=${app_root}/releases
+readonly repository=https://github.com/galeevv/pulsar2.git
+readonly branch=${PULSAR_UPDATE_BRANCH:-main}
+readonly env_file=/etc/pulsar/pulsar.env
+readonly database=/var/lib/pulsar/pulsar.db
+readonly deploy_backup_dir=/var/backups/pulsar/deploy
+readonly update_state_root=/var/lib/pulsar/update
+
+if (( EUID != 0 )); then
+  echo "Run as root: sudo pulsar-update" >&2
+  exit 1
+fi
+
+exec 9>/run/lock/pulsar-update.lock
+if ! flock -n 9; then
+  echo "Another Pulsar update is already running." >&2
+  exit 1
+fi
+
+for command in git npm node sqlite3 curl systemctl systemd-run flock; do
+  command -v "$command" >/dev/null || {
+    echo "Required command is missing: $command" >&2
+    exit 1
+  }
+done
+
+test -r "$env_file"
+test -s "$database"
+install -d -m 0755 "$releases_dir"
+install -d -m 0700 "$deploy_backup_dir"
+
+target_sha="$(git ls-remote "$repository" "refs/heads/${branch}" | awk 'NR == 1 { print $1 }')"
+if [[ ! "$target_sha" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "Could not resolve origin/${branch}." >&2
+  exit 1
+fi
+
+current_path="$(readlink -f "$current_link")"
+current_sha="$(git -C "$current_path" rev-parse HEAD 2>/dev/null || true)"
+short_sha="${target_sha:0:12}"
+release="${releases_dir}/${target_sha}"
+stage_state="${update_state_root}/${target_sha}"
+install -d -o root -g pulsar -m 0755 "$update_state_root" "$stage_state"
+
+echo "Current: ${current_sha:-unknown}"
+echo "Target:  ${target_sha}"
+
+if [[ "$current_sha" == "$target_sha" ]]; then
+  systemctl is-active --quiet pulsar-web pulsar-worker
+  curl --fail --silent --show-error --max-time 10 \
+    http://127.0.0.1:3100/ >/dev/null
+  echo "Pulsar is already up to date and healthy."
+  exit 0
+fi
+
+run_release_command() {
+  local stage=$1
+  shift
+  systemd-run \
+    --quiet --wait --collect --pipe \
+    --unit="pulsar-update-${stage}-${short_sha}" \
+    --property=User=pulsar \
+    --property=Group=pulsar \
+    --property="WorkingDirectory=${release}" \
+    --property="EnvironmentFile=${env_file}" \
+    --property=Environment=HOME=/var/lib/pulsar \
+    --property=Environment=NEXT_TELEMETRY_DISABLED=1 \
+    --property=Environment=NODE_OPTIONS=--max-old-space-size=1536 \
+    --property=MemoryMax=2200M \
+    "$@"
+}
+
+if [[ ! -d "$release" ]]; then
+  for stale_release in "${release}.tmp."*; do
+    if [[ -d "$stale_release" ]]; then
+      rm -rf -- "$stale_release"
+    fi
+  done
+  temporary_release="${release}.tmp.$$"
+  rm -rf -- "$temporary_release"
+  install -d -o pulsar -g pulsar -m 0755 "$temporary_release"
+  runuser -u pulsar -- git -C "$temporary_release" init --quiet
+  runuser -u pulsar -- git -C "$temporary_release" remote add origin "$repository"
+  runuser -u pulsar -- git -C "$temporary_release" fetch --quiet --depth 1 origin "$target_sha"
+  runuser -u pulsar -- git -C "$temporary_release" checkout --quiet --detach FETCH_HEAD
+  fetched_sha="$(runuser -u pulsar -- git -C "$temporary_release" rev-parse HEAD)"
+  if [[ "$fetched_sha" != "$target_sha" ]]; then
+    echo "Fetched commit does not match the requested commit." >&2
+    exit 1
+  fi
+  mv -- "$temporary_release" "$release"
+fi
+
+chown -R pulsar:pulsar "$release"
+if [[ ! -f "${stage_state}/install-complete" ]]; then
+  run_release_command install /usr/bin/npm ci --include=dev --no-audit --no-fund
+  touch "${stage_state}/install-complete"
+fi
+if [[ ! -f "${stage_state}/typecheck-complete" ]]; then
+  run_release_command typecheck /usr/bin/npm run typecheck
+  touch "${stage_state}/typecheck-complete"
+fi
+if [[ ! -f "${stage_state}/tests-complete" ]]; then
+  run_release_command test /usr/bin/npm test
+  touch "${stage_state}/tests-complete"
+fi
+if [[ ! -s "${release}/.next/BUILD_ID" ]]; then
+  run_release_command build /usr/bin/npm run build
+fi
+test -s "${release}/.next/BUILD_ID"
+chown -R root:pulsar "$release"
+
+systemctl start pulsar-backup.service
+
+stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+database_backup="${deploy_backup_dir}/pre-${stamp}-${current_sha:-unknown}.db"
+sqlite3 "$database" ".timeout 10000" ".backup '${database_backup}'"
+test "$(sqlite3 "$database_backup" 'PRAGMA integrity_check;')" = ok
+chmod 0600 "$database_backup"
+
+previous_path="$current_path"
+rollback_required=0
+code_switched=0
+
+switch_current() {
+  local target=$1
+  local temporary_link="${app_root}/.current.$$"
+  rm -f -- "$temporary_link"
+  ln -s "$target" "$temporary_link"
+  if [[ -L "$current_link" ]]; then
+    mv -Tf -- "$temporary_link" "$current_link"
+  else
+    legacy="${app_root}/legacy-${stamp}-${current_sha:0:12}"
+    mv -- "$current_link" "$legacy"
+    previous_path="$legacy"
+    mv -- "$temporary_link" "$current_link"
+  fi
+}
+
+rollback() {
+  local exit_code=$?
+  trap - ERR
+  if (( rollback_required )); then
+    echo "Deployment failed; restoring the previous release and database." >&2
+    systemctl stop pulsar-worker pulsar-web || true
+    if (( code_switched )); then
+      switch_current "$previous_path"
+    fi
+    rm -f -- "${database}-wal" "${database}-shm"
+    restore_tmp="${database}.restore.$$"
+    cp -- "$database_backup" "$restore_tmp"
+    chown pulsar:pulsar "$restore_tmp"
+    chmod 0640 "$restore_tmp"
+    mv -f -- "$restore_tmp" "$database"
+    systemctl start pulsar-web pulsar-worker || true
+  fi
+  exit "$exit_code"
+}
+trap rollback ERR
+
+systemctl stop pulsar-worker pulsar-web
+rollback_required=1
+
+run_release_command migrate /usr/bin/npm run db:deploy
+switch_current "$release"
+code_switched=1
+systemctl start pulsar-web pulsar-worker
+
+healthy=0
+for _ in {1..30}; do
+  if systemctl is-active --quiet pulsar-web pulsar-worker && \
+    curl --fail --silent --show-error --max-time 5 \
+      http://127.0.0.1:3100/ >/dev/null; then
+    healthy=1
+    break
+  fi
+  sleep 1
+done
+test "$healthy" = 1
+
+deployed_sha="$(git -C "$(readlink -f "$current_link")" rev-parse HEAD)"
+test "$deployed_sha" = "$target_sha"
+rollback_required=0
+trap - ERR
+
+printf '%s %s\n' "$(date -u +%FT%TZ)" "$target_sha" >"${app_root}/DEPLOYED"
+chmod 0644 "${app_root}/DEPLOYED"
+
+mapfile -t stale_releases < <(
+  find "$releases_dir" -mindepth 1 -maxdepth 1 -type d \
+    -regextype posix-extended -regex '.*/[0-9a-f]{40}' \
+    -printf '%T@ %p\n' | sort -nr | awk 'NR > 3 { print $2 }'
+)
+for stale_release in "${stale_releases[@]}"; do
+  if [[ "$stale_release" =~ ^/opt/pulsar/releases/[0-9a-f]{40}$ ]] && \
+    [[ "$(readlink -f "$current_link")" != "$stale_release" ]]; then
+    rm -rf -- "$stale_release"
+  fi
+done
+find "$deploy_backup_dir" -maxdepth 1 -type f -name 'pre-*.db' -mtime +14 -delete
+
+echo "Pulsar updated successfully to ${target_sha}."
+echo "Rollback database snapshot: ${database_backup}"

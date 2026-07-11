@@ -27,26 +27,48 @@ export default async function AdminPayoutsPage() {
 
   return (
     <Card className="glass-card rounded-3xl">
-      <CardHeader><CardTitle>Payout Requests</CardTitle></CardHeader>
+      <CardHeader>
+        <CardTitle>Payout Requests</CardTitle>
+      </CardHeader>
       <CardContent className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>User</TableHead><TableHead>Amount</TableHead><TableHead>Details</TableHead><TableHead>Status</TableHead><TableHead>Actions</TableHead>
+              <TableHead>User</TableHead>
+              <TableHead>Amount</TableHead>
+              <TableHead>Details</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {payouts.map((payout) => (
               <TableRow key={payout.id}>
-                <TableCell>{getUserLabel(payout.user.authIdentities)}</TableCell>
+                <TableCell>
+                  {getUserLabel(payout.user.authIdentities)}
+                </TableCell>
                 <TableCell>{formatRub(payout.amountRub)}</TableCell>
                 <TableCell>{payout.payoutDetails}</TableCell>
-                <TableCell><Badge>{payout.status}</Badge></TableCell>
+                <TableCell>
+                  <Badge>{payout.status}</Badge>
+                </TableCell>
                 <TableCell>
                   <div className="flex min-w-96 flex-col gap-2">
-                    <PayoutAction action={approvePayoutAction} payoutId={payout.id} label="Approve" />
-                    <PayoutAction action={markPayoutPaidAction} payoutId={payout.id} label="Mark paid" />
-                    <PayoutAction action={rejectPayoutAction} payoutId={payout.id} label="Reject" />
+                    <PayoutAction
+                      action={approvePayoutAction}
+                      payoutId={payout.id}
+                      label="Approve"
+                    />
+                    <PayoutAction
+                      action={markPayoutPaidAction}
+                      payoutId={payout.id}
+                      label="Mark paid"
+                    />
+                    <PayoutAction
+                      action={rejectPayoutAction}
+                      payoutId={payout.id}
+                      label="Reject"
+                    />
                   </div>
                 </TableCell>
               </TableRow>
@@ -71,7 +93,9 @@ function PayoutAction({
     <form action={action} className="flex gap-2">
       <input type="hidden" name="payoutId" value={payoutId} />
       <Input name="adminNote" placeholder="Admin note" />
-      <Button type="submit" size="sm" variant="outline">{label}</Button>
+      <Button type="submit" size="sm" variant="outline">
+        {label}
+      </Button>
     </form>
   )
 }

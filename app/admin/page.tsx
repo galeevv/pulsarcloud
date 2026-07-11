@@ -1,4 +1,9 @@
-import { ActivityIcon, CreditCardIcon, RadioIcon, UsersIcon } from "lucide-react"
+import {
+  ActivityIcon,
+  CreditCardIcon,
+  RadioIcon,
+  UsersIcon,
+} from "lucide-react"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { prisma } from "@/lib/db"
@@ -11,16 +16,35 @@ export default async function AdminDashboardPage() {
       prisma.subscription.count({ where: { status: "ACTIVE" } }),
       prisma.payment.count({ where: { status: "PENDING" } }),
       prisma.payoutRequest.count({ where: { status: "PENDING" } }),
-      prisma.walletLedgerEntry.findMany({ where: { status: "POSTED" } }),
+      prisma.walletLedgerEntry.findMany({
+        where: {
+          status: "POSTED",
+          isTest: false,
+          type: "PAYMENT_CAPTURE",
+          direction: "CREDIT",
+        },
+      }),
     ])
   const turnoverRub = ledger.reduce((sum, entry) => sum + entry.amountRub, 0)
 
   return (
     <main className="grid gap-4 md:grid-cols-4">
       <MetricCard icon={<UsersIcon />} label="Users" value={String(users)} />
-      <MetricCard icon={<RadioIcon />} label="Active subscriptions" value={String(activeSubscriptions)} />
-      <MetricCard icon={<CreditCardIcon />} label="Pending payments" value={String(pendingPayments)} />
-      <MetricCard icon={<ActivityIcon />} label="Pending payouts" value={String(pendingPayouts)} />
+      <MetricCard
+        icon={<RadioIcon />}
+        label="Active subscriptions"
+        value={String(activeSubscriptions)}
+      />
+      <MetricCard
+        icon={<CreditCardIcon />}
+        label="Pending payments"
+        value={String(pendingPayments)}
+      />
+      <MetricCard
+        icon={<ActivityIcon />}
+        label="Pending payouts"
+        value={String(pendingPayouts)}
+      />
       <Card className="glass-card rounded-3xl md:col-span-4">
         <CardHeader>
           <CardTitle>Wallet ledger volume</CardTitle>

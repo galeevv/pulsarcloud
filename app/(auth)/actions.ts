@@ -233,7 +233,13 @@ export async function startTelegramStubAction(
   _formData: FormData
 ): Promise<TelegramStubState> {
   void _state
-  void _formData
+  const invite = z
+    .string()
+    .trim()
+    .min(1)
+    .max(64)
+    .optional()
+    .parse(_formData.get("invite") || undefined)
   const telegramAuth = createTelegramAuthService()
   const challenge = await telegramAuth.createLoginChallenge()
 
@@ -243,7 +249,11 @@ export async function startTelegramStubAction(
       providerSubject: challenge.nonce,
       kind: AuthChallengeKind.TELEGRAM_LOGIN,
       tokenHash: hashValue(challenge.nonce),
-      context: { provider: "telegram", message: challenge.message },
+      context: {
+        provider: "telegram",
+        message: challenge.message,
+        ...(invite ? { invite } : {}),
+      },
       expiresAt: new Date(Date.now() + 10 * 60 * 1000),
     },
   })

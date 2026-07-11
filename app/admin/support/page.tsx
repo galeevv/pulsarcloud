@@ -37,20 +37,40 @@ export default async function AdminSupportPage({
           <CardContent className="flex flex-col gap-3">
             <div className="soft-panel flex flex-col gap-2 p-4">
               {conversation.messages.map((message) => (
-                <div key={message.id} className="rounded-3xl border border-border/70 bg-background/40 p-3">
-                  <p className="text-xs text-muted-foreground">{message.authorRole}</p>
+                <div
+                  key={message.id}
+                  className="rounded-3xl border border-border/70 bg-background/40 p-3"
+                >
+                  <p className="text-xs text-muted-foreground">
+                    {message.authorRole}
+                  </p>
                   <p className="text-sm">{message.body}</p>
                 </div>
               ))}
             </div>
-            <form action={replySupportConversationAction} className="flex flex-col gap-2">
-              <input type="hidden" name="conversationId" value={conversation.id} />
+            <form
+              action={replySupportConversationAction}
+              className="flex flex-col gap-2"
+            >
+              <input
+                type="hidden"
+                name="conversationId"
+                value={conversation.id}
+              />
               <Textarea name="body" placeholder="Ответ администратора" />
               <Button type="submit">Ответить</Button>
             </form>
             <form action={setSupportConversationStatusAction}>
-              <input type="hidden" name="conversationId" value={conversation.id} />
-              <input type="hidden" name="status" value={conversation.status === "OPEN" ? "CLOSED" : "OPEN"} />
+              <input
+                type="hidden"
+                name="conversationId"
+                value={conversation.id}
+              />
+              <input
+                type="hidden"
+                name="status"
+                value={conversation.status === "OPEN" ? "CLOSED" : "OPEN"}
+              />
               <Button type="submit" variant="outline">
                 {conversation.status === "OPEN" ? "Закрыть" : "Открыть"}
               </Button>

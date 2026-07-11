@@ -1,5 +1,20 @@
 # Pulsar 2.0
 
+Pulsar 2.0 is a Next.js App Router application for VPN subscription billing,
+authentication, referrals, support, and Remnawave provisioning.
+
+Documentation index:
+
+- [Application reference](docs/application-reference.md)
+- [Architecture](docs/architecture.md)
+- [Authentication](docs/auth.md)
+- [Billing](docs/billing.md)
+- [Integration operations](docs/integration-handoff.md)
+- [Remnawave test environment](docs/remnawave-test-environment.md)
+- [Repository and VPS audit](docs/audit-2026-07-12.md)
+- [Testing](docs/test.md)
+- [Seed data](docs/seed.md)
+
 Clean Next.js foundation for the commercial PulsarVPN cabinet. This is a new project, not a refactor of Pulsar 1.0. Legacy backend terms, promo codes, credits, username/password auth, Marzban/x-ui artifacts, and old project structure are intentionally absent.
 
 ## Stack

@@ -52,6 +52,7 @@ enum Currency {
 
 enum PaymentProvider {
   MOCK
+  TEST
   PLATEGA
 }
 
@@ -100,6 +101,11 @@ enum ReferralRewardStatus {
   RESERVED
   PAID
   CANCELED
+}
+
+enum ReferralRewardKind {
+  REGISTRATION
+  FIRST_PAYMENT
 }
 
 enum WalletLedgerDirection {
@@ -157,6 +163,7 @@ enum JobType {
   PROVISION_SUBSCRIPTION
   SYNC_SUBSCRIPTION
   PROCESS_TELEGRAM_UPDATE
+  REGENERATE_SUBSCRIPTION_URL
   EXPIRE_AUTH_CHALLENGES
   DELETE_EXPIRED_SESSIONS
 }
@@ -204,16 +211,16 @@ model User {
   referralProfile      ReferralProfile?
   referralInvitesSent  ReferralInvite[]      @relation("ReferralInviteInviter")
   referralInvite       ReferralInvite?       @relation("ReferralInviteInvited")
-  referralRewards      ReferralReward[]       @relation("ReferralRewardOwner")
-  referralConversions  ReferralReward[]       @relation("ReferralRewardInvited")
+  referralRewards      ReferralReward[]      @relation("ReferralRewardOwner")
+  referralConversions  ReferralReward[]      @relation("ReferralRewardInvited")
   walletLedgerEntries  WalletLedgerEntry[]
-  payoutRequests       PayoutRequest[]        @relation("PayoutOwner")
-  approvedPayouts      PayoutRequest[]        @relation("PayoutApprovedBy")
-  paidPayouts          PayoutRequest[]        @relation("PayoutPaidBy")
-  rejectedPayouts      PayoutRequest[]        @relation("PayoutRejectedBy")
+  payoutRequests       PayoutRequest[]       @relation("PayoutOwner")
+  approvedPayouts      PayoutRequest[]       @relation("PayoutApprovedBy")
+  paidPayouts          PayoutRequest[]       @relation("PayoutPaidBy")
+  rejectedPayouts      PayoutRequest[]       @relation("PayoutRejectedBy")
   supportConversations SupportConversation[]
   supportMessages      SupportMessage[]
-  auditEvents          AuditEvent[]           @relation("AuditActor")
+  auditEvents          AuditEvent[]          @relation("AuditActor")
 
   @@index([role, status])
   @@index([createdAt])
@@ -260,15 +267,15 @@ model AuthChallenge {
 }
 
 model Session {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   userId     String
-  tokenHash  String   @unique
+  tokenHash  String    @unique
   userAgent  String?
   ipAddress  String?
   expiresAt  DateTime
-  lastSeenAt DateTime @default(now())
+  lastSeenAt DateTime  @default(now())
   revokedAt  DateTime?
-  createdAt  DateTime @default(now())
+  createdAt  DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -300,23 +307,23 @@ model PricingVersion {
 }
 
 model PriceQuote {
-  id                    String            @id @default(cuid())
-  userId                String
-  pricingVersionId      String
-  purpose               PriceQuotePurpose @default(SUBSCRIPTION)
-  currency              Currency          @default(RUB)
-  durationMonths        Int
-  deviceLimit           Int
-  lteEnabled            Boolean           @default(false)
-  referralDiscountPct   Int               @default(0)
-  subtotalRub           Int
-  discountRub           Int
-  totalRub              Int
-  pricingSnapshot       Json
-  idempotencyKey        String            @unique
-  expiresAt             DateTime
-  consumedAt            DateTime?
-  createdAt             DateTime          @default(now())
+  id                  String            @id @default(cuid())
+  userId              String
+  pricingVersionId    String
+  purpose             PriceQuotePurpose @default(SUBSCRIPTION)
+  currency            Currency          @default(RUB)
+  durationMonths      Int
+  deviceLimit         Int
+  lteEnabled          Boolean           @default(false)
+  referralDiscountPct Int               @default(0)
+  subtotalRub         Int
+  discountRub         Int
+  totalRub            Int
+  pricingSnapshot     Json
+  idempotencyKey      String            @unique
+  expiresAt           DateTime
+  consumedAt          DateTime?
+  createdAt           DateTime          @default(now())
 
   user           User           @relation(fields: [userId], references: [id], onDelete: Restrict)
   pricingVersion PricingVersion @relation(fields: [pricingVersionId], references: [id], onDelete: Restrict)
@@ -331,6 +338,7 @@ model Payment {
   userId            String
   quoteId           String          @unique
   provider          PaymentProvider
+  isTest            Boolean         @default(false)
   status            PaymentStatus   @default(PENDING)
   currency          Currency        @default(RUB)
   amountRub         Int
@@ -349,16 +357,17 @@ model Payment {
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
 
-  user          User                  @relation(fields: [userId], references: [id], onDelete: Restrict)
-  quote         PriceQuote            @relation(fields: [quoteId], references: [id], onDelete: Restrict)
-  webhookEvents PaymentWebhookEvent[]
-  periods       SubscriptionPeriod[]
+  user           User                  @relation(fields: [userId], references: [id], onDelete: Restrict)
+  quote          PriceQuote            @relation(fields: [quoteId], references: [id], onDelete: Restrict)
+  webhookEvents  PaymentWebhookEvent[]
+  periods        SubscriptionPeriod[]
   referralReward ReferralReward?
-  ledgerEntries WalletLedgerEntry[]
+  ledgerEntries  WalletLedgerEntry[]
 
   @@unique([provider, externalPaymentId])
   @@index([userId, createdAt])
   @@index([status, createdAt])
+  @@index([isTest, status, createdAt])
 }
 
 model PaymentWebhookEvent {
@@ -417,6 +426,7 @@ model SubscriptionPeriod {
   deviceLimit    Int
   lteEnabled     Boolean  @default(false)
   amountRub      Int
+  isTest         Boolean  @default(false)
   createdAt      DateTime @default(now())
 
   subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
@@ -427,12 +437,12 @@ model SubscriptionPeriod {
 }
 
 model ReferralProfile {
-  userId     String   @id
-  inviteCode String   @unique
-  isEnabled  Boolean  @default(false)
+  userId     String    @id
+  inviteCode String    @unique
+  isEnabled  Boolean   @default(false)
   enabledAt  DateTime?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -462,7 +472,8 @@ model ReferralReward {
   inviteId      String               @unique
   inviterId     String
   invitedUserId String
-  paymentId     String               @unique
+  paymentId     String?              @unique
+  kind          ReferralRewardKind   @default(FIRST_PAYMENT)
   amountRub     Int
   status        ReferralRewardStatus @default(PENDING)
   availableAt   DateTime?
@@ -471,10 +482,10 @@ model ReferralReward {
   canceledAt    DateTime?
   createdAt     DateTime             @default(now())
 
-  invite  ReferralInvite @relation(fields: [inviteId], references: [id], onDelete: Restrict)
-  inviter User           @relation("ReferralRewardOwner", fields: [inviterId], references: [id], onDelete: Restrict)
-  invited User           @relation("ReferralRewardInvited", fields: [invitedUserId], references: [id], onDelete: Restrict)
-  payment Payment        @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  invite      ReferralInvite     @relation(fields: [inviteId], references: [id], onDelete: Restrict)
+  inviter     User               @relation("ReferralRewardOwner", fields: [inviterId], references: [id], onDelete: Restrict)
+  invited     User               @relation("ReferralRewardInvited", fields: [invitedUserId], references: [id], onDelete: Restrict)
+  payment     Payment?           @relation(fields: [paymentId], references: [id], onDelete: Restrict)
   ledgerEntry WalletLedgerEntry?
 
   @@index([inviterId, status])
@@ -482,21 +493,22 @@ model ReferralReward {
 }
 
 model WalletLedgerEntry {
-  id             String                @id @default(cuid())
-  userId         String
-  direction      WalletLedgerDirection
-  amountRub      Int
-  currency       Currency              @default(RUB)
-  type           WalletLedgerType
-  status         WalletLedgerStatus    @default(POSTED)
-  idempotencyKey String                @unique
-  paymentId      String?
-  payoutRequestId String?
-  referralRewardId String?             @unique
-  metadata       Json?
-  createdAt      DateTime              @default(now())
-  postedAt       DateTime?
-  voidedAt       DateTime?
+  id               String                @id @default(cuid())
+  userId           String
+  direction        WalletLedgerDirection
+  amountRub        Int
+  currency         Currency              @default(RUB)
+  type             WalletLedgerType
+  status           WalletLedgerStatus    @default(POSTED)
+  isTest           Boolean               @default(false)
+  idempotencyKey   String                @unique
+  paymentId        String?
+  payoutRequestId  String?
+  referralRewardId String?               @unique
+  metadata         Json?
+  createdAt        DateTime              @default(now())
+  postedAt         DateTime?
+  voidedAt         DateTime?
 
   user           User            @relation(fields: [userId], references: [id], onDelete: Restrict)
   payment        Payment?        @relation(fields: [paymentId], references: [id], onDelete: Restrict)
@@ -527,10 +539,10 @@ model PayoutRequest {
   rejectedAt     DateTime?
   canceledAt     DateTime?
 
-  user       User  @relation("PayoutOwner", fields: [userId], references: [id], onDelete: Restrict)
-  approvedBy User? @relation("PayoutApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
-  paidBy     User? @relation("PayoutPaidBy", fields: [paidById], references: [id], onDelete: SetNull)
-  rejectedBy User? @relation("PayoutRejectedBy", fields: [rejectedById], references: [id], onDelete: SetNull)
+  user          User                @relation("PayoutOwner", fields: [userId], references: [id], onDelete: Restrict)
+  approvedBy    User?               @relation("PayoutApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  paidBy        User?               @relation("PayoutPaidBy", fields: [paidById], references: [id], onDelete: SetNull)
+  rejectedBy    User?               @relation("PayoutRejectedBy", fields: [rejectedById], references: [id], onDelete: SetNull)
   ledgerEntries WalletLedgerEntry[]
 
   @@index([userId, createdAt])

@@ -41,12 +41,20 @@ export default async function AdminUsersPage() {
           <TableBody>
             {users.map((user) => (
               <TableRow key={user.id}>
-                <TableCell>{getIdentitySubject(user.authIdentities, "EMAIL") ?? "—"}</TableCell>
-                <TableCell>{getIdentitySubject(user.authIdentities, "TELEGRAM") ?? "—"}</TableCell>
-                <TableCell><Badge>{user.role}</Badge></TableCell>
+                <TableCell>
+                  {getIdentitySubject(user.authIdentities, "EMAIL") ?? "—"}
+                </TableCell>
+                <TableCell>
+                  {getIdentitySubject(user.authIdentities, "TELEGRAM") ?? "—"}
+                </TableCell>
+                <TableCell>
+                  <Badge>{user.role}</Badge>
+                </TableCell>
                 <TableCell>{formatRub(user.balanceRub)}</TableCell>
                 <TableCell>{user.subscription?.status ?? "NONE"}</TableCell>
-                <TableCell>{user.createdAt.toLocaleDateString("ru-RU")}</TableCell>
+                <TableCell>
+                  {user.createdAt.toLocaleDateString("ru-RU")}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>

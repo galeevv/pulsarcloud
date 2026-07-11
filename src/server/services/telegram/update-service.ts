@@ -11,6 +11,7 @@ import { prisma } from "@/lib/db"
 import { hashValue } from "@/lib/security"
 import { runInTransaction } from "@/lib/transactions"
 import { sendTelegramMessage } from "@/src/server/services/telegram/bot-client"
+import { applyReferralOnboarding } from "@/src/server/services/referrals/referral-onboarding-service"
 
 const updateSchema = z.object({
   update_id: z.number().int().nonnegative(),
@@ -134,18 +135,26 @@ async function consumeLoginChallenge(nonce: string, telegramId: string) {
     })
     if (challenge.userId && existing && existing.userId !== challenge.userId)
       throw new ConflictError("Telegram account is already linked.")
-    const userId =
+    const createdUser =
       challenge.userId ??
       existing?.userId ??
       (
         await tx.user.create({
           data: {
             referralProfile: {
-              create: { inviteCode: randomBytes(9).toString("base64url") },
+              create: {
+                inviteCode: randomBytes(9).toString("base64url"),
+                isEnabled: true,
+                enabledAt: new Date(),
+              },
             },
           },
         })
       ).id
+    const userId = createdUser
+    if (!challenge.userId && !existing) {
+      await applyReferralOnboarding(tx, userId, readInvite(challenge.context))
+    }
     if (!existing)
       await tx.authIdentity.create({
         data: {
@@ -180,4 +189,11 @@ function appUrl() {
     /\/$/,
     ""
   )
+}
+
+function readInvite(context: unknown) {
+  if (!context || typeof context !== "object" || !("invite" in context)) {
+    return undefined
+  }
+  return typeof context.invite === "string" ? context.invite : undefined
 }

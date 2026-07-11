@@ -2,7 +2,14 @@
 
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
-import { NodeProtocol, NodeStatus, NodeType, SupportConversationStatus, type Prisma } from "@/generated/prisma/client"
+import {
+  JobType,
+  NodeProtocol,
+  NodeStatus,
+  NodeType,
+  SupportConversationStatus,
+  type Prisma,
+} from "@/generated/prisma/client"
 
 import { requireAdmin } from "@/lib/auth"
 import { prisma } from "@/lib/db"
@@ -12,7 +19,6 @@ import {
   assertLteCoveredByPayment,
 } from "@/lib/subscription-billing-policy"
 import { confirmMockPayment } from "@/src/server/services/billing/payment-service"
-import { createSubscriptionProvisioningService } from "@/src/server/services/provisioning/subscription-provisioning-service"
 import {
   approvePayoutRequest,
   markPayoutRequestPaid,
@@ -31,9 +37,12 @@ export async function confirmPaymentAction(formData: FormData) {
 export async function extendSubscriptionAction(formData: FormData) {
   const admin = await requireAdmin()
   const subscriptionId = z.string().min(1).parse(formData.get("subscriptionId"))
-  const months = z.coerce.number().int().min(1).max(24).parse(
-    formData.get("months")
-  )
+  const months = z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(24)
+    .parse(formData.get("months"))
   const subscription = await prisma.subscription.findUniqueOrThrow({
     where: { id: subscriptionId },
   })
@@ -44,24 +53,39 @@ export async function extendSubscriptionAction(formData: FormData) {
   const expiresAt = new Date(baseDate)
   expiresAt.setMonth(expiresAt.getMonth() + months)
 
-  await prisma.subscription.update({
-    where: { id: subscriptionId },
-    data: {
-      status: "ACTIVE",
-      startsAt: subscription.startsAt ?? new Date(),
-      expiresAt,
-    },
+  await runInTransaction(prisma, async (tx) => {
+    const updated = await tx.subscription.update({
+      where: { id: subscriptionId },
+      data: {
+        status: "ACTIVE",
+        startsAt: subscription.startsAt ?? new Date(),
+        expiresAt,
+        syncStatus: "PENDING",
+        version: { increment: 1 },
+      },
+    })
+    await enqueueSubscriptionSync(tx, updated.id, updated.version, "extend")
+    await auditInTransaction(
+      tx,
+      admin.id,
+      "subscription.extend",
+      "Subscription",
+      subscriptionId,
+      { months }
+    )
   })
-  await audit(admin.id, "subscription.extend", "Subscription", subscriptionId, { months })
   revalidatePath("/admin/subscriptions")
 }
 
 export async function changeSubscriptionDeviceLimitAction(formData: FormData) {
   const admin = await requireAdmin()
   const subscriptionId = z.string().min(1).parse(formData.get("subscriptionId"))
-  const deviceLimit = z.coerce.number().int().min(1).max(10).parse(
-    formData.get("deviceLimit")
-  )
+  const deviceLimit = z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(10)
+    .parse(formData.get("deviceLimit"))
 
   const subscription = await prisma.subscription.findUniqueOrThrow({
     where: { id: subscriptionId },
@@ -73,11 +97,30 @@ export async function changeSubscriptionDeviceLimitAction(formData: FormData) {
     subscription.periods[0]
   )
 
-  await createSubscriptionProvisioningService().updateDeviceLimit(
-    subscriptionId,
-    deviceLimit
-  )
-  await audit(admin.id, "subscription.deviceLimit", "Subscription", subscriptionId, { deviceLimit })
+  await runInTransaction(prisma, async (tx) => {
+    const updated = await tx.subscription.update({
+      where: { id: subscriptionId },
+      data: {
+        deviceLimit,
+        syncStatus: "PENDING",
+        version: { increment: 1 },
+      },
+    })
+    await enqueueSubscriptionSync(
+      tx,
+      updated.id,
+      updated.version,
+      "device-limit"
+    )
+    await auditInTransaction(
+      tx,
+      admin.id,
+      "subscription.deviceLimit",
+      "Subscription",
+      subscriptionId,
+      { deviceLimit }
+    )
+  })
   revalidatePath("/admin/subscriptions")
 }
 
@@ -96,8 +139,25 @@ export async function toggleSubscriptionLteAction(formData: FormData) {
     subscription.periods[0]
   )
 
-  await createSubscriptionProvisioningService().setLte(subscriptionId, enabled)
-  await audit(admin.id, "subscription.lte", "Subscription", subscriptionId, { enabled })
+  await runInTransaction(prisma, async (tx) => {
+    const updated = await tx.subscription.update({
+      where: { id: subscriptionId },
+      data: {
+        lteEnabled: enabled,
+        syncStatus: "PENDING",
+        version: { increment: 1 },
+      },
+    })
+    await enqueueSubscriptionSync(tx, updated.id, updated.version, "lte")
+    await auditInTransaction(
+      tx,
+      admin.id,
+      "subscription.lte",
+      "Subscription",
+      subscriptionId,
+      { enabled }
+    )
+  })
   revalidatePath("/admin/subscriptions")
 }
 
@@ -105,10 +165,34 @@ export async function regenerateAdminSubscriptionUrlAction(formData: FormData) {
   const admin = await requireAdmin()
   const subscriptionId = z.string().min(1).parse(formData.get("subscriptionId"))
 
-  await createSubscriptionProvisioningService().regenerateSubscriptionUrl(
-    subscriptionId
-  )
-  await audit(admin.id, "subscription.regenerateUrl", "Subscription", subscriptionId)
+  await runInTransaction(prisma, async (tx) => {
+    await tx.job.upsert({
+      where: {
+        idempotencyKey: `subscription:${subscriptionId}:regenerate-url`,
+      },
+      update: {
+        status: "PENDING",
+        runAt: new Date(),
+        attemptCount: 0,
+        lockedAt: null,
+        lockedBy: null,
+        completedAt: null,
+        lastError: null,
+      },
+      create: {
+        type: JobType.REGENERATE_SUBSCRIPTION_URL,
+        idempotencyKey: `subscription:${subscriptionId}:regenerate-url`,
+        payload: { subscriptionId },
+      },
+    })
+    await auditInTransaction(
+      tx,
+      admin.id,
+      "subscription.regenerateUrl",
+      "Subscription",
+      subscriptionId
+    )
+  })
   revalidatePath("/admin/subscriptions")
 }
 
@@ -116,17 +200,36 @@ export async function syncAdminSubscriptionAction(formData: FormData) {
   const admin = await requireAdmin()
   const subscriptionId = z.string().min(1).parse(formData.get("subscriptionId"))
 
-  await createSubscriptionProvisioningService().syncSubscription(subscriptionId)
-  await audit(admin.id, "subscription.mockSync", "Subscription", subscriptionId)
+  await runInTransaction(prisma, async (tx) => {
+    const subscription = await tx.subscription.update({
+      where: { id: subscriptionId },
+      data: { syncStatus: "PENDING", version: { increment: 1 } },
+    })
+    await enqueueSubscriptionSync(
+      tx,
+      subscription.id,
+      subscription.version,
+      "manual"
+    )
+    await auditInTransaction(
+      tx,
+      admin.id,
+      "subscription.sync_requested",
+      "Subscription",
+      subscriptionId
+    )
+  })
   revalidatePath("/admin/subscriptions")
 }
 
 export async function approvePayoutAction(formData: FormData) {
   const admin = await requireAdmin()
   const payoutId = z.string().min(1).parse(formData.get("payoutId"))
-  const adminNote = z.string().max(500).optional().parse(
-    formData.get("adminNote") || undefined
-  )
+  const adminNote = z
+    .string()
+    .max(500)
+    .optional()
+    .parse(formData.get("adminNote") || undefined)
 
   await approvePayoutRequest(payoutId, admin.id, adminNote)
   revalidatePath("/admin/payouts")
@@ -135,9 +238,11 @@ export async function approvePayoutAction(formData: FormData) {
 export async function markPayoutPaidAction(formData: FormData) {
   const admin = await requireAdmin()
   const payoutId = z.string().min(1).parse(formData.get("payoutId"))
-  const adminNote = z.string().max(500).optional().parse(
-    formData.get("adminNote") || undefined
-  )
+  const adminNote = z
+    .string()
+    .max(500)
+    .optional()
+    .parse(formData.get("adminNote") || undefined)
 
   await markPayoutRequestPaid(payoutId, admin.id, adminNote)
   revalidatePath("/admin/payouts")
@@ -146,9 +251,11 @@ export async function markPayoutPaidAction(formData: FormData) {
 export async function rejectPayoutAction(formData: FormData) {
   const admin = await requireAdmin()
   const payoutId = z.string().min(1).parse(formData.get("payoutId"))
-  const adminNote = z.string().max(500).optional().parse(
-    formData.get("adminNote") || undefined
-  )
+  const adminNote = z
+    .string()
+    .max(500)
+    .optional()
+    .parse(formData.get("adminNote") || undefined)
 
   await rejectPayoutRequest(payoutId, admin.id, adminNote)
   revalidatePath("/admin/payouts")
@@ -178,15 +285,21 @@ export async function replySupportConversationAction(formData: FormData) {
 export async function setSupportConversationStatusAction(formData: FormData) {
   const admin = await requireAdmin()
   const conversationId = z.string().min(1).parse(formData.get("conversationId"))
-  const status = z.nativeEnum(SupportConversationStatus).parse(
-    formData.get("status")
-  )
+  const status = z
+    .nativeEnum(SupportConversationStatus)
+    .parse(formData.get("status"))
 
   await prisma.supportConversation.update({
     where: { id: conversationId },
     data: { status },
   })
-  await audit(admin.id, "support.status", "SupportConversation", conversationId, { status })
+  await audit(
+    admin.id,
+    "support.status",
+    "SupportConversation",
+    conversationId,
+    { status }
+  )
   revalidatePath("/admin/support")
 }
 
@@ -231,6 +344,12 @@ export async function updatePricingSettingsAction(formData: FormData) {
       referralFriendDiscountPct: z.coerce.number().int().min(0).max(100),
       referralRewardRub: z.coerce.number().int().min(0),
       minimalPayoutRub: z.coerce.number().int().positive(),
+      minDeviceLimit: z.coerce.number().int().min(1).max(20),
+      maxDeviceLimit: z.coerce.number().int().min(1).max(20),
+      discount1: z.coerce.number().int().min(0).max(100),
+      discount3: z.coerce.number().int().min(0).max(100),
+      discount6: z.coerce.number().int().min(0).max(100),
+      discount12: z.coerce.number().int().min(0).max(100),
     })
     .parse({
       baseMonthlyPriceRub: formData.get("baseMonthlyPriceRub"),
@@ -239,6 +358,12 @@ export async function updatePricingSettingsAction(formData: FormData) {
       referralFriendDiscountPct: formData.get("referralFriendDiscountPct"),
       referralRewardRub: formData.get("referralRewardRub"),
       minimalPayoutRub: formData.get("minimalPayoutRub"),
+      minDeviceLimit: formData.get("minDeviceLimit"),
+      maxDeviceLimit: formData.get("maxDeviceLimit"),
+      discount1: formData.get("discount1"),
+      discount3: formData.get("discount3"),
+      discount6: formData.get("discount6"),
+      discount12: formData.get("discount12"),
     })
 
   const pricing = await runInTransaction(prisma, async (tx) => {
@@ -250,20 +375,55 @@ export async function updatePricingSettingsAction(formData: FormData) {
       where: { id: current.id },
       data: { status: "RETIRED", retiredAt: new Date() },
     })
+    if (data.minDeviceLimit > data.maxDeviceLimit) {
+      throw new Error("Minimum device limit cannot exceed maximum.")
+    }
+    const { discount1, discount3, discount6, discount12, ...pricingData } = data
     return tx.pricingVersion.create({
       data: {
-        ...data,
+        ...pricingData,
         version: current.version + 1,
         status: "ACTIVE",
         effectiveAt: new Date(),
-        minDeviceLimit: current.minDeviceLimit,
-        maxDeviceLimit: current.maxDeviceLimit,
-        durationDiscounts: current.durationDiscounts as Prisma.InputJsonValue,
+        durationDiscounts: [
+          { months: 1, discountPct: discount1 },
+          { months: 3, discountPct: discount3 },
+          { months: 6, discountPct: discount6 },
+          { months: 12, discountPct: discount12 },
+        ],
       },
     })
   })
   await audit(admin.id, "settings.pricing", "PricingVersion", pricing.id)
   revalidatePath("/admin/settings")
+}
+
+function enqueueSubscriptionSync(
+  tx: Prisma.TransactionClient,
+  subscriptionId: string,
+  version: number,
+  reason: string
+) {
+  return tx.job.create({
+    data: {
+      type: JobType.SYNC_SUBSCRIPTION,
+      idempotencyKey: `subscription:${subscriptionId}:version:${version}`,
+      payload: { subscriptionId, version, reason },
+    },
+  })
+}
+
+function auditInTransaction(
+  tx: Prisma.TransactionClient,
+  actorUserId: string,
+  eventType: string,
+  entityType: string,
+  entityId?: string,
+  data?: object
+) {
+  return tx.auditEvent.create({
+    data: { actorUserId, eventType, entityType, entityId, data },
+  })
 }
 
 function audit(

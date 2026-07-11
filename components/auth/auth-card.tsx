@@ -214,6 +214,7 @@ function EmailStartForm({
       </div>
 
       <form action={telegramAction}>
+        <input type="hidden" name="invite" value={invite ?? ""} />
         <Button
           type="submit"
           variant="outline"

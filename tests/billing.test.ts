@@ -7,7 +7,10 @@ import {
   assertLteCoveredByPayment,
 } from "@/lib/subscription-billing-policy"
 import type { TestDatabase } from "./helpers/test-database"
-import { createPricingVersion, createTestDatabase } from "./helpers/test-database"
+import {
+  createPricingVersion,
+  createTestDatabase,
+} from "./helpers/test-database"
 
 let database: TestDatabase
 let billing: typeof import("@/src/server/services/billing/payment-service")
@@ -20,9 +23,8 @@ before(async () => {
   process.env.DATABASE_URL = database.url
   applicationDatabase = await import("@/lib/db")
   billing = await import("@/src/server/services/billing/payment-service")
-  webhooks = await import(
-    "@/src/server/services/billing/payment-webhook-service"
-  )
+  webhooks =
+    await import("@/src/server/services/billing/payment-webhook-service")
   providers = await import("@/src/server/services/payments/provider")
   await createPricingVersion(database.client)
 })
@@ -55,8 +57,14 @@ test("backend creates an immutable quote and ignores any client-side displayed p
   assert.equal(quote.discountRub, 0)
   assert.equal(quote.totalRub, 199)
   assert.ok(quote.expiresAt > quote.createdAt)
-  assert.equal(await database.client.priceQuote.count({ where: { userId: user.id } }), 1)
-  assert.equal(await database.client.payment.count({ where: { userId: user.id } }), 1)
+  assert.equal(
+    await database.client.priceQuote.count({ where: { userId: user.id } }),
+    1
+  )
+  assert.equal(
+    await database.client.payment.count({ where: { userId: user.id } }),
+    1
+  )
   await assert.rejects(
     database.client.priceQuote.update({
       where: { id: quote.id },
@@ -82,11 +90,15 @@ test("confirmation is atomic and repeated confirmation creates no duplicate effe
   assert.equal(first.applied, true)
   assert.equal(second.applied, false)
   assert.equal(
-    await database.client.subscriptionPeriod.count({ where: { paymentId: payment.id } }),
+    await database.client.subscriptionPeriod.count({
+      where: { paymentId: payment.id },
+    }),
     1
   )
   assert.equal(
-    await database.client.walletLedgerEntry.count({ where: { paymentId: payment.id } }),
+    await database.client.walletLedgerEntry.count({
+      where: { paymentId: payment.id },
+    }),
     2
   )
   assert.equal(
@@ -118,11 +130,52 @@ test("confirmation is atomic and repeated confirmation creates no duplicate effe
   )
 })
 
+test("self-service test payment provisions entitlement without live revenue", async () => {
+  process.env.ENABLE_TEST_PAYMENTS = "true"
+  const user = await database.client.user.create({ data: {} })
+  const payment = await billing.createSubscriptionPayment(
+    {
+      userId: user.id,
+      months: 1,
+      deviceLimit: 2,
+      lteEnabled: true,
+      idempotencyKey: crypto.randomUUID(),
+    },
+    "TEST"
+  )
+
+  assert.equal(payment.isTest, true)
+  assert.equal(payment.provider, "TEST")
+  assert.match(payment.checkoutUrl ?? "", /\/payments\/test\//)
+
+  const result = await billing.confirmTestPayment(payment.id, user.id)
+  assert.equal(result.applied, true)
+  const period = await database.client.subscriptionPeriod.findUniqueOrThrow({
+    where: { paymentId: payment.id },
+  })
+  const ledger = await database.client.walletLedgerEntry.findMany({
+    where: { paymentId: payment.id },
+  })
+  assert.equal(period.isTest, true)
+  assert.equal(ledger.length, 2)
+  assert.ok(ledger.every((entry) => entry.isTest))
+  assert.equal(
+    await database.client.referralReward.count({
+      where: { paymentId: payment.id },
+    }),
+    0
+  )
+})
+
 test("signed webhook is idempotent across subscription, referral, ledger, and jobs", async () => {
   const inviter = await database.client.user.create({ data: {} })
   const invited = await database.client.user.create({ data: {} })
   await database.client.referralProfile.create({
-    data: { userId: inviter.id, inviteCode: `invite-${inviter.id}`, isEnabled: true },
+    data: {
+      userId: inviter.id,
+      inviteCode: `invite-${inviter.id}`,
+      isEnabled: true,
+    },
   })
   await database.client.referralProfile.create({
     data: { userId: invited.id, inviteCode: `invite-${invited.id}` },
@@ -177,15 +230,21 @@ test("signed webhook is idempotent across subscription, referral, ledger, and jo
   assert.equal(second.duplicate, true)
   assert.equal(await database.client.paymentWebhookEvent.count(), 1)
   assert.equal(
-    await database.client.subscriptionPeriod.count({ where: { paymentId: payment.id } }),
+    await database.client.subscriptionPeriod.count({
+      where: { paymentId: payment.id },
+    }),
     1
   )
   assert.equal(
-    await database.client.referralReward.count({ where: { paymentId: payment.id } }),
+    await database.client.referralReward.count({
+      where: { paymentId: payment.id },
+    }),
     1
   )
   assert.equal(
-    await database.client.job.count({ where: { idempotencyKey: { contains: payment.id } } }),
+    await database.client.job.count({
+      where: { idempotencyKey: { contains: payment.id } },
+    }),
     2
   )
 
@@ -206,8 +265,11 @@ test("signed webhook is idempotent across subscription, referral, ledger, and jo
     })
   )
   assert.equal(
-    (await database.client.payment.findUniqueOrThrow({ where: { id: payment.id } }))
-      .status,
+    (
+      await database.client.payment.findUniqueOrThrow({
+        where: { id: payment.id },
+      })
+    ).status,
     "PARTIALLY_REFUNDED"
   )
 
@@ -246,10 +308,7 @@ test("signed webhook is idempotent across subscription, referral, ledger, and jo
 })
 
 test("entitlement policy blocks unpaid device and LTE upgrades", () => {
-  assert.throws(
-    () => assertDeviceLimitCoveredByPayment(1, 2),
-    ConflictError
-  )
+  assert.throws(() => assertDeviceLimitCoveredByPayment(1, 2), ConflictError)
   assert.throws(() => assertLteCoveredByPayment(false, true), ConflictError)
   assert.doesNotThrow(() =>
     assertDeviceLimitCoveredByPayment(1, 3, {
