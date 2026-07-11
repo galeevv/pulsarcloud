@@ -55,9 +55,18 @@ async function seedUser(
 }
 
 async function main() {
-  const admin = await seedUser("seed-admin", "admin@pulsarr.space", UserRole.ADMIN)
+  const admin = await seedUser(
+    "seed-admin",
+    "admin@pulsarr.space",
+    UserRole.ADMIN
+  )
   const user = await seedUser("seed-user", "user@pulsarr.space")
-  const activeUser = await seedUser("seed-active", "active@pulsarr.space", UserRole.USER, 225)
+  const activeUser = await seedUser(
+    "seed-active",
+    "active@pulsarr.space",
+    UserRole.USER,
+    225
+  )
   const expiredUser = await seedUser("seed-expired", "expired@pulsarr.space")
 
   await prisma.authIdentity.upsert({
@@ -78,12 +87,12 @@ async function main() {
 
   const pricing = await prisma.pricingVersion.upsert({
     where: { version: 1 },
-    update: {},
+    update: { extraDeviceMonthlyPriceRub: 50 },
     create: {
       version: 1,
       status: "ACTIVE",
       baseMonthlyPriceRub: 119,
-      extraDeviceMonthlyPriceRub: 15,
+      extraDeviceMonthlyPriceRub: 50,
       minDeviceLimit: 1,
       maxDeviceLimit: 5,
       lteMonthlyPriceRub: 50,
@@ -223,11 +232,17 @@ async function main() {
     },
   })
 
-  const conversation = await prisma.supportConversation.findFirst({
-    where: { userId: activeUser.id, status: "OPEN" },
-  }) ?? await prisma.supportConversation.create({
-    data: { userId: activeUser.id, subject: "Тестовый чат", lastMessageAt: now },
-  })
+  const conversation =
+    (await prisma.supportConversation.findFirst({
+      where: { userId: activeUser.id, status: "OPEN" },
+    })) ??
+    (await prisma.supportConversation.create({
+      data: {
+        userId: activeUser.id,
+        subject: "Тестовый чат",
+        lastMessageAt: now,
+      },
+    }))
   await prisma.supportMessage.upsert({
     where: { idempotencyKey: "seed:support:user" },
     update: {},
@@ -252,14 +267,39 @@ async function main() {
   })
 
   const nodes = [
-    ["Moscow", "RU", "Moscow", NodeType.REGULAR, NodeProtocol.VLESS_REALITY, "ru-1.pulsarr.space", NodeStatus.ACTIVE],
-    ["LTE", "NL", "Amsterdam", NodeType.LTE, NodeProtocol.VLESS_XHTTP_TLS, "nl-lte.pulsarr.space", NodeStatus.ACTIVE],
+    [
+      "Moscow",
+      "RU",
+      "Moscow",
+      NodeType.REGULAR,
+      NodeProtocol.VLESS_REALITY,
+      "ru-1.pulsarr.space",
+      NodeStatus.ACTIVE,
+    ],
+    [
+      "LTE",
+      "NL",
+      "Amsterdam",
+      NodeType.LTE,
+      NodeProtocol.VLESS_XHTTP_TLS,
+      "nl-lte.pulsarr.space",
+      NodeStatus.ACTIVE,
+    ],
   ] as const
   for (const [name, country, city, type, protocol, domain, status] of nodes) {
     await prisma.node.upsert({
       where: { domain },
       update: { status },
-      create: { name, country, city, type, protocol, domain, status, capacity: 1000 },
+      create: {
+        name,
+        country,
+        city,
+        type,
+        protocol,
+        domain,
+        status,
+        capacity: 1000,
+      },
     })
   }
 

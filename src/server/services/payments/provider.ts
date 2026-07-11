@@ -12,6 +12,7 @@ import { timingSafeStringEqual } from "@/lib/security"
 
 export type CreatePaymentInput = {
   paymentId: string
+  userId: string
   amountRub: number
   currency: "RUB"
   description: string
@@ -92,9 +93,13 @@ export class MockPaymentProvider implements PaymentProviderAdapter {
     try {
       payload = JSON.parse(rawBody)
     } catch (error) {
-      throw new ValidationError("Payment webhook body is not valid JSON.", {}, {
-        cause: error,
-      })
+      throw new ValidationError(
+        "Payment webhook body is not valid JSON.",
+        {},
+        {
+          cause: error,
+        }
+      )
     }
 
     const parsed = mockWebhookSchema.safeParse(payload)
@@ -110,6 +115,120 @@ export class MockPaymentProvider implements PaymentProviderAdapter {
       eventType: parsed.data.status,
       amountRub: parsed.data.amountRub,
       refundedAmountRub: parsed.data.refundedAmountRub,
+      currency: parsed.data.currency,
+      payload: parsed.data,
+    }
+  }
+}
+
+const plategaCreateResponseSchema = z.object({
+  transactionId: z.string().uuid(),
+  redirect: z.string().url(),
+})
+
+const plategaWebhookSchema = z.object({
+  id: z.string().uuid(),
+  amount: z.number().int().nonnegative(),
+  currency: z.literal("RUB"),
+  status: z.enum(["PENDING", "CONFIRMED", "CANCELED", "CHARGEBACKED"]),
+  paymentMethod: z.literal(2),
+})
+
+export class PlategaPaymentProvider implements PaymentProviderAdapter {
+  readonly type = PaymentProviderType.PLATEGA
+
+  async createPayment(input: CreatePaymentInput) {
+    const response = await fetch(
+      new URL("/transaction/process", getPlategaApiUrl()),
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-merchantid": getRequiredEnv("PLATEGA_MERCHANT_ID"),
+          "x-secret": getRequiredEnv("PLATEGA_SECRET"),
+        },
+        body: JSON.stringify({
+          paymentMethod: 2,
+          paymentDetails: { amount: input.amountRub, currency: input.currency },
+          description: input.description,
+          return: `${getAppUrl()}/subscription?payment=success`,
+          failedUrl: `${getAppUrl()}/subscription?payment=failed`,
+          payload: input.paymentId,
+          metadata: { userId: input.userId },
+        }),
+        signal: AbortSignal.timeout(15_000),
+      }
+    )
+
+    if (!response.ok) {
+      throw new IntegrationError("Platega rejected payment creation.", {
+        status: response.status,
+      })
+    }
+
+    const parsed = plategaCreateResponseSchema.safeParse(await response.json())
+    if (!parsed.success) {
+      throw new IntegrationError(
+        "Platega returned an invalid payment response."
+      )
+    }
+
+    return {
+      providerPaymentId: parsed.data.transactionId,
+      checkoutUrl: parsed.data.redirect,
+    }
+  }
+
+  async verifyWebhook({ rawBody, headers }: VerifyWebhookInput) {
+    const merchantId = headers.get("x-merchantid")
+    const secret = headers.get("x-secret")
+
+    if (
+      !merchantId ||
+      !secret ||
+      !timingSafeStringEqual(
+        merchantId,
+        getRequiredEnv("PLATEGA_MERCHANT_ID")
+      ) ||
+      !timingSafeStringEqual(secret, getRequiredEnv("PLATEGA_SECRET"))
+    ) {
+      throw new UnauthorizedError("Invalid Platega callback credentials.")
+    }
+
+    let payload: unknown
+    try {
+      payload = JSON.parse(rawBody)
+    } catch (error) {
+      throw new ValidationError(
+        "Platega callback body is not valid JSON.",
+        {},
+        {
+          cause: error,
+        }
+      )
+    }
+
+    const parsed = plategaWebhookSchema.safeParse(payload)
+    if (!parsed.success) {
+      throw new ValidationError("Invalid Platega callback payload.", {
+        issues: parsed.error.issues,
+      })
+    }
+
+    const eventType = {
+      PENDING: "PENDING",
+      CONFIRMED: "SUCCEEDED",
+      CANCELED: "CANCELED",
+      CHARGEBACKED: "REFUNDED",
+    }[parsed.data.status] as ProviderPaymentEventType
+
+    return {
+      providerEventId: `${parsed.data.id}:${parsed.data.status}:${parsed.data.amount}`,
+      providerPaymentId: parsed.data.id,
+      eventType,
+      amountRub: parsed.data.amount,
+      refundedAmountRub:
+        parsed.data.status === "CHARGEBACKED" ? parsed.data.amount : undefined,
       currency: parsed.data.currency,
       payload: parsed.data,
     }
@@ -132,7 +251,30 @@ export function getPaymentProvider(
     return new MockPaymentProvider()
   }
 
+  if (provider === PaymentProviderType.PLATEGA) {
+    return new PlategaPaymentProvider()
+  }
+
   throw new IntegrationError(`Payment provider ${provider} is not configured.`)
+}
+
+function getRequiredEnv(name: string) {
+  const value = process.env[name]
+  if (!value) {
+    throw new IntegrationError(`${name} is required.`)
+  }
+  return value
+}
+
+function getPlategaApiUrl() {
+  return process.env.PLATEGA_API_URL ?? "https://app.platega.io"
+}
+
+function getAppUrl() {
+  return (process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").replace(
+    /\/$/,
+    ""
+  )
 }
 
 export function getConfiguredPaymentProvider() {

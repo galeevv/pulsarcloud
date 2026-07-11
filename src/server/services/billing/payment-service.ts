@@ -72,6 +72,7 @@ export async function createSubscriptionPayment(
     // Provider I/O is outside SQL transactions and receives its own stable key.
     const created = await provider.createPayment({
       paymentId: payment.id,
+      userId: payment.userId,
       amountRub: payment.amountRub,
       currency: "RUB",
       description: `PulsarVPN ${payment.durationMonths} мес.`,

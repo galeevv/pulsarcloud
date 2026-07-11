@@ -18,6 +18,7 @@ import {
   isDatabaseSetupError,
 } from "@/lib/db-health"
 import { getOrCreateEmailUserInTransaction } from "@/lib/email-login"
+import { sealJobPayload } from "@/lib/job-payload-crypto"
 import {
   createOtpCode,
   createRandomToken,
@@ -38,7 +39,7 @@ export type RequestOtpState = {
 }
 
 export type VerifyOtpState = { ok: boolean; message?: string }
-export type TelegramStubState = { ok: boolean; message?: string }
+export type TelegramStubState = { ok: boolean; message?: string; url?: string }
 
 const emailSchema = z.object({
   email: z.string().trim().email("Введите корректный email").toLowerCase(),
@@ -77,7 +78,7 @@ export async function requestEmailOtpAction(
   const { email, invite } = parsed.data
   const code = createOtpCode()
   const token = createRandomToken()
-  const expiresAt = new Date(Date.now() + 5 * 60 * 1000)
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000)
   const magicPath = `/auth/verify/link?token=${encodeURIComponent(token)}`
   const magicLink = await buildAbsoluteUrl(magicPath)
 
@@ -108,7 +109,11 @@ export async function requestEmailOtpAction(
         data: {
           type: JobType.SEND_AUTH_EMAIL,
           idempotencyKey: `auth:${created.id}:email`,
-          payload: { challengeId: created.id, email },
+          payload: {
+            challengeId: created.id,
+            email,
+            delivery: sealJobPayload({ code, magicLink }),
+          },
         },
       })
 
@@ -238,10 +243,19 @@ export async function startTelegramStubAction(
       providerSubject: challenge.nonce,
       kind: AuthChallengeKind.TELEGRAM_LOGIN,
       tokenHash: hashValue(challenge.nonce),
-      context: { provider: "mock", message: challenge.message },
-      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+      context: { provider: "telegram", message: challenge.message },
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
     },
   })
+
+  if (challenge.nonce) {
+    const username = process.env.TELEGRAM_BOT_USERNAME ?? "pulsarcloud_bot"
+    return {
+      ok: true,
+      message: "Откройте бота и подтвердите вход.",
+      url: `https://t.me/${username}?start=login_${challenge.nonce}`,
+    }
+  }
 
   return { ok: true, message: "Telegram-вход будет подключён позже." }
 }
@@ -254,12 +268,12 @@ function isUsableEmailChallenge(
 ) {
   return Boolean(
     challenge &&
-      challenge.provider === AuthProvider.EMAIL &&
-      challenge.kind === AuthChallengeKind.EMAIL_OTP &&
-      challenge.status === AuthChallengeStatus.PENDING &&
-      challenge.providerSubject === email &&
-      challenge.expiresAt > new Date() &&
-      challenge.attemptCount < challenge.maxAttempts
+    challenge.provider === AuthProvider.EMAIL &&
+    challenge.kind === AuthChallengeKind.EMAIL_OTP &&
+    challenge.status === AuthChallengeStatus.PENDING &&
+    challenge.providerSubject === email &&
+    challenge.expiresAt > new Date() &&
+    challenge.attemptCount < challenge.maxAttempts
   )
 }
 
@@ -274,7 +288,8 @@ function readInvite(context: unknown) {
 function shouldShowDevAuth() {
   return (
     process.env.DEV_SHOW_OTP === "true" ||
-    (process.env.NODE_ENV !== "production" && process.env.DEV_SHOW_OTP !== "false")
+    (process.env.NODE_ENV !== "production" &&
+      process.env.DEV_SHOW_OTP !== "false")
   )
 }
 

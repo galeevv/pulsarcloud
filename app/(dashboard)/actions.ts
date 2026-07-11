@@ -47,11 +47,14 @@ export async function createPaymentAction(formData: FormData) {
     redirect("/subscription?error=payment")
   }
 
-  await createSubscriptionPayment({
+  const payment = await createSubscriptionPayment({
     userId: user.id,
     ...parsed.data,
   })
 
+  if (payment.checkoutUrl?.startsWith("https://")) {
+    redirect(payment.checkoutUrl)
+  }
   redirect("/subscription?payment=pending")
 }
 

@@ -129,6 +129,7 @@ export function AuthCard({
               message={!requestState.ok ? requestState.message : undefined}
               telegramAction={telegramAction}
               telegramMessage={telegramState.message}
+              telegramUrl={telegramState.url}
             />
           )}
         </CardContent>
@@ -146,6 +147,7 @@ function EmailStartForm({
   message,
   telegramAction,
   telegramMessage,
+  telegramUrl,
 }: {
   action: React.ComponentProps<"form">["action"]
   authError?: "expired" | "used"
@@ -155,6 +157,7 @@ function EmailStartForm({
   message?: string
   telegramAction: React.ComponentProps<"form">["action"]
   telegramMessage?: string
+  telegramUrl?: string
 }) {
   const authErrorMessage =
     authError === "used"
@@ -222,7 +225,18 @@ function EmailStartForm({
       </form>
       {telegramMessage ? (
         <p className="text-center text-xs text-muted-foreground">
-          {telegramMessage}
+          {telegramUrl ? (
+            <a
+              className="underline"
+              href={telegramUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {telegramMessage}
+            </a>
+          ) : (
+            telegramMessage
+          )}
         </p>
       ) : null}
     </>

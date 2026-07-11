@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Remnawave PostgreSQL backup
+
+[Timer]
+OnCalendar=*-*-* 03:45:00
+RandomizedDelaySec=15m
+Persistent=true
+Unit=remnawave-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,30 @@
+[Unit]
+Description=Pulsar 2.0 background worker
+After=network-online.target pulsar-web.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pulsar
+Group=pulsar
+WorkingDirectory=/opt/pulsar/current
+EnvironmentFile=/etc/pulsar/pulsar.env
+ExecStart=/usr/bin/npm run worker
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryMax=512M
+TasksMax=128
+
+[Install]
+WantedBy=multi-user.target

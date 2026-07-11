@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly env_file=/opt/remnawave/.env
+readonly backup_dir=/var/backups/remnawave
+readonly stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+readonly output="${backup_dir}/remnawave-${stamp}.dump"
+readonly verify_path="/tmp/remnawave-backup-verify.dump"
+
+postgres_user="$(sed -n 's/^POSTGRES_USER=//p' "$env_file" | tail -n 1)"
+postgres_db="$(sed -n 's/^POSTGRES_DB=//p' "$env_file" | tail -n 1)"
+test -n "$postgres_user"
+test -n "$postgres_db"
+
+install -d -m 0700 "$backup_dir"
+exec 9>"${backup_dir}/.backup.lock"
+flock -n 9 || exit 0
+
+trap 'docker exec remnawave-db rm -f "$verify_path" >/dev/null 2>&1 || true; rm -f "${output}.part"' EXIT
+docker exec remnawave-db pg_dump -U "$postgres_user" -d "$postgres_db" --format=custom >"${output}.part"
+test -s "${output}.part"
+docker cp "${output}.part" "remnawave-db:${verify_path}" >/dev/null
+docker exec remnawave-db pg_restore --list "$verify_path" >/dev/null
+mv "${output}.part" "$output"
+sha256sum "$output" >"${output}.sha256"
+
+find "$backup_dir" -maxdepth 1 -type f \
+  \( -name 'remnawave-*.dump' -o -name 'remnawave-*.dump.sha256' \) \
+  -mtime +14 -delete

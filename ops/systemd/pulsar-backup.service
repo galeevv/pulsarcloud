@@ -1,0 +1,15 @@
+[Unit]
+Description=Create and verify a Pulsar SQLite backup
+
+[Service]
+Type=oneshot
+User=pulsar
+Group=pulsar
+ExecStart=/usr/local/sbin/pulsar-backup
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true

@@ -1,10 +1,10 @@
-import {
-  AuthProvider,
-  SubscriptionSyncStatus,
-} from "@/generated/prisma/client"
+import { AuthProvider, SubscriptionSyncStatus } from "@/generated/prisma/client"
 
 import { prisma } from "@/lib/db"
-import { createRemnawaveClient, type RemnawaveClient } from "@/src/server/services/remnawave/client"
+import {
+  createRemnawaveClient,
+  type RemnawaveClient,
+} from "@/src/server/services/remnawave/client"
 
 const USER_FRIENDLY_SYNC_ERROR =
   "Не удалось обновить подписку. Мы уже проверяем проблему."
@@ -31,6 +31,8 @@ export class SubscriptionProvisioningService {
       const result = await this.remnawaveClient.createOrUpdateUser({
         userId: subscription.userId,
         email: getEmail(subscription.user.authIdentities),
+        telegramId: getTelegramId(subscription.user.authIdentities),
+        expiresAt: subscription.expiresAt ?? new Date(),
         deviceLimit: subscription.deviceLimit,
         lteEnabled: subscription.lteEnabled,
       })
@@ -178,6 +180,8 @@ export class SubscriptionProvisioningService {
       const result = await this.remnawaveClient.syncSubscription({
         userId: subscription.userId,
         email: getEmail(subscription.user.authIdentities),
+        telegramId: getTelegramId(subscription.user.authIdentities),
+        expiresAt: subscription.expiresAt ?? new Date(),
         deviceLimit: subscription.deviceLimit,
         lteEnabled: subscription.lteEnabled,
         remnawaveUserId: subscription.remnawaveUserId,
@@ -238,6 +242,15 @@ export class SubscriptionProvisioningService {
       },
     })
   }
+}
+
+function getTelegramId(
+  identities: Array<{ provider: AuthProvider; providerSubject: string }>
+) {
+  return (
+    identities.find((identity) => identity.provider === AuthProvider.TELEGRAM)
+      ?.providerSubject ?? null
+  )
 }
 
 function getEmail(

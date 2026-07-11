@@ -1,17 +1,13 @@
 import { cookies, headers } from "next/headers"
 import { redirect } from "next/navigation"
 
-import {
-  AuthProvider,
-  UserRole,
-  type User,
-} from "@/generated/prisma/client"
+import { AuthProvider, UserRole, type User } from "@/generated/prisma/client"
 
 import { prisma } from "@/lib/db"
 import { isDatabaseSetupError } from "@/lib/db-health"
 import { createRandomToken, hashValue } from "@/lib/security"
 
-const SESSION_TTL_DAYS = 30
+const DEFAULT_SESSION_TTL_DAYS = 180
 
 export type CurrentUser = User & {
   email: string | null
@@ -23,7 +19,12 @@ export function getSessionCookieName() {
 }
 
 function getSessionExpiresAt() {
-  return new Date(Date.now() + SESSION_TTL_DAYS * 24 * 60 * 60 * 1000)
+  const configured = Number(process.env.SESSION_TTL_DAYS)
+  const days =
+    Number.isInteger(configured) && configured > 0
+      ? configured
+      : DEFAULT_SESSION_TTL_DAYS
+  return new Date(Date.now() + days * 24 * 60 * 60 * 1000)
 }
 
 export async function createSession(userId: string) {
