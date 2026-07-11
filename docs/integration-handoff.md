@@ -15,9 +15,7 @@ Secrets live only in `/etc/pulsar/pulsar.env` on the VPS.
   must use `https://pulsar-cloud.space/api/payments/webhook/platega` as its POST
   callback URL. Run a low-value acceptance payment before public launch.
 - Remnawave: HTTP adapter is enabled; standard and LTE squads are configured.
-  The same-VPS node is an acceptance-test topology, not the final LTE topology.
-- Self-service test payment: enabled temporarily with
-  `ENABLE_TEST_PAYMENTS=true`; disable it after acceptance testing.
+  The same-VPS node is the current topology, not the final LTE topology.
 
 ## Email acceptance
 

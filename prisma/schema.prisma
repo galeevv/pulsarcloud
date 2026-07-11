@@ -52,7 +52,6 @@ enum Currency {
 
 enum PaymentProvider {
   MOCK
-  TEST
   PLATEGA
 }
 

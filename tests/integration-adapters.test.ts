@@ -2,8 +2,82 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { openJobPayload, sealJobPayload } from "@/lib/job-payload-crypto"
+import { sendTransactionalEmail } from "@/src/server/services/email/resend-client"
 import { PlategaPaymentProvider } from "@/src/server/services/payments/provider"
 import { HttpRemnawaveClient } from "@/src/server/services/remnawave/client"
+import { sendTelegramMessage } from "@/src/server/services/telegram/bot-client"
+
+test("Resend adapter sends the production OTP envelope idempotently", async () => {
+  const originalFetch = globalThis.fetch
+  const originalEnv = { ...process.env }
+  let request: { headers?: HeadersInit; body?: BodyInit | null } | undefined
+  try {
+    process.env.RESEND_API_KEY = "resend-test-key"
+    process.env.EMAIL_FROM = "Pulsar <auth@pulsar-cloud.space>"
+    globalThis.fetch = async (_input, init) => {
+      request = init
+      return Response.json({ id: "email-1" })
+    }
+
+    await sendTransactionalEmail({
+      idempotencyKey: "auth-email/challenge-1",
+      to: "user@example.com",
+      subject: "Вход в Pulsar",
+      text: "Код: 123456",
+      html: "<p>Код: 123456</p>",
+    })
+
+    const headers = new Headers(request?.headers)
+    const body = JSON.parse(String(request?.body)) as {
+      from: string
+      to: string[]
+    }
+    assert.equal(headers.get("authorization"), "Bearer resend-test-key")
+    assert.equal(headers.get("idempotency-key"), "auth-email/challenge-1")
+    assert.equal(body.from, "Pulsar <auth@pulsar-cloud.space>")
+    assert.deepEqual(body.to, ["user@example.com"])
+  } finally {
+    globalThis.fetch = originalFetch
+    process.env = originalEnv
+  }
+})
+
+test("Telegram adapter sends a login completion button", async () => {
+  const originalFetch = globalThis.fetch
+  const originalEnv = { ...process.env }
+  let requestBody: unknown
+  try {
+    process.env.TELEGRAM_BOT_TOKEN = "telegram-test-token"
+    globalThis.fetch = async (_input, init) => {
+      requestBody = JSON.parse(String(init?.body))
+      return Response.json({ ok: true })
+    }
+
+    await sendTelegramMessage("123", "Вход подтверждён", {
+      buttonText: "Войти",
+      buttonUrl: "https://pulsar-cloud.space/auth/telegram/complete?token=x",
+    })
+
+    assert.deepEqual(requestBody, {
+      chat_id: "123",
+      text: "Вход подтверждён",
+      disable_web_page_preview: true,
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: "Войти",
+              url: "https://pulsar-cloud.space/auth/telegram/complete?token=x",
+            },
+          ],
+        ],
+      },
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+    process.env = originalEnv
+  }
+})
 
 test("Platega adapter creates an SBP payment from backend input", async () => {
   const originalFetch = globalThis.fetch

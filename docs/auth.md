@@ -11,6 +11,6 @@ inside a transaction. A consumed challenge cannot be reused concurrently.
 Sessions use an opaque random cookie; only its SHA-256 hash is stored in
 `Session`. Logout revokes the row and clears the HTTP-only cookie.
 
-Development may expose the OTP when `DEV_SHOW_OTP=true`. Production email and
-Telegram delivery are intentionally unimplemented until credentials are
-available; see `docs/integration-handoff.md`.
+OTP values and magic links are never returned to the browser or written to
+logs. Resend delivery and Telegram webhook processing run through durable jobs;
+see `docs/integration-handoff.md`.

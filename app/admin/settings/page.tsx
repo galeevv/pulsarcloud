@@ -31,7 +31,6 @@ export default async function AdminSettingsPage() {
     ])
   )
   const integrations = [
-    ["Test payments", process.env.ENABLE_TEST_PAYMENTS === "true"],
     [
       "Platega",
       Boolean(process.env.PLATEGA_MERCHANT_ID && process.env.PLATEGA_SECRET),

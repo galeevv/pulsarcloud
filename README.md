@@ -13,7 +13,6 @@ Documentation index:
 - [Remnawave test environment](docs/remnawave-test-environment.md)
 - [Repository and VPS audit](docs/audit-2026-07-12.md)
 - [Testing](docs/test.md)
-- [Seed data](docs/seed.md)
 
 Clean Next.js foundation for the commercial PulsarVPN cabinet. This is a new project, not a refactor of Pulsar 1.0. Legacy backend terms, promo codes, credits, username/password auth, Marzban/x-ui artifacts, and old project structure are intentionally absent.
 
@@ -47,13 +46,7 @@ npm run db:deploy
 npm run db:generate
 ```
 
-4. Seed demo data:
-
-```bash
-npm run db:seed
-```
-
-5. Start the web process:
+4. Start the web process:
 
 ```bash
 npm run dev
@@ -61,7 +54,7 @@ npm run dev
 
 Open `http://localhost:3000`.
 
-6. Start the single background worker in another terminal:
+5. Start the single background worker in another terminal:
 
 ```bash
 npm run worker
@@ -71,18 +64,10 @@ Both processes use the same local `pulsar.db`. Startup enables WAL, foreign
 keys, full synchronous durability, a 5-second busy timeout, and in-memory temp
 storage. SQLite versions without the WAL-reset fix are rejected.
 
-## Dev Login
+## Login
 
-No passwords exist. Use Email OTP.
-
-Seed emails:
-
-- Admin: `admin@pulsarr.space`
-- Empty user: `user@pulsarr.space`
-- Active subscription user: `active@pulsarr.space`
-- Expired subscription user: `expired@pulsarr.space`
-
-In development, OTP is logged to the server console and shown in the login card when `DEV_SHOW_OTP=true`.
+No passwords exist. Users authenticate with a Resend-delivered email OTP or a
+Telegram deep link. OTP values and magic links are never shown or logged.
 
 ## Routes
 
@@ -114,16 +99,13 @@ Admin is protected by `role ADMIN`. Regular users are redirected to `/home`.
 
 ## Integration modes
 
-- Payments use Platega in production. `TEST` is an explicit self-service
-  acceptance mode and `MOCK` remains available only for development/admin tests.
-- Provisioning uses the Remnawave HTTP adapter in production and a mock adapter
-  in automated tests.
+- Payments use Platega.
+- Provisioning uses the Remnawave HTTP adapter.
 - Email delivery uses Resend; Telegram login and profile binding use the bot
   webhook and durable update jobs.
 - External calls run outside SQL transactions and are retried by the worker.
 
-Production migrations create an active pricing baseline but never demo users.
-Run `npm run db:seed` only for a disposable development database.
+Migrations create an active pricing baseline but never demo users.
 
-See `/docs/architecture.md`, `/docs/auth.md`,
-`/docs/billing.md`, `/docs/integration-handoff.md`, and `/docs/seed.md`.
+See `/docs/architecture.md`, `/docs/auth.md`, `/docs/billing.md`, and
+`/docs/integration-handoff.md`.

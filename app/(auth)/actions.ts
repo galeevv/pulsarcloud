@@ -27,19 +27,16 @@ import {
   timingSafeStringEqual,
 } from "@/lib/security"
 import { runInTransaction } from "@/lib/transactions"
-import { createTelegramAuthService } from "@/src/server/services/telegram/auth-service"
 
 export type RequestOtpState = {
   ok: boolean
   email?: string
   challengeId?: string
-  devMagicLink?: string
-  devOtp?: string
   message?: string
 }
 
 export type VerifyOtpState = { ok: boolean; message?: string }
-export type TelegramStubState = { ok: boolean; message?: string; url?: string }
+export type TelegramLoginState = { ok: boolean; message?: string }
 
 const emailSchema = z.object({
   email: z.string().trim().email("Введите корректный email").toLowerCase(),
@@ -76,6 +73,20 @@ export async function requestEmailOtpAction(
   }
 
   const { email, invite } = parsed.data
+  const recentChallenge = await prisma.authChallenge.findFirst({
+    where: {
+      provider: AuthProvider.EMAIL,
+      providerSubject: email,
+      createdAt: { gt: new Date(Date.now() - 60_000) },
+    },
+    select: { id: true },
+  })
+  if (recentChallenge) {
+    return {
+      ok: false,
+      message: "Подождите минуту перед повторной отправкой.",
+    }
+  }
   const code = createOtpCode()
   const token = createRandomToken()
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000)
@@ -120,17 +131,10 @@ export async function requestEmailOtpAction(
       return created
     })
 
-    if (shouldShowDevAuth()) {
-      console.info(`[Pulsar dev magic link] ${email}: ${magicLink}`)
-      console.info(`[Pulsar dev fallback code] ${email}: ${code}`)
-    }
-
     return {
       ok: true,
       email,
       challengeId: challenge.id,
-      devMagicLink: shouldShowDevAuth() ? magicPath : undefined,
-      devOtp: shouldShowDevAuth() ? code : undefined,
       message: "Ссылка отправлена.",
     }
   } catch (error) {
@@ -228,10 +232,10 @@ export async function verifyEmailOtpAction(
   redirect("/home")
 }
 
-export async function startTelegramStubAction(
-  _state: TelegramStubState,
-  _formData: FormData
-): Promise<TelegramStubState> {
+export async function startTelegramLoginAction(
+  _state: TelegramLoginState,
+  formData: FormData
+): Promise<TelegramLoginState> {
   void _state
   const invite = z
     .string()
@@ -239,35 +243,25 @@ export async function startTelegramStubAction(
     .min(1)
     .max(64)
     .optional()
-    .parse(_formData.get("invite") || undefined)
-  const telegramAuth = createTelegramAuthService()
-  const challenge = await telegramAuth.createLoginChallenge()
+    .parse(formData.get("invite") || undefined)
+  const nonce = createRandomToken(18)
 
   await prisma.authChallenge.create({
     data: {
       provider: AuthProvider.TELEGRAM,
-      providerSubject: challenge.nonce,
+      providerSubject: nonce,
       kind: AuthChallengeKind.TELEGRAM_LOGIN,
-      tokenHash: hashValue(challenge.nonce),
+      tokenHash: hashValue(nonce),
       context: {
         provider: "telegram",
-        message: challenge.message,
         ...(invite ? { invite } : {}),
       },
       expiresAt: new Date(Date.now() + 10 * 60 * 1000),
     },
   })
 
-  if (challenge.nonce) {
-    const username = process.env.TELEGRAM_BOT_USERNAME ?? "pulsarcloud_bot"
-    return {
-      ok: true,
-      message: "Откройте бота и подтвердите вход.",
-      url: `https://t.me/${username}?start=login_${challenge.nonce}`,
-    }
-  }
-
-  return { ok: true, message: "Telegram-вход будет подключён позже." }
+  const username = process.env.TELEGRAM_BOT_USERNAME ?? "pulsarcloud_bot"
+  redirect(`https://t.me/${username}?start=login_${nonce}`)
 }
 
 function isUsableEmailChallenge(
@@ -293,14 +287,6 @@ function readInvite(context: unknown) {
   }
 
   return typeof context.invite === "string" ? context.invite : undefined
-}
-
-function shouldShowDevAuth() {
-  return (
-    process.env.DEV_SHOW_OTP === "true" ||
-    (process.env.NODE_ENV !== "production" &&
-      process.env.DEV_SHOW_OTP !== "false")
-  )
 }
 
 async function buildAbsoluteUrl(path: string) {

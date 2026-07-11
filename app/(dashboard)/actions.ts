@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
 import { z } from "zod"
-import { PaymentProvider } from "@/generated/prisma/client"
 
 import { clearCurrentSession, requireUser } from "@/lib/auth"
 import { prisma } from "@/lib/db"
@@ -21,7 +20,6 @@ const paymentSchema = z.object({
   deviceLimit: z.coerce.number().int().min(1).max(5),
   lteEnabled: z.coerce.boolean().default(false),
   idempotencyKey: z.string().uuid(),
-  paymentMode: z.enum(["live", "test"]).default("live"),
 })
 
 export type SupportMessageState = {
@@ -43,21 +41,16 @@ export async function createPaymentAction(formData: FormData) {
     deviceLimit: formData.get("deviceLimit"),
     lteEnabled: formData.get("lteEnabled") === "on",
     idempotencyKey: formData.get("idempotencyKey"),
-    paymentMode: formData.get("paymentMode") ?? "live",
   })
 
   if (!parsed.success) {
     redirect("/subscription?error=payment")
   }
 
-  const { paymentMode, ...paymentInput } = parsed.data
-  const payment = await createSubscriptionPayment(
-    {
-      userId: user.id,
-      ...paymentInput,
-    },
-    paymentMode === "test" ? PaymentProvider.TEST : undefined
-  )
+  const payment = await createSubscriptionPayment({
+    userId: user.id,
+    ...parsed.data,
+  })
 
   if (payment.checkoutUrl?.startsWith("https://")) {
     redirect(payment.checkoutUrl)

@@ -1,6 +1,4 @@
-import { confirmPaymentAction } from "@/app/admin/actions"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Table,
@@ -35,7 +33,6 @@ export default async function AdminPaymentsPage() {
               <TableHead>Provider</TableHead>
               <TableHead>Plan</TableHead>
               <TableHead>Created</TableHead>
-              <TableHead>Action</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -49,10 +46,7 @@ export default async function AdminPaymentsPage() {
                   <Badge>{payment.status}</Badge>
                 </TableCell>
                 <TableCell>
-                  <Badge variant={payment.isTest ? "secondary" : "outline"}>
-                    {payment.provider}
-                    {payment.isTest ? " · TEST" : ""}
-                  </Badge>
+                  <Badge variant="outline">{payment.provider}</Badge>
                 </TableCell>
                 <TableCell>
                   {payment.durationMonths} mo · {payment.deviceLimit} dev · LTE{" "}
@@ -60,22 +54,6 @@ export default async function AdminPaymentsPage() {
                 </TableCell>
                 <TableCell>
                   {payment.createdAt.toLocaleDateString("ru-RU")}
-                </TableCell>
-                <TableCell>
-                  {payment.status === "PENDING" ? (
-                    <form action={confirmPaymentAction}>
-                      <input
-                        type="hidden"
-                        name="paymentId"
-                        value={payment.id}
-                      />
-                      <Button type="submit" size="sm">
-                        Confirm payment
-                      </Button>
-                    </form>
-                  ) : (
-                    "—"
-                  )}
                 </TableCell>
               </TableRow>
             ))}

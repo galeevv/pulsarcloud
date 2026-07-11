@@ -183,41 +183,8 @@ export class HttpRemnawaveClient implements RemnawaveClient {
   }
 }
 
-export class MockRemnawaveClient implements RemnawaveClient {
-  async createOrUpdateUser(input: RemnawaveSubscriptionInput) {
-    return this.buildResult(input.userId)
-  }
-  async revokeSubscription() {}
-  async regenerateSubscriptionUrl(id: string) {
-    return {
-      subscriptionUrl: `https://sub.pulsar-cloud.space/${id}-${Date.now()}`,
-    }
-  }
-  async updateDeviceLimit() {}
-  async enableLte() {}
-  async disableLte() {}
-  async syncSubscription(
-    input: RemnawaveSubscriptionInput & { remnawaveUserId?: string | null }
-  ) {
-    return this.buildResult(input.remnawaveUserId ?? input.userId)
-  }
-  async listDevices() {
-    return []
-  }
-  async deleteDevice() {}
-  private buildResult(seed: string) {
-    const id = seed.startsWith("mock-rw-") ? seed : `mock-rw-${seed}`
-    return {
-      remnawaveUserId: id,
-      subscriptionUrl: `https://sub.pulsar-cloud.space/${id}`,
-    }
-  }
-}
-
 export function createRemnawaveClient(): RemnawaveClient {
-  return process.env.REMNAWAVE_PROVIDER === "HTTP"
-    ? new HttpRemnawaveClient()
-    : new MockRemnawaveClient()
+  return new HttpRemnawaveClient()
 }
 
 function userBody(input: RemnawaveSubscriptionInput, uuid: string) {

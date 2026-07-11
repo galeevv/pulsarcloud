@@ -21,7 +21,6 @@ import { prisma } from "@/lib/db"
 import { calculateSubscriptionPrice, getDurationDiscounts } from "@/lib/pricing"
 import { getActivePricingVersion } from "@/lib/pricing-data"
 import { runInTransaction } from "@/lib/transactions"
-import { assertTestPaymentsEnabled } from "@/lib/test-payments"
 import {
   getConfiguredPaymentProvider,
   getPaymentProvider,
@@ -54,9 +53,6 @@ export async function createSubscriptionPayment(
     }
   }
 
-  if (providerOverride === "TEST") {
-    assertTestPaymentsEnabled()
-  }
   const provider = providerOverride
     ? getPaymentProvider(providerOverride)
     : getConfiguredPaymentProvider()
@@ -203,7 +199,6 @@ async function createQuoteAndPayment(
         userId: input.userId,
         quoteId: quote.id,
         provider,
-        isTest: provider === "TEST",
         status: PaymentStatus.CREATED,
         amountRub: quote.totalRub,
         durationMonths: quote.durationMonths,
@@ -222,23 +217,6 @@ export function confirmMockPayment(paymentId: string, adminUserId: string) {
       source: "admin.mock",
     })
   )
-}
-
-export function confirmTestPayment(paymentId: string, userId: string) {
-  assertTestPaymentsEnabled()
-  return runInTransaction(prisma, async (tx) => {
-    const payment = await tx.payment.findUnique({ where: { id: paymentId } })
-    if (!payment || payment.userId !== userId) {
-      throw new NotFoundError("Test payment not found.", { paymentId })
-    }
-    if (payment.provider !== "TEST" || !payment.isTest) {
-      throw new ConflictError("Payment is not a test payment.", { paymentId })
-    }
-    return confirmPaymentInTransaction(tx, paymentId, {
-      actorUserId: userId,
-      source: "user.test",
-    })
-  })
 }
 
 export async function confirmPaymentInTransaction(
@@ -263,12 +241,6 @@ export async function confirmPaymentInTransaction(
     throw new ConflictError("Only mock payments can be confirmed manually.", {
       paymentId,
       provider: payment.provider,
-    })
-  }
-
-  if (context.source === "user.test" && payment.provider !== "TEST") {
-    throw new ConflictError("Only test payments can use test confirmation.", {
-      paymentId,
     })
   }
 
@@ -341,7 +313,6 @@ export async function confirmPaymentInTransaction(
       deviceLimit: payment.deviceLimit,
       lteEnabled: payment.lteEnabled,
       amountRub: payment.amountRub,
-      isTest: payment.isTest,
     },
   })
   await tx.priceQuote.update({
@@ -350,14 +321,12 @@ export async function confirmPaymentInTransaction(
   })
 
   await createPaymentLedgerEntries(tx, payment, now)
-  if (!payment.isTest) {
-    await ensureReferralReward(
-      tx,
-      payment.userId,
-      payment.id,
-      payment.quote.pricingVersionId
-    )
-  }
+  await ensureReferralReward(
+    tx,
+    payment.userId,
+    payment.id,
+    payment.quote.pricingVersionId
+  )
   await tx.job.create({
     data: {
       type: JobType.PROVISION_SUBSCRIPTION,
@@ -406,7 +375,6 @@ async function createPaymentLedgerEntries(
       amountRub: payment.amountRub,
       type: WalletLedgerType.PAYMENT_CAPTURE,
       status: WalletLedgerStatus.POSTED,
-      isTest: payment.isTest,
       postedAt,
       idempotencyKey: `payment:${payment.id}:capture`,
     },
@@ -419,7 +387,6 @@ async function createPaymentLedgerEntries(
       amountRub: payment.amountRub,
       type: WalletLedgerType.SUBSCRIPTION_CHARGE,
       status: WalletLedgerStatus.POSTED,
-      isTest: payment.isTest,
       postedAt,
       idempotencyKey: `payment:${payment.id}:subscription`,
     },

@@ -19,7 +19,6 @@ export default async function AdminDashboardPage() {
       prisma.walletLedgerEntry.findMany({
         where: {
           status: "POSTED",
-          isTest: false,
           type: "PAYMENT_CAPTURE",
           direction: "CREDIT",
         },

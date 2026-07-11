@@ -15,7 +15,6 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
-    "db:seed": "prisma db seed",
     "db:studio": "prisma studio",
     "test": "tsx --test --test-concurrency=1 tests/*.test.ts"
   },
@@ -55,8 +54,5 @@
     "tailwindcss": "^4",
     "tsx": "^4.23.0",
     "typescript": "^5"
-  },
-  "prisma": {
-    "seed": "tsx prisma/seed.ts"
   }
 }

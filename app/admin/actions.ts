@@ -18,21 +18,11 @@ import {
   assertDeviceLimitCoveredByPayment,
   assertLteCoveredByPayment,
 } from "@/lib/subscription-billing-policy"
-import { confirmMockPayment } from "@/src/server/services/billing/payment-service"
 import {
   approvePayoutRequest,
   markPayoutRequestPaid,
   rejectPayoutRequest,
 } from "@/src/server/services/wallet/payout-service"
-
-export async function confirmPaymentAction(formData: FormData) {
-  const admin = await requireAdmin()
-  const paymentId = z.string().min(1).parse(formData.get("paymentId"))
-
-  await confirmMockPayment(paymentId, admin.id)
-  revalidatePath("/admin/payments")
-  revalidatePath("/admin/subscriptions")
-}
 
 export async function extendSubscriptionAction(formData: FormData) {
   const admin = await requireAdmin()

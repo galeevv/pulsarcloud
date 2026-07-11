@@ -68,13 +68,7 @@ and stores an immutable `PriceQuote` snapshot. A payment copies the quote terms.
 Providers:
 
 - `PLATEGA`: live RUB/SBP payments;
-- `TEST`: explicit self-service test checkout;
-- `MOCK`: development/admin testing retained for automated tests.
-
-`TEST` payments run the same subscription and Remnawave workflow, but related
-payments, periods, and ledger entries are marked `isTest`. They are excluded from
-live turnover and do not qualify referrals. Production requires the explicit
-`ENABLE_TEST_PAYMENTS=true` flag.
+- `MOCK`: an isolated adapter used only by automated tests.
 
 Payment confirmation conditionally transitions the payment, extends from
 `max(now, expiresAt)`, creates one immutable period, posts ledger entries,
@@ -133,5 +127,4 @@ and maintenance. Job idempotency keys prevent duplicate domain effects.
   localhost or an internal Docker network.
 - Caddy is the only public HTTP entry point.
 - Payment and Telegram callbacks authenticate before mutation.
-- Test payments require an explicit server flag and authenticated ownership.
 - Secrets belong in `/etc/pulsar/pulsar.env`, never Git.

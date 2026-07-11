@@ -69,7 +69,6 @@ export async function applyReferralOnboarding(
       deviceLimit: pricing.minDeviceLimit,
       lteEnabled: false,
       amountRub: 0,
-      isTest: true,
     },
   })
 

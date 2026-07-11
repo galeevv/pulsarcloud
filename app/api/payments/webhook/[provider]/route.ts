@@ -16,7 +16,10 @@ export async function POST(
   const provider = parseProvider(rawProvider)
 
   if (!provider) {
-    return Response.json({ error: "Unknown payment provider." }, { status: 404 })
+    return Response.json(
+      { error: "Unknown payment provider." },
+      { status: 404 }
+    )
   }
 
   try {
@@ -45,9 +48,5 @@ export async function POST(
 
 function parseProvider(value: string) {
   const normalized = value.toUpperCase()
-  return normalized === PaymentProvider.MOCK
-    ? PaymentProvider.MOCK
-    : normalized === PaymentProvider.PLATEGA
-      ? PaymentProvider.PLATEGA
-      : null
+  return normalized === PaymentProvider.PLATEGA ? PaymentProvider.PLATEGA : null
 }

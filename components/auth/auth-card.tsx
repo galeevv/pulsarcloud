@@ -5,10 +5,10 @@ import { ArrowLeftIcon, ArrowRightIcon, SendIcon } from "lucide-react"
 
 import {
   requestEmailOtpAction,
-  startTelegramStubAction,
+  startTelegramLoginAction,
   verifyEmailOtpAction,
   type RequestOtpState,
-  type TelegramStubState,
+  type TelegramLoginState,
   type VerifyOtpState,
 } from "@/app/(auth)/actions"
 import { Button } from "@/components/ui/button"
@@ -22,12 +22,7 @@ import {
   PulsarAssetCard,
   pulsarCtaClass,
 } from "@/components/app/pulsar-primitives"
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import {
   InputGroup,
   InputGroupAddon,
@@ -43,7 +38,7 @@ import { Separator } from "@/components/ui/separator"
 
 const requestInitialState: RequestOtpState = { ok: false }
 const verifyInitialState: VerifyOtpState = { ok: false }
-const telegramInitialState: TelegramStubState = { ok: false }
+const telegramInitialState: TelegramLoginState = { ok: false }
 
 export function AuthCard({
   authError,
@@ -60,8 +55,10 @@ export function AuthCard({
     verifyEmailOtpAction,
     verifyInitialState
   )
-  const [telegramState, telegramAction, isTelegramPending] =
-    React.useActionState(startTelegramStubAction, telegramInitialState)
+  const [, telegramAction, isTelegramPending] = React.useActionState(
+    startTelegramLoginAction,
+    telegramInitialState
+  )
   const [dismissedChallengeId, setDismissedChallengeId] = React.useState<
     string | null
   >(null)
@@ -111,7 +108,6 @@ export function AuthCard({
               key={challengeId}
               action={verifyAction}
               challengeId={challengeId}
-              devOtp={requestState.devOtp}
               email={email}
               invite={invite}
               isRequestPending={isRequestPending}
@@ -128,8 +124,6 @@ export function AuthCard({
               isTelegramPending={isTelegramPending}
               message={!requestState.ok ? requestState.message : undefined}
               telegramAction={telegramAction}
-              telegramMessage={telegramState.message}
-              telegramUrl={telegramState.url}
             />
           )}
         </CardContent>
@@ -146,8 +140,6 @@ function EmailStartForm({
   isTelegramPending,
   message,
   telegramAction,
-  telegramMessage,
-  telegramUrl,
 }: {
   action: React.ComponentProps<"form">["action"]
   authError?: "expired" | "used"
@@ -156,8 +148,6 @@ function EmailStartForm({
   isTelegramPending: boolean
   message?: string
   telegramAction: React.ComponentProps<"form">["action"]
-  telegramMessage?: string
-  telegramUrl?: string
 }) {
   const authErrorMessage =
     authError === "used"
@@ -224,22 +214,6 @@ function EmailStartForm({
           <SendIcon data-icon="inline-start" />С помощью Telegram
         </Button>
       </form>
-      {telegramMessage ? (
-        <p className="text-center text-xs text-muted-foreground">
-          {telegramUrl ? (
-            <a
-              className="underline"
-              href={telegramUrl}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {telegramMessage}
-            </a>
-          ) : (
-            telegramMessage
-          )}
-        </p>
-      ) : null}
     </>
   )
 }
@@ -247,7 +221,6 @@ function EmailStartForm({
 function MagicLinkSent({
   action,
   challengeId,
-  devOtp,
   email,
   invite,
   isRequestPending,
@@ -257,7 +230,6 @@ function MagicLinkSent({
 }: {
   action: React.ComponentProps<"form">["action"]
   challengeId: string
-  devOtp?: string
   email: string
   invite?: string
   isRequestPending: boolean
@@ -284,7 +256,6 @@ function MagicLinkSent({
       <ManualCodeForm
         action={action}
         challengeId={challengeId}
-        devOtp={devOtp}
         email={email}
         invite={invite}
         isVerifyPending={isVerifyPending}
@@ -319,7 +290,6 @@ function MagicLinkSent({
 function ManualCodeForm({
   action,
   challengeId,
-  devOtp,
   email,
   invite,
   isVerifyPending,
@@ -327,7 +297,6 @@ function ManualCodeForm({
 }: {
   action: React.ComponentProps<"form">["action"]
   challengeId: string
-  devOtp?: string
   email: string
   invite?: string
   isVerifyPending: boolean
@@ -385,7 +354,6 @@ function ManualCodeForm({
               ))}
             </InputOTPGroup>
           </InputOTP>
-          {devOtp ? <DevOtpHint value={devOtp} /> : null}
         </Field>
       </FieldGroup>
       {message ? (
@@ -397,14 +365,6 @@ function ManualCodeForm({
         </p>
       ) : null}
     </form>
-  )
-}
-
-function DevOtpHint({ value }: { value: string }) {
-  return (
-    <FieldDescription className="text-center">
-      Dev OTP: {value}
-    </FieldDescription>
   )
 }
 

@@ -21,6 +21,9 @@ let applicationDatabase: typeof import("@/lib/db")
 before(async () => {
   database = await createTestDatabase("billing")
   process.env.DATABASE_URL = database.url
+  process.env.PAYMENT_PROVIDER = "MOCK"
+  process.env.ALLOW_MOCK_PAYMENT_PROVIDER = "true"
+  process.env.MOCK_PAYMENT_WEBHOOK_SECRET = "billing-test-webhook-secret"
   applicationDatabase = await import("@/lib/db")
   billing = await import("@/src/server/services/billing/payment-service")
   webhooks =
@@ -127,43 +130,6 @@ test("confirmation is atomic and repeated confirmation creates no duplicate effe
       where: { id: period.id },
       data: { amountRub: 1 },
     })
-  )
-})
-
-test("self-service test payment provisions entitlement without live revenue", async () => {
-  process.env.ENABLE_TEST_PAYMENTS = "true"
-  const user = await database.client.user.create({ data: {} })
-  const payment = await billing.createSubscriptionPayment(
-    {
-      userId: user.id,
-      months: 1,
-      deviceLimit: 2,
-      lteEnabled: true,
-      idempotencyKey: crypto.randomUUID(),
-    },
-    "TEST"
-  )
-
-  assert.equal(payment.isTest, true)
-  assert.equal(payment.provider, "TEST")
-  assert.match(payment.checkoutUrl ?? "", /\/payments\/test\//)
-
-  const result = await billing.confirmTestPayment(payment.id, user.id)
-  assert.equal(result.applied, true)
-  const period = await database.client.subscriptionPeriod.findUniqueOrThrow({
-    where: { paymentId: payment.id },
-  })
-  const ledger = await database.client.walletLedgerEntry.findMany({
-    where: { paymentId: payment.id },
-  })
-  assert.equal(period.isTest, true)
-  assert.equal(ledger.length, 2)
-  assert.ok(ledger.every((entry) => entry.isTest))
-  assert.equal(
-    await database.client.referralReward.count({
-      where: { paymentId: payment.id },
-    }),
-    0
   )
 })
 

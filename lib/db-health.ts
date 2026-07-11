@@ -3,7 +3,7 @@ import { Prisma } from "@/generated/prisma/client"
 import { prisma } from "@/lib/db"
 
 export const DATABASE_SETUP_MESSAGE =
-  "База данных не готова. Выполните npm run db:deploy и npm run db:seed."
+  "База данных не готова. Выполните npm run db:deploy."
 
 export async function ensureDatabaseReady() {
   try {
