@@ -1,22 +1,60 @@
-import { PrismaPg } from "@prisma/adapter-pg"
-import { PrismaClient } from "@prisma/client"
+import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3"
 
-const connectionString =
-  process.env.DATABASE_URL ??
-  "postgresql://pulsar:pulsar@localhost:5432/pulsar2?schema=public"
+import { PrismaClient } from "@/generated/prisma/client"
+import { initializeSqliteConnection } from "@/lib/sqlite-runtime"
+
+const databaseUrl = process.env.DATABASE_URL ?? "file:./pulsar.db"
+
+type PrismaRuntime = {
+  databaseUrl: string
+  prisma: PrismaClient
+  ready: ReturnType<typeof initializeSqliteConnection>
+}
 
 const globalForPrisma = globalThis as unknown as {
-  prisma?: PrismaClient
+  pulsarPrismaRuntime?: PrismaRuntime
 }
 
-function createPrismaClient() {
-  const adapter = new PrismaPg({ connectionString })
+function createRuntime(): PrismaRuntime {
+  if (!databaseUrl.startsWith("file:")) {
+    throw new Error(
+      `Pulsar requires a SQLite DATABASE_URL beginning with "file:"; received ${JSON.stringify(databaseUrl)}.`
+    )
+  }
 
-  return new PrismaClient({ adapter })
+  const adapter = new PrismaBetterSqlite3({ url: databaseUrl })
+  const prisma = new PrismaClient({ adapter })
+
+  return {
+    databaseUrl,
+    prisma,
+    ready: initializeSqliteConnection(prisma),
+  }
 }
 
-export const prisma = globalForPrisma.prisma ?? createPrismaClient()
+function getRuntime() {
+  const existing = globalForPrisma.pulsarPrismaRuntime
 
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma
+  if (existing && existing.databaseUrl === databaseUrl) {
+    return existing
+  }
+
+  const runtime = createRuntime()
+
+  if (process.env.NODE_ENV !== "production") {
+    globalForPrisma.pulsarPrismaRuntime = runtime
+  }
+
+  return runtime
+}
+
+const runtime = getRuntime()
+
+export const prisma = runtime.prisma
+export const sqliteReady = runtime.ready
+
+await sqliteReady
+
+export function getPrismaClient() {
+  return prisma
 }

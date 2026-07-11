@@ -1,8 +1,10 @@
 "use client"
 
-import type * as React from "react"
+import * as React from "react"
 import { SendIcon } from "lucide-react"
+import { toast } from "sonner"
 
+import type { SupportMessageState } from "@/app/(dashboard)/actions"
 import {
   InputGroup,
   InputGroupAddon,
@@ -13,8 +15,29 @@ import {
 export function SupportComposer({
   action,
 }: {
-  action: (formData: FormData) => void | Promise<void>
+  action: (
+    state: SupportMessageState,
+    formData: FormData
+  ) => Promise<SupportMessageState>
 }) {
+  const formRef = React.useRef<HTMLFormElement>(null)
+  const [state, formAction, isPending] = React.useActionState(action, {
+    ok: false,
+  })
+
+  React.useEffect(() => {
+    if (!state.message) {
+      return
+    }
+
+    if (state.ok) {
+      formRef.current?.reset()
+      return
+    }
+
+    toast.error(state.message)
+  }, [state])
+
   function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (
       event.key !== "Enter" ||
@@ -30,7 +53,8 @@ export function SupportComposer({
 
   return (
     <form
-      action={action}
+      ref={formRef}
+      action={formAction}
       className="flex shrink-0 flex-col gap-2 border-t border-border/70 p-3"
     >
       <InputGroup className="min-h-11 rounded-[22px] border border-border/70 bg-background/40">
@@ -43,6 +67,7 @@ export function SupportComposer({
           rows={1}
           className="max-h-28 min-h-11 overflow-y-auto py-3"
           onKeyDown={handleKeyDown}
+          aria-invalid={!state.ok && state.message ? true : undefined}
         />
         <InputGroupAddon align="inline-end">
           <InputGroupButton
@@ -50,11 +75,15 @@ export function SupportComposer({
             variant="secondary"
             size="icon-sm"
             aria-label="Отправить сообщение"
+            disabled={isPending}
           >
             <SendIcon />
           </InputGroupButton>
         </InputGroupAddon>
       </InputGroup>
+      {!state.ok && state.message ? (
+        <p className="px-1 text-xs text-destructive">{state.message}</p>
+      ) : null}
     </form>
   )
 }

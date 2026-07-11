@@ -10,16 +10,25 @@ import {
 } from "@/components/ui/table"
 import { prisma } from "@/lib/db"
 import { formatRub } from "@/lib/pricing"
+import { getUserLabel } from "@/lib/user-identity"
 
 export default async function AdminReferralsPage() {
   const [profiles, invites, rewards] = await Promise.all([
-    prisma.referralProfile.findMany({ include: { user: true } }),
+    prisma.referralProfile.findMany({
+      include: { user: { include: { authIdentities: true } } },
+    }),
     prisma.referralInvite.findMany({
-      include: { inviter: true, invited: true },
+      include: {
+        inviter: { include: { authIdentities: true } },
+        invited: { include: { authIdentities: true } },
+      },
       orderBy: { createdAt: "desc" },
     }),
     prisma.referralReward.findMany({
-      include: { inviter: true, invited: true },
+      include: {
+        inviter: { include: { authIdentities: true } },
+        invited: { include: { authIdentities: true } },
+      },
       orderBy: { createdAt: "desc" },
     }),
   ])
@@ -34,8 +43,8 @@ export default async function AdminReferralsPage() {
             <TableBody>
               {profiles.map((profile) => (
                 <TableRow key={profile.userId}>
-                  <TableCell>{profile.user.email}</TableCell>
-                  <TableCell>{profile.inviteUrl}</TableCell>
+                  <TableCell>{getUserLabel(profile.user.authIdentities)}</TableCell>
+                  <TableCell>{profile.inviteCode}</TableCell>
                   <TableCell><Badge>{profile.isEnabled ? "enabled" : "locked"}</Badge></TableCell>
                 </TableRow>
               ))}
@@ -53,8 +62,8 @@ export default async function AdminReferralsPage() {
                 const reward = rewards.find((item) => item.invitedUserId === invite.invitedUserId)
                 return (
                   <TableRow key={invite.id}>
-                    <TableCell>{invite.inviter.email}</TableCell>
-                    <TableCell>{invite.invited.email}</TableCell>
+                    <TableCell>{getUserLabel(invite.inviter.authIdentities)}</TableCell>
+                    <TableCell>{getUserLabel(invite.invited.authIdentities)}</TableCell>
                     <TableCell>{invite.status}</TableCell>
                     <TableCell>{reward ? `${formatRub(reward.amountRub)} · ${reward.status}` : "—"}</TableCell>
                   </TableRow>

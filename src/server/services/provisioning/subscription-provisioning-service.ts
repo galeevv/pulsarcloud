@@ -1,9 +1,7 @@
 import {
-  IntegrationLogStatus,
-  IntegrationProvider,
-  SubscriptionFeatureType,
+  AuthProvider,
   SubscriptionSyncStatus,
-} from "@prisma/client"
+} from "@/generated/prisma/client"
 
 import { prisma } from "@/lib/db"
 import { createRemnawaveClient, type RemnawaveClient } from "@/src/server/services/remnawave/client"
@@ -17,7 +15,7 @@ export class SubscriptionProvisioningService {
   async provisionSubscription(subscriptionId: string) {
     const subscription = await prisma.subscription.findUnique({
       where: { id: subscriptionId },
-      include: { user: true },
+      include: { user: { include: { authIdentities: true } } },
     })
 
     if (!subscription) {
@@ -32,7 +30,7 @@ export class SubscriptionProvisioningService {
 
       const result = await this.remnawaveClient.createOrUpdateUser({
         userId: subscription.userId,
-        email: subscription.user.email,
+        email: getEmail(subscription.user.authIdentities),
         deviceLimit: subscription.deviceLimit,
         lteEnabled: subscription.lteEnabled,
       })
@@ -48,7 +46,7 @@ export class SubscriptionProvisioningService {
         },
       })
 
-      await this.log("provisionSubscription", IntegrationLogStatus.SUCCESS, {
+      await this.log("provisionSubscription", "SUCCESS", {
         subscriptionId,
       })
     } catch (error) {
@@ -81,7 +79,7 @@ export class SubscriptionProvisioningService {
         },
       })
 
-      await this.log("regenerateSubscriptionUrl", IntegrationLogStatus.SUCCESS, {
+      await this.log("regenerateSubscriptionUrl", "SUCCESS", {
         subscriptionId,
       })
     } catch (error) {
@@ -115,7 +113,7 @@ export class SubscriptionProvisioningService {
         },
       })
 
-      await this.log("updateDeviceLimit", IntegrationLogStatus.SUCCESS, {
+      await this.log("updateDeviceLimit", "SUCCESS", {
         subscriptionId,
         deviceLimit,
       })
@@ -148,33 +146,10 @@ export class SubscriptionProvisioningService {
           syncStatus: SubscriptionSyncStatus.SYNCED,
           lastUserFriendlyError: null,
           lastTechnicalError: null,
-          features: enabled
-            ? {
-                upsert: {
-                  where: {
-                    subscriptionId_type: {
-                      subscriptionId,
-                      type: SubscriptionFeatureType.LTE_ACCESS,
-                    },
-                  },
-                  update: { enabled: true },
-                  create: {
-                    type: SubscriptionFeatureType.LTE_ACCESS,
-                    label: "LTE add-on",
-                    enabled: true,
-                  },
-                },
-              }
-            : {
-                updateMany: {
-                  where: { type: SubscriptionFeatureType.LTE_ACCESS },
-                  data: { enabled: false },
-                },
-              },
         },
       })
 
-      await this.log("setLte", IntegrationLogStatus.SUCCESS, {
+      await this.log("setLte", "SUCCESS", {
         subscriptionId,
         enabled,
       })
@@ -187,7 +162,7 @@ export class SubscriptionProvisioningService {
   async syncSubscription(subscriptionId: string) {
     const subscription = await prisma.subscription.findUnique({
       where: { id: subscriptionId },
-      include: { user: true },
+      include: { user: { include: { authIdentities: true } } },
     })
 
     if (!subscription) {
@@ -202,7 +177,7 @@ export class SubscriptionProvisioningService {
 
       const result = await this.remnawaveClient.syncSubscription({
         userId: subscription.userId,
-        email: subscription.user.email,
+        email: getEmail(subscription.user.authIdentities),
         deviceLimit: subscription.deviceLimit,
         lteEnabled: subscription.lteEnabled,
         remnawaveUserId: subscription.remnawaveUserId,
@@ -219,7 +194,7 @@ export class SubscriptionProvisioningService {
         },
       })
 
-      await this.log("syncSubscription", IntegrationLogStatus.SUCCESS, {
+      await this.log("syncSubscription", "SUCCESS", {
         subscriptionId,
       })
     } catch (error) {
@@ -243,7 +218,7 @@ export class SubscriptionProvisioningService {
 
     await this.log(
       "provisioningFailed",
-      IntegrationLogStatus.FAILED,
+      "FAILED",
       { subscriptionId },
       technicalError
     )
@@ -251,20 +226,27 @@ export class SubscriptionProvisioningService {
 
   private async log(
     action: string,
-    status: IntegrationLogStatus,
+    status: "SUCCESS" | "FAILED",
     requestPayload: object,
     error?: string
   ) {
-    await prisma.integrationLog.create({
+    await prisma.auditEvent.create({
       data: {
-        provider: IntegrationProvider.REMNAWAVE,
-        action,
-        status,
-        requestPayload,
-        error,
+        eventType: `integration.remnawave.${action}`,
+        entityType: "Integration",
+        data: { status, requestPayload, error },
       },
     })
   }
+}
+
+function getEmail(
+  identities: Array<{ provider: AuthProvider; providerSubject: string }>
+) {
+  return (
+    identities.find((identity) => identity.provider === AuthProvider.EMAIL)
+      ?.providerSubject ?? null
+  )
 }
 
 export function createSubscriptionProvisioningService() {

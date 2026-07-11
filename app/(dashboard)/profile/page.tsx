@@ -1,4 +1,3 @@
-import Image from "next/image"
 import Link from "next/link"
 import {
   CheckIcon,
@@ -24,8 +23,12 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
-import { Separator } from "@/components/ui/separator"
+import {
+  PulsarActionRow,
+  PulsarAssetCard,
+  PulsarIconContainer,
+  pulsarCtaClass,
+} from "@/components/app/pulsar-primitives"
 import { requireUser } from "@/lib/auth"
 
 export default async function ProfilePage() {
@@ -33,52 +36,35 @@ export default async function ProfilePage() {
 
   return (
     <main className="pulsar-container">
-      <Card className="gap-0 overflow-hidden rounded-3xl border border-border/70 bg-card/40 py-0">
-        <div className="relative aspect-[21/9] w-full">
-          <Image
-            src="/details/birth.gif"
-            alt="Профиль Pulsar"
-            fill
-            className="object-contain"
-            sizes="(max-width: 768px) 100vw, 448px"
-            unoptimized
-            priority
-          />
+      <PulsarAssetCard
+        src="/details/birth.gif"
+        alt="Профиль Pulsar"
+        contentClassName="flex min-h-56 flex-col justify-center gap-4"
+      >
+        <div className="flex flex-col items-center gap-1 text-center">
+          <p className="text-[26px] leading-8 font-semibold tracking-normal">
+            Профиль
+          </p>
         </div>
-        <Separator className="my-0" />
-        <CardContent className="flex min-h-56 flex-col justify-center gap-4 p-4">
-          <div className="flex flex-col items-center gap-1 text-center">
-            <p className="text-[26px] leading-8 font-semibold tracking-normal">
-              Профиль
-            </p>
-          </div>
 
-          <LoginMethodsCard email={user.email} telegramId={user.telegramId} />
+        <LoginMethodsCard email={user.email} telegramId={user.telegramId} />
 
-          <Link href="/support" className="group block">
-            <div className="soft-panel flex min-h-[62px] items-center justify-between gap-3 p-3 transition-colors group-hover:bg-card/55">
-              <div className="flex min-w-0 items-center gap-3">
-                <div className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-border/70 bg-background/40">
-                  <HeadphonesIcon className="size-4" />
-                </div>
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">
-                    Написать в поддержку
-                  </p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    Поможем с доступом и оплатой
-                  </p>
-                </div>
-              </div>
-              <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
-            </div>
-          </Link>
+        <Link href="/support" className="group block">
+          <PulsarActionRow
+            icon={HeadphonesIcon}
+            title="Написать в поддержку"
+            description="Поможем с доступом и оплатой"
+            className="transition-colors group-hover:bg-card/55"
+            trailing={
+              <ChevronRightIcon className="size-4 text-muted-foreground transition-colors group-hover:text-foreground" />
+            }
+          />
+        </Link>
 
-          <LegalCard />
+        <LegalCard />
 
-          <LogoutConfirmDialog />
-        </CardContent>
-      </Card>
+        <LogoutConfirmDialog />
+      </PulsarAssetCard>
     </main>
   )
 }
@@ -92,7 +78,7 @@ function LogoutConfirmDialog() {
             type="button"
             variant="outline"
             size="lg"
-            className="h-11 w-full rounded-[18px] text-destructive hover:bg-destructive/10 hover:text-destructive"
+            className={`${pulsarCtaClass} text-destructive hover:bg-destructive/10 hover:text-destructive`}
           />
         }
       >
@@ -172,9 +158,7 @@ function LoginMethodRow({
   return (
     <div className="flex min-h-[52px] items-center justify-between gap-3 rounded-2xl border border-border/70 bg-background/25 p-3">
       <div className="flex min-w-0 items-center gap-3">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-border/70 bg-background/40">
-          <Icon className="size-4" />
-        </div>
+        <PulsarIconContainer icon={Icon} />
         <div className="min-w-0">
           <p className="text-xs text-muted-foreground">{label}</p>
           <p className="truncate text-sm font-medium">{value}</p>
@@ -203,22 +187,15 @@ function LoginMethodRow({
 function LegalCard() {
   return (
     <Link href="/legal" className="group block">
-      <div className="soft-panel flex min-h-[62px] items-center justify-between gap-3 p-3 transition-colors group-hover:bg-card/55">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-border/70 bg-background/40">
-            <FileTextIcon className="size-4" />
-          </div>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium">
-              Юридическая информация
-            </p>
-            <p className="truncate text-xs text-muted-foreground">
-              Оферта, политика и соглашение
-            </p>
-          </div>
-        </div>
-        <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
-      </div>
+      <PulsarActionRow
+        icon={FileTextIcon}
+        title="Юридическая информация"
+        description="Оферта, политика и соглашение"
+        className="transition-colors group-hover:bg-card/55"
+        trailing={
+          <ChevronRightIcon className="size-4 text-muted-foreground transition-colors group-hover:text-foreground" />
+        }
+      />
     </Link>
   )
 }

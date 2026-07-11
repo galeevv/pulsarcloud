@@ -1,9 +1,10 @@
 generator client {
-  provider = "prisma-client-js"
+  provider = "prisma-client"
+  output   = "../generated/prisma"
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
 }
 
 enum UserRole {
@@ -11,21 +12,65 @@ enum UserRole {
   ADMIN
 }
 
-enum AuthIdentityType {
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum AuthProvider {
   EMAIL
   TELEGRAM
 }
 
-enum LoginChallengeType {
+enum AuthChallengeKind {
   EMAIL_OTP
-  TELEGRAM
+  MAGIC_LINK
+  TELEGRAM_LOGIN
 }
 
-enum LoginChallengeStatus {
+enum AuthChallengeStatus {
   PENDING
-  COMPLETED
+  CONSUMED
   EXPIRED
   CANCELED
+}
+
+enum PricingVersionStatus {
+  DRAFT
+  ACTIVE
+  RETIRED
+}
+
+enum PriceQuotePurpose {
+  SUBSCRIPTION
+}
+
+enum Currency {
+  RUB
+}
+
+enum PaymentProvider {
+  MOCK
+  PLATEGA
+}
+
+enum PaymentStatus {
+  CREATED
+  PENDING
+  SUCCEEDED
+  FAILED
+  CANCELED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum WebhookProcessingStatus {
+  RECEIVED
+  PROCESSING
+  PROCESSED
+  FAILED
+  IGNORED
 }
 
 enum SubscriptionStatus {
@@ -43,49 +88,9 @@ enum SubscriptionSyncStatus {
   FAILED
 }
 
-enum SubscriptionFeatureType {
-  REGULAR_ACCESS
-  LTE_ACCESS
-  GAMING_ACCESS
-}
-
-enum PaymentStatus {
-  PENDING
-  CONFIRMED
-  CANCELED
-  FAILED
-  CHARGEBACKED
-}
-
-enum PaymentProviderType {
-  MOCK
-  PLATEGA
-}
-
-enum WalletLedgerDirection {
-  CREDIT
-  DEBIT
-}
-
-enum WalletLedgerType {
-  TOPUP
-  SUBSCRIPTION_PAYMENT
-  REFERRAL_REWARD
-  PAYOUT_RESERVE
-  PAYOUT_PAID
-  PAYOUT_REFUND
-  ADMIN_ADJUSTMENT
-}
-
-enum WalletLedgerStatus {
-  PENDING
-  POSTED
-  VOIDED
-}
-
 enum ReferralInviteStatus {
   REGISTERED
-  PAID
+  CONVERTED
   CANCELED
 }
 
@@ -97,11 +102,33 @@ enum ReferralRewardStatus {
   CANCELED
 }
 
+enum WalletLedgerDirection {
+  CREDIT
+  DEBIT
+}
+
+enum WalletLedgerType {
+  PAYMENT_CAPTURE
+  PAYMENT_REFUND
+  SUBSCRIPTION_CHARGE
+  REFERRAL_REWARD
+  PAYOUT_RESERVE
+  PAYOUT_RELEASE
+  ADMIN_ADJUSTMENT
+}
+
+enum WalletLedgerStatus {
+  PENDING
+  POSTED
+  VOIDED
+}
+
 enum PayoutRequestStatus {
   PENDING
   APPROVED
   PAID
   REJECTED
+  CANCELED
 }
 
 enum SupportConversationStatus {
@@ -113,6 +140,32 @@ enum SupportMessageAuthorRole {
   USER
   ADMIN
   SYSTEM
+}
+
+enum TelegramUpdateStatus {
+  RECEIVED
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
+enum JobType {
+  SEND_AUTH_EMAIL
+  SEND_PAYMENT_RECEIPT
+  PROCESS_PAYMENT_WEBHOOK
+  PROVISION_SUBSCRIPTION
+  SYNC_SUBSCRIPTION
+  PROCESS_TELEGRAM_UPDATE
+  EXPIRE_AUTH_CHALLENGES
+  DELETE_EXPIRED_SESSIONS
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELED
 }
 
 enum NodeType {
@@ -133,207 +186,298 @@ enum NodeStatus {
   DISABLED
 }
 
-enum IntegrationProvider {
-  REMNAWAVE
-  PLATEGA
-  TELEGRAM
-  SYSTEM
-}
-
-enum IntegrationLogStatus {
-  SUCCESS
-  PENDING
-  FAILED
-}
-
 model User {
-  id         String   @id @default(cuid())
-  email      String?  @unique
-  telegramId String?  @unique
-  role       UserRole @default(USER)
-  balanceRub Int      @default(0)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id         String     @id @default(cuid())
+  role       UserRole   @default(USER)
+  status     UserStatus @default(ACTIVE)
+  balanceRub Int        @default(0)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
 
-  identities                AuthIdentity[]
-  sessions                  Session[]
-  loginChallenges           LoginChallenge[]
-  subscriptions             Subscription[]
-  payments                  Payment[]
-  walletLedgerEntries       WalletLedgerEntry[]
-  referralProfile           ReferralProfile?
-  referralInvitesSent       ReferralInvite[]       @relation("ReferralInviteInviter")
-  referralInviteReceived    ReferralInvite?        @relation("ReferralInviteInvited")
-  referralRewardsIssued     ReferralReward[]       @relation("ReferralRewardInviter")
-  referralRewardsReceived   ReferralReward[]       @relation("ReferralRewardInvited")
-  payoutRequests            PayoutRequest[]
-  supportConversations      SupportConversation[]
-  supportMessages           SupportMessage[]
-  auditLogs                 AuditLog[]             @relation("AuditActor")
-  deviceLimitChanges        DeviceLimitChange[]    @relation("DeviceLimitChangeActor")
-  approvedPayoutRequests    PayoutRequest[]        @relation("PayoutApprovedBy")
-  paidPayoutRequests        PayoutRequest[]        @relation("PayoutPaidBy")
-  rejectedPayoutRequests    PayoutRequest[]        @relation("PayoutRejectedBy")
+  authIdentities       AuthIdentity[]
+  authChallenges       AuthChallenge[]
+  sessions             Session[]
+  priceQuotes          PriceQuote[]
+  payments             Payment[]
+  subscription         Subscription?
+  referralProfile      ReferralProfile?
+  referralInvitesSent  ReferralInvite[]      @relation("ReferralInviteInviter")
+  referralInvite       ReferralInvite?       @relation("ReferralInviteInvited")
+  referralRewards      ReferralReward[]       @relation("ReferralRewardOwner")
+  referralConversions  ReferralReward[]       @relation("ReferralRewardInvited")
+  walletLedgerEntries  WalletLedgerEntry[]
+  payoutRequests       PayoutRequest[]        @relation("PayoutOwner")
+  approvedPayouts      PayoutRequest[]        @relation("PayoutApprovedBy")
+  paidPayouts          PayoutRequest[]        @relation("PayoutPaidBy")
+  rejectedPayouts      PayoutRequest[]        @relation("PayoutRejectedBy")
+  supportConversations SupportConversation[]
+  supportMessages      SupportMessage[]
+  auditEvents          AuditEvent[]           @relation("AuditActor")
+
+  @@index([role, status])
+  @@index([createdAt])
 }
 
 model AuthIdentity {
-  id         String           @id @default(cuid())
-  userId     String
-  type       AuthIdentityType
-  identifier String
-  verifiedAt DateTime?
-  createdAt  DateTime         @default(now())
+  id              String       @id @default(cuid())
+  userId          String
+  provider        AuthProvider
+  providerSubject String
+  verifiedAt      DateTime?
+  metadata        Json?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([type, identifier])
+  @@unique([provider, providerSubject])
+  @@unique([userId, provider])
+  @@index([userId])
+}
+
+model AuthChallenge {
+  id              String              @id @default(cuid())
+  userId          String?
+  provider        AuthProvider
+  providerSubject String
+  kind            AuthChallengeKind
+  status          AuthChallengeStatus @default(PENDING)
+  tokenHash       String              @unique
+  codeHash        String?
+  attemptCount    Int                 @default(0)
+  maxAttempts     Int                 @default(5)
+  expiresAt       DateTime
+  consumedAt      DateTime?
+  context         Json?
+  createdAt       DateTime            @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([provider, providerSubject, status, createdAt])
+  @@index([status, expiresAt])
   @@index([userId])
 }
 
 model Session {
-  id        String   @id @default(cuid())
-  userId    String
-  tokenHash String   @unique
-  userAgent String?
-  ipAddress String?
-  expiresAt DateTime
-  createdAt DateTime @default(now())
+  id         String   @id @default(cuid())
+  userId     String
+  tokenHash  String   @unique
+  userAgent  String?
+  ipAddress  String?
+  expiresAt  DateTime
+  lastSeenAt DateTime @default(now())
+  revokedAt  DateTime?
+  createdAt  DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([userId])
+  @@index([userId, revokedAt])
   @@index([expiresAt])
 }
 
-model EmailOtp {
-  id         String    @id @default(cuid())
-  email      String
-  codeHash   String
-  attempts   Int       @default(0)
-  expiresAt  DateTime
-  consumedAt DateTime?
-  createdAt  DateTime  @default(now())
+model PricingVersion {
+  id                         String               @id @default(cuid())
+  version                    Int                  @unique
+  status                     PricingVersionStatus @default(DRAFT)
+  currency                   Currency             @default(RUB)
+  baseMonthlyPriceRub        Int
+  extraDeviceMonthlyPriceRub Int
+  minDeviceLimit             Int                  @default(1)
+  maxDeviceLimit             Int                  @default(5)
+  lteMonthlyPriceRub         Int
+  durationDiscounts          Json
+  referralFriendDiscountPct  Int                  @default(0)
+  referralRewardRub          Int
+  minimalPayoutRub           Int
+  effectiveAt                DateTime?
+  retiredAt                  DateTime?
+  createdAt                  DateTime             @default(now())
 
-  @@index([email])
+  quotes PriceQuote[]
+
+  @@index([status, effectiveAt])
+}
+
+model PriceQuote {
+  id                    String            @id @default(cuid())
+  userId                String
+  pricingVersionId      String
+  purpose               PriceQuotePurpose @default(SUBSCRIPTION)
+  currency              Currency          @default(RUB)
+  durationMonths        Int
+  deviceLimit           Int
+  lteEnabled            Boolean           @default(false)
+  referralDiscountPct   Int               @default(0)
+  subtotalRub           Int
+  discountRub           Int
+  totalRub              Int
+  pricingSnapshot       Json
+  idempotencyKey        String            @unique
+  expiresAt             DateTime
+  consumedAt            DateTime?
+  createdAt             DateTime          @default(now())
+
+  user           User           @relation(fields: [userId], references: [id], onDelete: Restrict)
+  pricingVersion PricingVersion @relation(fields: [pricingVersionId], references: [id], onDelete: Restrict)
+  payment        Payment?
+
+  @@index([userId, createdAt])
   @@index([expiresAt])
 }
 
-model LoginChallenge {
-  id              String               @id @default(cuid())
-  userId          String?
-  type            LoginChallengeType
-  status          LoginChallengeStatus @default(PENDING)
-  email           String?
-  telegramPayload Json?
-  nonce           String               @unique
-  expiresAt       DateTime
-  completedAt     DateTime?
-  createdAt       DateTime             @default(now())
+model Payment {
+  id                String          @id @default(cuid())
+  userId            String
+  quoteId           String          @unique
+  provider          PaymentProvider
+  status            PaymentStatus   @default(PENDING)
+  currency          Currency        @default(RUB)
+  amountRub         Int
+  durationMonths    Int
+  deviceLimit       Int
+  lteEnabled        Boolean         @default(false)
+  idempotencyKey    String          @unique
+  externalPaymentId String?
+  checkoutUrl       String?
+  metadata          Json?
+  refundedAmountRub Int             @default(0)
+  confirmedAt       DateTime?
+  refundedAt        DateTime?
+  canceledAt        DateTime?
+  failedAt          DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
 
-  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user          User                  @relation(fields: [userId], references: [id], onDelete: Restrict)
+  quote         PriceQuote            @relation(fields: [quoteId], references: [id], onDelete: Restrict)
+  webhookEvents PaymentWebhookEvent[]
+  periods       SubscriptionPeriod[]
+  referralReward ReferralReward?
+  ledgerEntries WalletLedgerEntry[]
 
-  @@index([userId])
-  @@index([type, status])
+  @@unique([provider, externalPaymentId])
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+}
+
+model PaymentWebhookEvent {
+  id              String                  @id @default(cuid())
+  provider        PaymentProvider
+  providerEventId String
+  eventType       String
+  paymentId       String?
+  payloadHash     String
+  payload         Json
+  status          WebhookProcessingStatus @default(RECEIVED)
+  attemptCount    Int                     @default(0)
+  processedAt     DateTime?
+  lastError       String?
+  verifiedAt      DateTime?
+  receivedAt      DateTime                @default(now())
+
+  payment Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  @@unique([provider, providerEventId])
+  @@unique([provider, payloadHash])
+  @@index([paymentId])
+  @@index([status, receivedAt])
 }
 
 model Subscription {
   id                    String                 @id @default(cuid())
-  userId                String
+  userId                String                 @unique
   status                SubscriptionStatus     @default(NONE)
   startsAt              DateTime?
   expiresAt             DateTime?
   deviceLimit           Int                    @default(1)
   lteEnabled            Boolean                @default(false)
   subscriptionUrl       String?
-  remnawaveUserId       String?
+  remnawaveUserId       String?                @unique
   syncStatus            SubscriptionSyncStatus @default(NOT_SYNCED)
   lastUserFriendlyError String?
   lastTechnicalError    String?
+  version               Int                    @default(0)
   createdAt             DateTime               @default(now())
   updatedAt             DateTime               @updatedAt
 
-  user               User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  features           SubscriptionFeature[]
-  deviceLimitChanges DeviceLimitChange[]
+  user    User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  periods SubscriptionPeriod[]
 
-  @@index([userId])
-  @@index([status])
-  @@index([syncStatus])
+  @@index([status, expiresAt])
+  @@index([syncStatus, updatedAt])
 }
 
-model SubscriptionFeature {
-  id             String                  @id @default(cuid())
-  subscriptionId String
-  type           SubscriptionFeatureType
-  label          String
-  enabled        Boolean                 @default(true)
-  metadata       Json?
-  createdAt      DateTime                @default(now())
-
-  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
-
-  @@unique([subscriptionId, type])
-  @@index([subscriptionId])
-}
-
-model DeviceLimitChange {
+model SubscriptionPeriod {
   id             String   @id @default(cuid())
   subscriptionId String
-  fromLimit      Int
-  toLimit        Int
-  actorUserId    String?
-  paymentId      String?
+  paymentId      String?  @unique
+  startsAt       DateTime
+  endsAt         DateTime
+  deviceLimit    Int
+  lteEnabled     Boolean  @default(false)
+  amountRub      Int
   createdAt      DateTime @default(now())
 
   subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
-  actor        User?        @relation("DeviceLimitChangeActor", fields: [actorUserId], references: [id], onDelete: SetNull)
-  payment      Payment?     @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  payment      Payment?     @relation(fields: [paymentId], references: [id], onDelete: Restrict)
 
-  @@index([subscriptionId])
-  @@index([actorUserId])
+  @@index([subscriptionId, startsAt])
+  @@index([endsAt])
 }
 
-model Payment {
-  id                String              @id @default(cuid())
-  userId            String
-  provider          PaymentProviderType @default(MOCK)
-  status            PaymentStatus       @default(PENDING)
-  amountRub         Int
-  durationMonths    Int
-  deviceLimit       Int
-  lteEnabled        Boolean             @default(false)
-  externalPaymentId String?
-  checkoutUrl       String?
-  metadata          Json?
-  confirmedAt       DateTime?
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
+model ReferralProfile {
+  userId     String   @id
+  inviteCode String   @unique
+  isEnabled  Boolean  @default(false)
+  enabledAt  DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  webhookLogs        PaymentWebhookLog[]
-  referralRewards    ReferralReward[]
-  deviceLimitChanges DeviceLimitChange[]
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([userId])
-  @@index([status])
-  @@index([provider])
+  @@index([isEnabled])
 }
 
-model PaymentWebhookLog {
-  id              String              @id @default(cuid())
-  paymentId       String?
-  provider        PaymentProviderType
-  status          IntegrationLogStatus
-  eventId         String?
-  requestPayload  Json?
-  responsePayload Json?
-  error           String?
-  createdAt       DateTime            @default(now())
+model ReferralInvite {
+  id                 String               @id @default(cuid())
+  inviterId          String
+  invitedUserId      String               @unique
+  inviteCodeSnapshot String
+  status             ReferralInviteStatus @default(REGISTERED)
+  createdAt          DateTime             @default(now())
+  convertedAt        DateTime?
+  canceledAt         DateTime?
 
-  payment Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  inviter User            @relation("ReferralInviteInviter", fields: [inviterId], references: [id], onDelete: Restrict)
+  invited User            @relation("ReferralInviteInvited", fields: [invitedUserId], references: [id], onDelete: Restrict)
+  reward  ReferralReward?
 
-  @@index([paymentId])
-  @@index([provider])
+  @@index([inviterId, status])
+  @@index([status, createdAt])
+}
+
+model ReferralReward {
+  id            String               @id @default(cuid())
+  inviteId      String               @unique
+  inviterId     String
+  invitedUserId String
+  paymentId     String               @unique
+  amountRub     Int
+  status        ReferralRewardStatus @default(PENDING)
+  availableAt   DateTime?
+  reservedAt    DateTime?
+  paidAt        DateTime?
+  canceledAt    DateTime?
+  createdAt     DateTime             @default(now())
+
+  invite  ReferralInvite @relation(fields: [inviteId], references: [id], onDelete: Restrict)
+  inviter User           @relation("ReferralRewardOwner", fields: [inviterId], references: [id], onDelete: Restrict)
+  invited User           @relation("ReferralRewardInvited", fields: [invitedUserId], references: [id], onDelete: Restrict)
+  payment Payment        @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  ledgerEntry WalletLedgerEntry?
+
+  @@index([inviterId, status])
+  @@index([invitedUserId])
 }
 
 model WalletLedgerEntry {
@@ -341,88 +485,55 @@ model WalletLedgerEntry {
   userId         String
   direction      WalletLedgerDirection
   amountRub      Int
+  currency       Currency              @default(RUB)
   type           WalletLedgerType
   status         WalletLedgerStatus    @default(POSTED)
-  idempotencyKey String?               @unique
+  idempotencyKey String                @unique
+  paymentId      String?
+  payoutRequestId String?
+  referralRewardId String?             @unique
   metadata       Json?
   createdAt      DateTime              @default(now())
+  postedAt       DateTime?
+  voidedAt       DateTime?
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user           User            @relation(fields: [userId], references: [id], onDelete: Restrict)
+  payment        Payment?        @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  payoutRequest  PayoutRequest?  @relation(fields: [payoutRequestId], references: [id], onDelete: Restrict)
+  referralReward ReferralReward? @relation(fields: [referralRewardId], references: [id], onDelete: Restrict)
 
-  @@index([userId])
-  @@index([type])
-  @@index([status])
-}
-
-model ReferralProfile {
-  userId    String   @id
-  inviteCode String  @unique
-  inviteUrl  String
-  isEnabled  Boolean @default(false)
-  enabledAt  DateTime?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
-
-model ReferralInvite {
-  id            String               @id @default(cuid())
-  inviterId     String
-  invitedUserId String               @unique
-  status        ReferralInviteStatus @default(REGISTERED)
-  createdAt     DateTime             @default(now())
-  convertedAt   DateTime?
-
-  inviter User @relation("ReferralInviteInviter", fields: [inviterId], references: [id], onDelete: Cascade)
-  invited User @relation("ReferralInviteInvited", fields: [invitedUserId], references: [id], onDelete: Cascade)
-
-  @@index([inviterId])
-  @@index([status])
-}
-
-model ReferralReward {
-  id            String               @id @default(cuid())
-  inviterId     String
-  invitedUserId String
-  paymentId     String?
-  amountRub     Int
-  status        ReferralRewardStatus @default(PENDING)
-  createdAt     DateTime             @default(now())
-  availableAt   DateTime?
-  paidAt        DateTime?
-
-  inviter User     @relation("ReferralRewardInviter", fields: [inviterId], references: [id], onDelete: Cascade)
-  invited User     @relation("ReferralRewardInvited", fields: [invitedUserId], references: [id], onDelete: Cascade)
-  payment Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
-
-  @@index([inviterId])
-  @@index([invitedUserId])
-  @@index([status])
+  @@index([userId, createdAt])
+  @@index([paymentId])
+  @@index([payoutRequestId])
+  @@index([status, createdAt])
 }
 
 model PayoutRequest {
-  id              String              @id @default(cuid())
-  userId          String
-  amountRub       Int
-  status          PayoutRequestStatus @default(PENDING)
-  payoutDetails   String
-  adminNote       String?
-  approvedById    String?
-  paidById        String?
-  rejectedById    String?
-  createdAt       DateTime            @default(now())
-  approvedAt      DateTime?
-  paidAt          DateTime?
-  rejectedAt      DateTime?
+  id             String              @id @default(cuid())
+  userId         String
+  amountRub      Int
+  currency       Currency            @default(RUB)
+  status         PayoutRequestStatus @default(PENDING)
+  payoutDetails  String
+  idempotencyKey String              @unique
+  adminNote      String?
+  approvedById   String?
+  paidById       String?
+  rejectedById   String?
+  createdAt      DateTime            @default(now())
+  approvedAt     DateTime?
+  paidAt         DateTime?
+  rejectedAt     DateTime?
+  canceledAt     DateTime?
 
-  user       User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user       User  @relation("PayoutOwner", fields: [userId], references: [id], onDelete: Restrict)
   approvedBy User? @relation("PayoutApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
   paidBy     User? @relation("PayoutPaidBy", fields: [paidById], references: [id], onDelete: SetNull)
   rejectedBy User? @relation("PayoutRejectedBy", fields: [rejectedById], references: [id], onDelete: SetNull)
+  ledgerEntries WalletLedgerEntry[]
 
-  @@index([userId])
-  @@index([status])
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
 }
 
 model SupportConversation {
@@ -431,14 +542,15 @@ model SupportConversation {
   status        SupportConversationStatus @default(OPEN)
   subject       String?
   lastMessageAt DateTime?
+  closedAt      DateTime?
   createdAt     DateTime                  @default(now())
   updatedAt     DateTime                  @updatedAt
 
-  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user     User             @relation(fields: [userId], references: [id], onDelete: Restrict)
   messages SupportMessage[]
 
-  @@index([userId])
-  @@index([status])
+  @@index([userId, status, updatedAt])
+  @@index([status, lastMessageAt])
 }
 
 model SupportMessage {
@@ -447,23 +559,66 @@ model SupportMessage {
   senderId       String?
   authorRole     SupportMessageAuthorRole
   body           String
+  idempotencyKey String?                  @unique
   createdAt      DateTime                 @default(now())
 
   conversation SupportConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender       User?               @relation(fields: [senderId], references: [id], onDelete: SetNull)
 
-  @@index([conversationId])
+  @@index([conversationId, createdAt])
   @@index([senderId])
 }
 
-model LegalDocument {
-  id          String   @id @default(cuid())
-  slug        String   @unique
-  title       String
-  content     String
-  isPublished Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+model TelegramUpdate {
+  id           String               @id @default(cuid())
+  updateId     BigInt               @unique
+  status       TelegramUpdateStatus @default(RECEIVED)
+  payload      Json
+  payloadHash  String               @unique
+  attemptCount Int                  @default(0)
+  receivedAt   DateTime             @default(now())
+  processedAt  DateTime?
+  lastError    String?
+
+  @@index([status, receivedAt])
+}
+
+model Job {
+  id             String    @id @default(cuid())
+  type           JobType
+  status         JobStatus @default(PENDING)
+  idempotencyKey String    @unique
+  payload        Json
+  attemptCount   Int       @default(0)
+  maxAttempts    Int       @default(5)
+  runAt          DateTime  @default(now())
+  lockedAt       DateTime?
+  lockedBy       String?
+  lastError      String?
+  completedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([status, runAt])
+  @@index([lockedAt])
+  @@index([type, status])
+}
+
+model AuditEvent {
+  id             String   @id @default(cuid())
+  actorUserId    String?
+  eventType      String
+  entityType     String
+  entityId       String?
+  idempotencyKey String?  @unique
+  data           Json?
+  createdAt      DateTime @default(now())
+
+  actor User? @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([actorUserId, createdAt])
+  @@index([eventType, createdAt])
+  @@index([entityType, entityId, createdAt])
 }
 
 model Node {
@@ -473,60 +628,13 @@ model Node {
   city      String
   type      NodeType
   protocol  NodeProtocol
-  domain    String
+  domain    String       @unique
   status    NodeStatus   @default(ACTIVE)
   capacity  Int
   sortOrder Int          @default(0)
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 
-  @@index([type])
-  @@index([status])
+  @@index([type, status])
   @@index([sortOrder])
-}
-
-model IntegrationLog {
-  id              String              @id @default(cuid())
-  provider        IntegrationProvider
-  action          String
-  status          IntegrationLogStatus
-  requestPayload  Json?
-  responsePayload Json?
-  error           String?
-  createdAt       DateTime            @default(now())
-
-  @@index([provider])
-  @@index([status])
-  @@index([createdAt])
-}
-
-model AuditLog {
-  id             String   @id @default(cuid())
-  actorUserId    String?
-  action         String
-  entityType     String
-  entityId       String?
-  metadata       Json?
-  createdAt      DateTime @default(now())
-
-  actor User? @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
-
-  @@index([actorUserId])
-  @@index([action])
-  @@index([entityType])
-}
-
-model PricingSettings {
-  id                         String   @id @default("default")
-  baseMonthlyPriceRub        Int      @default(119)
-  extraDeviceMonthlyPriceRub Int      @default(15)
-  minDeviceLimit             Int      @default(1)
-  maxDeviceLimit             Int      @default(5)
-  lteMonthlyPriceRub         Int      @default(50)
-  durationDiscounts          Json
-  referralFriendDiscountPct  Int      @default(50)
-  referralRewardRub          Int      @default(75)
-  minimalPayoutRub           Int      @default(150)
-  createdAt                  DateTime @default(now())
-  updatedAt                  DateTime @updatedAt
 }

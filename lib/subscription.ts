@@ -1,5 +1,5 @@
-import type { Subscription } from "@prisma/client"
-import { SubscriptionStatus } from "@prisma/client"
+import type { Subscription } from "@/generated/prisma/client"
+import { SubscriptionStatus } from "@/generated/prisma/client"
 
 export function getEffectiveSubscriptionStatus(
   subscription: Subscription | null | undefined

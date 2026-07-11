@@ -4,6 +4,7 @@ import { useMemo, useState } from "react"
 import { WalletIcon } from "lucide-react"
 
 import { createPayoutRequestAction } from "@/app/(dashboard)/actions"
+import { pulsarCtaClass } from "@/components/app/pulsar-primitives"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -38,7 +39,7 @@ export function PayoutDialog({
   canRequestPayout,
   defaultAmountRub,
   minimalPayoutRub,
-  triggerClassName = "h-11 w-full rounded-[18px]",
+  triggerClassName = pulsarCtaClass,
 }: {
   buttonIcon?: boolean
   canRequestPayout: boolean
@@ -49,6 +50,7 @@ export function PayoutDialog({
   const [bank, setBank] = useState(bankItems[0].value)
   const [otherBank, setOtherBank] = useState("")
   const [destination, setDestination] = useState("")
+  const [idempotencyKey] = useState(() => crypto.randomUUID())
   const selectedBankLabel = useMemo(() => {
     if (bank === "other") {
       return otherBank.trim() || "Другой банк"
@@ -84,6 +86,7 @@ export function PayoutDialog({
           action={createPayoutRequestAction}
           className="flex flex-col gap-3"
         >
+          <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
           <input type="hidden" name="payoutDetails" value={payoutDetails} />
           <FieldGroup>
             <Field>

@@ -10,10 +10,11 @@ import {
 } from "@/components/ui/table"
 import { prisma } from "@/lib/db"
 import { formatRub } from "@/lib/pricing"
+import { getUserLabel } from "@/lib/user-identity"
 
 export default async function AdminWalletPage() {
   const entries = await prisma.walletLedgerEntry.findMany({
-    include: { user: true },
+    include: { user: { include: { authIdentities: true } } },
     orderBy: { createdAt: "desc" },
     take: 100,
   })
@@ -38,7 +39,7 @@ export default async function AdminWalletPage() {
           <TableBody>
             {entries.map((entry) => (
               <TableRow key={entry.id}>
-                <TableCell>{entry.user.email}</TableCell>
+                <TableCell>{getUserLabel(entry.user.authIdentities)}</TableCell>
                 <TableCell>{entry.direction}</TableCell>
                 <TableCell>{formatRub(entry.amountRub)}</TableCell>
                 <TableCell><Badge variant="secondary">{entry.type}</Badge></TableCell>

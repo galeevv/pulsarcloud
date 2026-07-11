@@ -17,10 +17,11 @@ import {
 } from "@/components/ui/table"
 import { prisma } from "@/lib/db"
 import { formatRub } from "@/lib/pricing"
+import { getUserLabel } from "@/lib/user-identity"
 
 export default async function AdminPayoutsPage() {
   const payouts = await prisma.payoutRequest.findMany({
-    include: { user: true },
+    include: { user: { include: { authIdentities: true } } },
     orderBy: { createdAt: "desc" },
   })
 
@@ -37,7 +38,7 @@ export default async function AdminPayoutsPage() {
           <TableBody>
             {payouts.map((payout) => (
               <TableRow key={payout.id}>
-                <TableCell>{payout.user.email}</TableCell>
+                <TableCell>{getUserLabel(payout.user.authIdentities)}</TableCell>
                 <TableCell>{formatRub(payout.amountRub)}</TableCell>
                 <TableCell>{payout.payoutDetails}</TableCell>
                 <TableCell><Badge>{payout.status}</Badge></TableCell>

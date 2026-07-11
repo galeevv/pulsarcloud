@@ -1,15 +1,7 @@
 "use client"
 
-import Image from "next/image"
-import Link from "next/link"
 import * as React from "react"
-import {
-  ArrowLeftIcon,
-  ArrowRightIcon,
-  KeyRoundIcon,
-  MailCheckIcon,
-  SendIcon,
-} from "lucide-react"
+import { ArrowLeftIcon, ArrowRightIcon, SendIcon } from "lucide-react"
 
 import {
   requestEmailOtpAction,
@@ -19,14 +11,17 @@ import {
   type TelegramStubState,
   type VerifyOtpState,
 } from "@/app/(auth)/actions"
-import { Button, buttonVariants } from "@/components/ui/button"
+import { Button } from "@/components/ui/button"
 import {
-  Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import {
+  PulsarAssetCard,
+  pulsarCtaClass,
+} from "@/components/app/pulsar-primitives"
 import {
   Field,
   FieldDescription,
@@ -45,7 +40,6 @@ import {
   InputOTPSlot,
 } from "@/components/ui/input-otp"
 import { Separator } from "@/components/ui/separator"
-import { cn } from "@/lib/utils"
 
 const requestInitialState: RequestOtpState = { ok: false }
 const verifyInitialState: VerifyOtpState = { ok: false }
@@ -83,70 +77,62 @@ export function AuthCard({
 
   return (
     <main className="flex min-h-svh items-center justify-center px-4 py-8">
-      <Card className="w-full max-w-md gap-0 overflow-hidden rounded-3xl border border-border/70 bg-card/40 py-0">
-        <div className="relative aspect-[21/9] w-full">
-          <Image
-            src="/hero/pulsar.gif"
-            alt="PulsarVPN"
-            fill
-            className="object-contain"
-            sizes="(max-width: 768px) 100vw, 448px"
-            unoptimized
-            priority
-          />
-        </div>
-        <Separator className="my-0" />
-        <div className="relative flex min-h-56 flex-col justify-center gap-4 p-4">
+      <PulsarAssetCard
+        src="/hero/pulsar.gif"
+        alt="PulsarVPN"
+        cardClassName="w-full max-w-md"
+        contentClassName="relative flex min-h-56 flex-col justify-center gap-4"
+      >
+        {isLinkSent ? (
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="outline"
+            className="absolute top-4 left-4"
+            aria-label="Изменить email"
+            onClick={() => setDismissedChallengeId(challengeId)}
+          >
+            <ArrowLeftIcon />
+          </Button>
+        ) : null}
+        <CardHeader className="items-center gap-1.5 p-0 text-center">
+          <CardTitle>
+            {isLinkSent ? "Введите код" : "Добро пожаловать"}
+          </CardTitle>
+          <CardDescription>
+            {isLinkSent
+              ? `Код отправлен на ${email}`
+              : "Подключиться к pulsar с помощью"}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4 p-0">
           {isLinkSent ? (
-            <Button
-              type="button"
-              size="icon-sm"
-              variant="outline"
-              className="absolute top-4 left-4"
-              aria-label="Изменить email"
-              onClick={() => setDismissedChallengeId(challengeId)}
-            >
-              <ArrowLeftIcon />
-            </Button>
-          ) : null}
-          <CardHeader className="items-center gap-1.5 p-0 text-center">
-            <CardTitle>Войти или создать аккаунт</CardTitle>
-            <CardDescription>
-              {isLinkSent
-                ? `Ссылка отправлена на ${email}`
-                : "Введите email, чтобы получить ссылку для входа."}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4 p-0">
-            {isLinkSent ? (
-              <MagicLinkSent
-                key={challengeId}
-                action={verifyAction}
-                challengeId={challengeId}
-                devMagicLink={requestState.devMagicLink}
-                devOtp={requestState.devOtp}
-                email={email}
-                invite={invite}
-                isRequestPending={isRequestPending}
-                isVerifyPending={isVerifyPending}
-                message={verifyState.message}
-                requestAction={requestAction}
-              />
-            ) : (
-              <EmailStartForm
-                action={requestAction}
-                authError={authError}
-                invite={invite}
-                isRequestPending={isRequestPending}
-                isTelegramPending={isTelegramPending}
-                message={!requestState.ok ? requestState.message : undefined}
-                telegramAction={telegramAction}
-                telegramMessage={telegramState.message}
-              />
-            )}
-          </CardContent>
-        </div>
-      </Card>
+            <MagicLinkSent
+              key={challengeId}
+              action={verifyAction}
+              challengeId={challengeId}
+              devOtp={requestState.devOtp}
+              email={email}
+              invite={invite}
+              isRequestPending={isRequestPending}
+              isVerifyPending={isVerifyPending}
+              message={verifyState.message}
+              requestAction={requestAction}
+            />
+          ) : (
+            <EmailStartForm
+              action={requestAction}
+              authError={authError}
+              invite={invite}
+              isRequestPending={isRequestPending}
+              isTelegramPending={isTelegramPending}
+              message={!requestState.ok ? requestState.message : undefined}
+              telegramAction={telegramAction}
+              telegramMessage={telegramState.message}
+            />
+          )}
+        </CardContent>
+      </PulsarAssetCard>
     </main>
   )
 }
@@ -228,7 +214,7 @@ function EmailStartForm({
         <Button
           type="submit"
           variant="outline"
-          className="h-11 w-full rounded-[18px]"
+          className={pulsarCtaClass}
           disabled={isTelegramPending}
         >
           <SendIcon data-icon="inline-start" />С помощью Telegram
@@ -246,7 +232,6 @@ function EmailStartForm({
 function MagicLinkSent({
   action,
   challengeId,
-  devMagicLink,
   devOtp,
   email,
   invite,
@@ -257,7 +242,6 @@ function MagicLinkSent({
 }: {
   action: React.ComponentProps<"form">["action"]
   challengeId: string
-  devMagicLink?: string
   devOtp?: string
   email: string
   invite?: string
@@ -267,7 +251,6 @@ function MagicLinkSent({
   requestAction: React.ComponentProps<"form">["action"]
 }) {
   const [resendSeconds, setResendSeconds] = React.useState(60)
-  const [showManualCode, setShowManualCode] = React.useState(false)
 
   React.useEffect(() => {
     if (resendSeconds <= 0) {
@@ -283,49 +266,15 @@ function MagicLinkSent({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="soft-panel flex items-center gap-3 p-3">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-border/70 bg-background/40">
-          <MailCheckIcon className="size-4" />
-        </div>
-        <p className="text-sm leading-5 text-muted-foreground">
-          Откройте письмо и нажмите “Войти в Pulsar”. Ссылка действует 5 минут.
-        </p>
-      </div>
-
-      {devMagicLink ? (
-        <Link
-          href={devMagicLink}
-          className={cn(
-            buttonVariants({ size: "lg" }),
-            "h-11 w-full rounded-[18px]"
-          )}
-        >
-          Войти в dev-режиме
-          <ArrowRightIcon data-icon="inline-end" />
-        </Link>
-      ) : null}
-
-      <Button
-        type="button"
-        variant="outline"
-        className="h-11 w-full rounded-[18px]"
-        onClick={() => setShowManualCode((value) => !value)}
-      >
-        <KeyRoundIcon data-icon="inline-start" />
-        {showManualCode ? "Скрыть код" : "Ввести код вручную"}
-      </Button>
-
-      {showManualCode ? (
-        <ManualCodeForm
-          action={action}
-          challengeId={challengeId}
-          devOtp={devOtp}
-          email={email}
-          invite={invite}
-          isVerifyPending={isVerifyPending}
-          message={message}
-        />
-      ) : null}
+      <ManualCodeForm
+        action={action}
+        challengeId={challengeId}
+        devOtp={devOtp}
+        email={email}
+        invite={invite}
+        isVerifyPending={isVerifyPending}
+        message={message}
+      />
 
       {resendSeconds > 0 ? (
         <p className="text-center text-sm text-muted-foreground">
@@ -421,11 +370,7 @@ function ManualCodeForm({
               ))}
             </InputOTPGroup>
           </InputOTP>
-          {devOtp ? (
-            <FieldDescription className="text-center">
-              Dev code: {devOtp}
-            </FieldDescription>
-          ) : null}
+          {devOtp ? <DevOtpHint value={devOtp} /> : null}
         </Field>
       </FieldGroup>
       {message ? (
@@ -437,6 +382,14 @@ function ManualCodeForm({
         </p>
       ) : null}
     </form>
+  )
+}
+
+function DevOtpHint({ value }: { value: string }) {
+  return (
+    <FieldDescription className="text-center">
+      Dev OTP: {value}
+    </FieldDescription>
   )
 }
 

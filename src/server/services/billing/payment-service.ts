@@ -1,285 +1,465 @@
 import {
-  AuthIdentityType,
-  IntegrationLogStatus,
-  IntegrationProvider,
-  PaymentProviderType,
+  JobType,
   PaymentStatus,
   ReferralInviteStatus,
   ReferralRewardStatus,
-  SubscriptionFeatureType,
   SubscriptionStatus,
   WalletLedgerDirection,
   WalletLedgerStatus,
   WalletLedgerType,
-} from "@prisma/client"
+  type Payment,
+  type Prisma,
+} from "@/generated/prisma/client"
 
+import {
+  ConflictError,
+  IntegrationError,
+  NotFoundError,
+  ValidationError,
+} from "@/lib/application-errors"
 import { prisma } from "@/lib/db"
-import { calculateSubscriptionPriceRub } from "@/lib/pricing"
-import { createPaymentProvider } from "@/src/server/services/payments/provider"
-import { createSubscriptionProvisioningService } from "@/src/server/services/provisioning/subscription-provisioning-service"
+import {
+  calculateSubscriptionPrice,
+  getDurationDiscounts,
+} from "@/lib/pricing"
+import { getActivePricingVersion } from "@/lib/pricing-data"
+import { runInTransaction } from "@/lib/transactions"
+import { getConfiguredPaymentProvider } from "@/src/server/services/payments/provider"
 
-type CreateMockPaymentInput = {
+const QUOTE_TTL_MS = 15 * 60 * 1000
+
+export type CreateSubscriptionPaymentInput = {
   userId: string
   months: number
   deviceLimit: number
   lteEnabled: boolean
+  idempotencyKey: string
 }
 
-export async function createMockPayment(input: CreateMockPaymentInput) {
-  const settings = await prisma.pricingSettings.findUniqueOrThrow({
-    where: { id: "default" },
-  })
-  const amountRub = calculateSubscriptionPriceRub(settings, input)
-  const payment = await prisma.payment.create({
-    data: {
-      userId: input.userId,
-      provider: PaymentProviderType.MOCK,
-      status: PaymentStatus.PENDING,
-      amountRub,
-      durationMonths: input.months,
-      deviceLimit: input.deviceLimit,
-      lteEnabled: input.lteEnabled,
-    },
-  })
-  const provider = createPaymentProvider()
-  const createdPayment = await provider.createPayment({
-    paymentId: payment.id,
-    amountRub,
-    description: `PulsarVPN ${input.months} мес.`,
+export async function createSubscriptionPayment(
+  input: CreateSubscriptionPaymentInput
+) {
+  const paymentIdempotencyKey = `payment:${input.idempotencyKey}`
+  const existing = await prisma.payment.findUnique({
+    where: { idempotencyKey: paymentIdempotencyKey },
   })
 
-  return prisma.payment.update({
-    where: { id: payment.id },
-    data: {
-      externalPaymentId: createdPayment.providerPaymentId,
-      checkoutUrl: createdPayment.checkoutUrl,
-    },
-  })
-}
+  if (existing) {
+    assertSamePaymentRequest(existing, input)
 
-export async function confirmMockPayment(paymentId: string, adminUserId: string) {
-  const payment = await prisma.payment.findUnique({
-    where: { id: paymentId },
-    include: {
-      user: true,
-    },
-  })
-
-  if (!payment) {
-    throw new Error("Payment not found")
+    if (existing.status !== PaymentStatus.CREATED) {
+      return existing
+    }
   }
 
-  if (payment.status === PaymentStatus.CONFIRMED) {
-    return payment
-  }
-
-  const startsAt = new Date()
-  const existingSubscription = await prisma.subscription.findFirst({
-    where: {
-      userId: payment.userId,
-      status: {
-        in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.EXPIRED],
-      },
-    },
-    orderBy: { createdAt: "desc" },
+  const provider = getConfiguredPaymentProvider()
+  const payment = existing ?? (await createQuoteAndPayment(input, provider.type))
+  const quote = await prisma.priceQuote.findUniqueOrThrow({
+    where: { id: payment.quoteId },
   })
-  const baseDate =
-    existingSubscription?.expiresAt && existingSubscription.expiresAt > startsAt
-      ? existingSubscription.expiresAt
-      : startsAt
-  const expiresAt = new Date(baseDate)
-  expiresAt.setMonth(expiresAt.getMonth() + payment.durationMonths)
 
-  const subscription = existingSubscription
-    ? await prisma.subscription.update({
-        where: { id: existingSubscription.id },
-        data: {
-          status: SubscriptionStatus.ACTIVE,
-          startsAt: existingSubscription.startsAt ?? startsAt,
-          expiresAt,
-          deviceLimit: payment.deviceLimit,
-          lteEnabled: payment.lteEnabled,
-          features: {
-            upsert: {
-              where: {
-                subscriptionId_type: {
-                  subscriptionId: existingSubscription.id,
-                  type: SubscriptionFeatureType.REGULAR_ACCESS,
-                },
-              },
-              update: { enabled: true },
-              create: {
-                type: SubscriptionFeatureType.REGULAR_ACCESS,
-                label: "Основные VPN-профили",
-              },
-            },
-          },
-        },
-      })
-    : await prisma.subscription.create({
-        data: {
-          userId: payment.userId,
-          status: SubscriptionStatus.ACTIVE,
-          startsAt,
-          expiresAt,
-          deviceLimit: payment.deviceLimit,
-          lteEnabled: payment.lteEnabled,
-          features: {
-            create: {
-              type: SubscriptionFeatureType.REGULAR_ACCESS,
-              label: "Основные VPN-профили",
-            },
-          },
-        },
-      })
-
-  if (payment.lteEnabled) {
-    await prisma.subscriptionFeature.upsert({
-      where: {
-        subscriptionId_type: {
-          subscriptionId: subscription.id,
-          type: SubscriptionFeatureType.LTE_ACCESS,
-        },
-      },
-      update: { enabled: true },
-      create: {
-        subscriptionId: subscription.id,
-        type: SubscriptionFeatureType.LTE_ACCESS,
-        label: "LTE add-on",
-        enabled: true,
-      },
+  if (payment.status === PaymentStatus.CREATED && quote.expiresAt <= new Date()) {
+    await prisma.payment.updateMany({
+      where: { id: payment.id, status: PaymentStatus.CREATED },
+      data: { status: PaymentStatus.CANCELED, canceledAt: new Date() },
+    })
+    throw new ConflictError("Price quote expired before checkout was created.", {
+      quoteId: quote.id,
     })
   }
 
-  await prisma.payment.update({
-    where: { id: payment.id },
-    data: {
-      status: PaymentStatus.CONFIRMED,
-      confirmedAt: new Date(),
-    },
-  })
-
-  await prisma.walletLedgerEntry.createMany({
-    data: [
-      {
-        userId: payment.userId,
-        direction: WalletLedgerDirection.CREDIT,
-        amountRub: payment.amountRub,
-        type: WalletLedgerType.TOPUP,
-        status: WalletLedgerStatus.POSTED,
-        idempotencyKey: `payment:${payment.id}:topup`,
+  try {
+    // Provider I/O is outside SQL transactions and receives its own stable key.
+    const created = await provider.createPayment({
+      paymentId: payment.id,
+      amountRub: payment.amountRub,
+      currency: "RUB",
+      description: `PulsarVPN ${payment.durationMonths} мес.`,
+      idempotencyKey: payment.idempotencyKey,
+    })
+    await prisma.payment.updateMany({
+      where: { id: payment.id, status: PaymentStatus.CREATED },
+      data: {
+        status: PaymentStatus.PENDING,
+        externalPaymentId: created.providerPaymentId,
+        checkoutUrl: created.checkoutUrl,
       },
-      {
-        userId: payment.userId,
-        direction: WalletLedgerDirection.DEBIT,
-        amountRub: payment.amountRub,
-        type: WalletLedgerType.SUBSCRIPTION_PAYMENT,
-        status: WalletLedgerStatus.POSTED,
-        idempotencyKey: `payment:${payment.id}:subscription`,
-      },
-    ],
-    skipDuplicates: true,
-  })
+    })
 
-  await ensureReferralReward(payment.userId, payment.id)
-  await createSubscriptionProvisioningService().provisionSubscription(
-    subscription.id
-  )
-
-  await prisma.auditLog.create({
-    data: {
-      actorUserId: adminUserId,
-      action: "payment.confirm",
-      entityType: "Payment",
-      entityId: payment.id,
-      metadata: { amountRub: payment.amountRub },
-    },
-  })
-
-  await prisma.integrationLog.create({
-    data: {
-      provider: IntegrationProvider.PLATEGA,
-      action: "mock.confirmPayment",
-      status: IntegrationLogStatus.SUCCESS,
-      requestPayload: { paymentId: payment.id },
-      responsePayload: { confirmed: true },
-    },
-  })
-
-  return payment
+    return prisma.payment.findUniqueOrThrow({ where: { id: payment.id } })
+  } catch (error) {
+    await prisma.payment.updateMany({
+      where: { id: payment.id, status: PaymentStatus.CREATED },
+      data: { status: PaymentStatus.FAILED, failedAt: new Date() },
+    })
+    throw new IntegrationError(
+      "Payment provider rejected payment creation.",
+      { paymentId: payment.id },
+      { cause: error }
+    )
+  }
 }
 
-async function ensureReferralReward(invitedUserId: string, paymentId: string) {
-  const invite = await prisma.referralInvite.findUnique({
+async function createQuoteAndPayment(
+  input: CreateSubscriptionPaymentInput,
+  provider: Payment["provider"]
+) {
+  return runInTransaction(prisma, async (tx) => {
+    const paymentIdempotencyKey = `payment:${input.idempotencyKey}`
+    const existing = await tx.payment.findUnique({
+      where: { idempotencyKey: paymentIdempotencyKey },
+    })
+
+    if (existing) {
+      assertSamePaymentRequest(existing, input)
+      return existing
+    }
+
+    const pricing = await getActivePricingVersion(tx)
+    const duration = getDurationDiscounts(pricing).find(
+      (option) => option.months === input.months
+    )
+
+    if (!duration) {
+      throw new ValidationError("Selected subscription duration is unavailable.", {
+        months: input.months,
+      })
+    }
+
+    if (
+      input.deviceLimit < pricing.minDeviceLimit ||
+      input.deviceLimit > pricing.maxDeviceLimit
+    ) {
+      throw new ValidationError("Selected device limit is unavailable.", {
+        deviceLimit: input.deviceLimit,
+      })
+    }
+
+    const referralInvite = await tx.referralInvite.findUnique({
+      where: { invitedUserId: input.userId },
+    })
+    const referralDiscountPct =
+      referralInvite?.status === ReferralInviteStatus.REGISTERED
+        ? pricing.referralFriendDiscountPct
+        : 0
+    const price = calculateSubscriptionPrice(pricing, {
+      months: input.months,
+      deviceLimit: input.deviceLimit,
+      lteEnabled: input.lteEnabled,
+      referralDiscountPct,
+    })
+
+    if (price.totalRub <= 0) {
+      throw new ValidationError("Payment total must be positive.")
+    }
+
+    const quote = await tx.priceQuote.create({
+      data: {
+        userId: input.userId,
+        pricingVersionId: pricing.id,
+        durationMonths: input.months,
+        deviceLimit: input.deviceLimit,
+        lteEnabled: input.lteEnabled,
+        referralDiscountPct,
+        subtotalRub: price.subtotalRub,
+        discountRub: price.discountRub,
+        totalRub: price.totalRub,
+        pricingSnapshot: {
+          pricingVersionId: pricing.id,
+          pricingVersion: pricing.version,
+          currency: pricing.currency,
+          baseMonthlyPriceRub: pricing.baseMonthlyPriceRub,
+          extraDeviceMonthlyPriceRub: pricing.extraDeviceMonthlyPriceRub,
+          lteMonthlyPriceRub: pricing.lteMonthlyPriceRub,
+          durationDiscounts:
+            pricing.durationDiscounts as Prisma.InputJsonValue,
+          durationDiscountPct: price.durationDiscountPct,
+          referralDiscountPct,
+        },
+        idempotencyKey: `quote:${input.idempotencyKey}`,
+        expiresAt: new Date(Date.now() + QUOTE_TTL_MS),
+      },
+    })
+
+    return tx.payment.create({
+      data: {
+        userId: input.userId,
+        quoteId: quote.id,
+        provider,
+        status: PaymentStatus.CREATED,
+        amountRub: quote.totalRub,
+        durationMonths: quote.durationMonths,
+        deviceLimit: quote.deviceLimit,
+        lteEnabled: quote.lteEnabled,
+        idempotencyKey: paymentIdempotencyKey,
+      },
+    })
+  })
+}
+
+export function confirmMockPayment(paymentId: string, adminUserId: string) {
+  return runInTransaction(prisma, (tx) =>
+    confirmPaymentInTransaction(tx, paymentId, {
+      actorUserId: adminUserId,
+      source: "admin.mock",
+    })
+  )
+}
+
+export async function confirmPaymentInTransaction(
+  tx: Prisma.TransactionClient,
+  paymentId: string,
+  context: {
+    actorUserId?: string
+    source: string
+    providerEventId?: string
+  }
+) {
+  const payment = await tx.payment.findUnique({
+    where: { id: paymentId },
+    include: { quote: true },
+  })
+
+  if (!payment) {
+    throw new NotFoundError("Payment not found.", { paymentId })
+  }
+
+  if (context.source === "admin.mock" && payment.provider !== "MOCK") {
+    throw new ConflictError("Only mock payments can be confirmed manually.", {
+      paymentId,
+      provider: payment.provider,
+    })
+  }
+
+  if (payment.status === PaymentStatus.SUCCEEDED) {
+    return { payment, applied: false }
+  }
+
+  if (payment.amountRub !== payment.quote.totalRub) {
+    throw new ConflictError("Payment amount no longer matches its quote.", {
+      paymentId,
+    })
+  }
+
+  const succeeded = await tx.payment.updateMany({
+    where: {
+      id: payment.id,
+      status: { in: [PaymentStatus.CREATED, PaymentStatus.PENDING] },
+    },
+    data: { status: PaymentStatus.SUCCEEDED, confirmedAt: new Date() },
+  })
+
+  if (succeeded.count !== 1) {
+    throw new ConflictError("Payment cannot succeed from its current state.", {
+      paymentId,
+      status: payment.status,
+    })
+  }
+
+  const now = new Date()
+  const currentSubscription = await tx.subscription.findUnique({
+    where: { userId: payment.userId },
+  })
+  const periodStartsAt =
+    currentSubscription?.expiresAt && currentSubscription.expiresAt > now
+      ? currentSubscription.expiresAt
+      : now
+  const periodEndsAt = addMonths(periodStartsAt, payment.durationMonths)
+
+  const subscription = currentSubscription
+    ? await tx.subscription.update({
+        where: { id: currentSubscription.id },
+        data: {
+          status: SubscriptionStatus.ACTIVE,
+          startsAt: currentSubscription.startsAt ?? now,
+          expiresAt: periodEndsAt,
+          deviceLimit: payment.deviceLimit,
+          lteEnabled: payment.lteEnabled,
+          syncStatus: "PENDING",
+          version: { increment: 1 },
+        },
+      })
+    : await tx.subscription.create({
+        data: {
+          userId: payment.userId,
+          status: SubscriptionStatus.ACTIVE,
+          startsAt: now,
+          expiresAt: periodEndsAt,
+          deviceLimit: payment.deviceLimit,
+          lteEnabled: payment.lteEnabled,
+          syncStatus: "PENDING",
+        },
+      })
+
+  await tx.subscriptionPeriod.create({
+    data: {
+      subscriptionId: subscription.id,
+      paymentId: payment.id,
+      startsAt: periodStartsAt,
+      endsAt: periodEndsAt,
+      deviceLimit: payment.deviceLimit,
+      lteEnabled: payment.lteEnabled,
+      amountRub: payment.amountRub,
+    },
+  })
+  await tx.priceQuote.update({
+    where: { id: payment.quoteId },
+    data: { consumedAt: now },
+  })
+
+  await createPaymentLedgerEntries(tx, payment, now)
+  await ensureReferralReward(
+    tx,
+    payment.userId,
+    payment.id,
+    payment.quote.pricingVersionId
+  )
+  await tx.job.create({
+    data: {
+      type: JobType.PROVISION_SUBSCRIPTION,
+      idempotencyKey: `subscription:${subscription.id}:payment:${payment.id}`,
+      payload: { subscriptionId: subscription.id, paymentId: payment.id },
+    },
+  })
+  await tx.job.create({
+    data: {
+      type: JobType.SEND_PAYMENT_RECEIPT,
+      idempotencyKey: `payment:${payment.id}:receipt`,
+      payload: { paymentId: payment.id, userId: payment.userId },
+    },
+  })
+  await tx.auditEvent.create({
+    data: {
+      actorUserId: context.actorUserId,
+      eventType: "payment.succeeded",
+      entityType: "Payment",
+      entityId: payment.id,
+      idempotencyKey: `audit:payment:${payment.id}:succeeded`,
+      data: {
+        amountRub: payment.amountRub,
+        source: context.source,
+        providerEventId: context.providerEventId,
+      },
+    },
+  })
+
+  return {
+    payment: await tx.payment.findUniqueOrThrow({ where: { id: payment.id } }),
+    applied: true,
+  }
+}
+
+async function createPaymentLedgerEntries(
+  tx: Prisma.TransactionClient,
+  payment: Payment,
+  postedAt: Date
+) {
+  await tx.walletLedgerEntry.create({
+    data: {
+      userId: payment.userId,
+      paymentId: payment.id,
+      direction: WalletLedgerDirection.CREDIT,
+      amountRub: payment.amountRub,
+      type: WalletLedgerType.PAYMENT_CAPTURE,
+      status: WalletLedgerStatus.POSTED,
+      postedAt,
+      idempotencyKey: `payment:${payment.id}:capture`,
+    },
+  })
+  await tx.walletLedgerEntry.create({
+    data: {
+      userId: payment.userId,
+      paymentId: payment.id,
+      direction: WalletLedgerDirection.DEBIT,
+      amountRub: payment.amountRub,
+      type: WalletLedgerType.SUBSCRIPTION_CHARGE,
+      status: WalletLedgerStatus.POSTED,
+      postedAt,
+      idempotencyKey: `payment:${payment.id}:subscription`,
+    },
+  })
+}
+
+async function ensureReferralReward(
+  tx: Prisma.TransactionClient,
+  invitedUserId: string,
+  paymentId: string,
+  pricingVersionId: string
+) {
+  const invite = await tx.referralInvite.findUnique({
     where: { invitedUserId },
   })
 
-  if (!invite || invite.status === ReferralInviteStatus.PAID) {
+  if (!invite || invite.status !== ReferralInviteStatus.REGISTERED) {
     return
   }
 
-  const settings = await prisma.pricingSettings.findUniqueOrThrow({
-    where: { id: "default" },
+  const converted = await tx.referralInvite.updateMany({
+    where: { id: invite.id, status: ReferralInviteStatus.REGISTERED },
+    data: { status: ReferralInviteStatus.CONVERTED, convertedAt: new Date() },
   })
 
-  await prisma.referralInvite.update({
-    where: { id: invite.id },
-    data: {
-      status: ReferralInviteStatus.PAID,
-      convertedAt: new Date(),
-    },
+  if (converted.count !== 1) {
+    return
+  }
+
+  const pricing = await tx.pricingVersion.findUniqueOrThrow({
+    where: { id: pricingVersionId },
+  })
+  await tx.referralProfile.update({
+    where: { userId: invitedUserId },
+    data: { isEnabled: true, enabledAt: new Date() },
   })
 
-  await prisma.referralReward.create({
+  if (pricing.referralRewardRub <= 0) {
+    return
+  }
+
+  const reward = await tx.referralReward.create({
     data: {
+      inviteId: invite.id,
       inviterId: invite.inviterId,
       invitedUserId,
       paymentId,
-      amountRub: settings.referralRewardRub,
+      amountRub: pricing.referralRewardRub,
       status: ReferralRewardStatus.AVAILABLE,
       availableAt: new Date(),
     },
   })
-
-  await prisma.walletLedgerEntry.create({
+  await tx.walletLedgerEntry.create({
     data: {
       userId: invite.inviterId,
+      referralRewardId: reward.id,
       direction: WalletLedgerDirection.CREDIT,
-      amountRub: settings.referralRewardRub,
+      amountRub: pricing.referralRewardRub,
       type: WalletLedgerType.REFERRAL_REWARD,
       status: WalletLedgerStatus.POSTED,
-      idempotencyKey: `referral:${paymentId}`,
+      postedAt: new Date(),
+      idempotencyKey: `referral:${invite.id}:reward`,
     },
   })
-
-  await prisma.user.update({
+  await tx.user.update({
     where: { id: invite.inviterId },
-    data: {
-      balanceRub: {
-        increment: settings.referralRewardRub,
-      },
-    },
+    data: { balanceRub: { increment: pricing.referralRewardRub } },
   })
+}
 
-  await prisma.referralProfile.upsert({
-    where: { userId: invitedUserId },
-    update: {
-      isEnabled: true,
-      enabledAt: new Date(),
-    },
-    create: {
-      userId: invitedUserId,
-      inviteCode: invitedUserId.slice(-7),
-      inviteUrl: `https://pulsarr.space/?invite=${invitedUserId.slice(-7)}`,
-      isEnabled: true,
-      enabledAt: new Date(),
-    },
-  })
+function assertSamePaymentRequest(
+  payment: Payment,
+  input: CreateSubscriptionPaymentInput
+) {
+  if (
+    payment.userId !== input.userId ||
+    payment.durationMonths !== input.months ||
+    payment.deviceLimit !== input.deviceLimit ||
+    payment.lteEnabled !== input.lteEnabled
+  ) {
+    throw new ConflictError("Payment idempotency key was reused with new input.")
+  }
+}
 
-  await prisma.authIdentity.findFirst({
-    where: {
-      userId: invitedUserId,
-      type: AuthIdentityType.EMAIL,
-    },
-  })
+function addMonths(date: Date, months: number) {
+  const result = new Date(date)
+  result.setMonth(result.getMonth() + months)
+  return result
 }

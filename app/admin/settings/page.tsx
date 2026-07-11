@@ -6,10 +6,15 @@ import { Input } from "@/components/ui/input"
 import { prisma } from "@/lib/db"
 
 export default async function AdminSettingsPage() {
-  const [settings, legalDocuments] = await Promise.all([
-    prisma.pricingSettings.findUniqueOrThrow({ where: { id: "default" } }),
-    prisma.legalDocument.findMany({ orderBy: { title: "asc" } }),
-  ])
+  const settings = await prisma.pricingVersion.findFirstOrThrow({
+    where: { status: "ACTIVE" },
+    orderBy: { version: "desc" },
+  })
+  const legalDocuments = [
+    { id: "agreement", slug: "agreement", title: "Пользовательское соглашение" },
+    { id: "offer", slug: "offer", title: "Публичная оферта" },
+    { id: "confidentiality", slug: "confidentiality", title: "Политика конфиденциальности" },
+  ]
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">

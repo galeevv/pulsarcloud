@@ -1,13 +1,13 @@
-import { Prisma } from "@prisma/client"
+import { Prisma } from "@/generated/prisma/client"
 
 import { prisma } from "@/lib/db"
 
 export const DATABASE_SETUP_MESSAGE =
-  "База данных не готова. Запустите Postgres, затем npm run db:migrate и npm run db:seed."
+  "База данных не готова. Выполните npm run db:deploy и npm run db:seed."
 
 export async function ensureDatabaseReady() {
   try {
-    await prisma.loginChallenge.findFirst({
+    await prisma.authChallenge.findFirst({
       select: {
         id: true,
       },

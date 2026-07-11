@@ -1,5 +1,4 @@
 import type { ComponentProps } from "react"
-import Image from "next/image"
 import {
   AlertCircleIcon,
   KeyRoundIcon,
@@ -9,15 +8,21 @@ import {
   RadioIcon,
   SmartphoneIcon,
 } from "lucide-react"
-import { SubscriptionStatus, type Subscription } from "@prisma/client"
+import { SubscriptionStatus, type Subscription } from "@/generated/prisma/client"
 
 import { changeOwnDeviceLimitAction } from "@/app/(dashboard)/actions"
 import { CopyButton } from "@/components/app/copy-button"
 import { PaymentStatusToast } from "@/components/app/payment-status-toast"
+import {
+  PulsarActionRow,
+  PulsarAssetCard,
+  PulsarIconContainer,
+  pulsarLinkButtonClass,
+} from "@/components/app/pulsar-primitives"
 import { SubscriptionPaymentAction } from "@/components/app/subscription-payment-action"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
-import { Button, buttonVariants } from "@/components/ui/button"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import {
   Empty,
@@ -28,12 +33,10 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { Progress } from "@/components/ui/progress"
-import { Separator } from "@/components/ui/separator"
 import { requireUser } from "@/lib/auth"
 import { prisma } from "@/lib/db"
 import { formatRub } from "@/lib/pricing"
 import { getEffectiveSubscriptionStatus } from "@/lib/subscription"
-import { cn } from "@/lib/utils"
 
 export default async function SubscriptionPage({
   searchParams,
@@ -43,11 +46,11 @@ export default async function SubscriptionPage({
   const user = await requireUser()
   const params = await searchParams
   const [subscription, settings, pendingPayment] = await Promise.all([
-    prisma.subscription.findFirst({
-      where: { userId: user.id },
-      orderBy: { createdAt: "desc" },
+    prisma.subscription.findUnique({ where: { userId: user.id } }),
+    prisma.pricingVersion.findFirstOrThrow({
+      where: { status: "ACTIVE" },
+      orderBy: { version: "desc" },
     }),
-    prisma.pricingSettings.findUniqueOrThrow({ where: { id: "default" } }),
     prisma.payment.findFirst({
       where: { userId: user.id, status: "PENDING" },
       orderBy: { createdAt: "desc" },
@@ -78,86 +81,74 @@ export default async function SubscriptionPage({
             ? formatRub(pendingPayment.amountRub)
             : "ожидает оплаты"
         }
+        error={params.error}
         show={showPendingPayment}
       />
-      <Card className="gap-0 overflow-hidden rounded-3xl border border-border/70 bg-card/40 py-0">
-        <div className="relative aspect-[21/9] w-full">
-          <Image
-            src="/details/observed.gif"
-            alt="PulsarVPN"
-            fill
-            className="object-contain"
-            sizes="(max-width: 768px) 100vw, 448px"
-            unoptimized
-            priority
-          />
-        </div>
-        <Separator className="my-0" />
-        <CardContent className="flex min-h-56 flex-col justify-center gap-4 p-4">
-          {hasSubscriptionRecord ? (
-            <div className="flex flex-col items-center text-center">
-              <p className="text-[26px] leading-8 font-semibold tracking-normal">
-                {subscriptionSummary.title}
-              </p>
-            </div>
-          ) : null}
+      <PulsarAssetCard
+        src="/details/observed.gif"
+        alt="PulsarVPN"
+        contentClassName="flex min-h-56 flex-col justify-center gap-4"
+      >
+        {hasSubscriptionRecord ? (
+          <div className="flex flex-col items-center text-center">
+            <p className="text-[26px] leading-8 font-semibold tracking-normal">
+              {subscriptionSummary.title}
+            </p>
+          </div>
+        ) : null}
 
-          {!hasSubscriptionRecord ? (
-            <SubscriptionEmptyState settings={settings} />
-          ) : subscription ? (
-            <>
-              <SubscriptionUrlCard url={subscription.subscriptionUrl} />
+        {!hasSubscriptionRecord ? (
+          <SubscriptionEmptyState settings={settings} />
+        ) : subscription ? (
+          <>
+            <SubscriptionUrlCard url={subscription.subscriptionUrl} />
 
-              <div className="soft-panel flex flex-col gap-3 p-4">
-                <div className="flex items-center justify-between gap-3 text-sm">
-                  <span className="text-muted-foreground">Период доступа</span>
-                  <span className="font-medium">
-                    {subscription.expiresAt
-                      ? `до ${formatSubscriptionDate(subscription.expiresAt)}`
-                      : "без срока"}
-                  </span>
-                </div>
-                <Progress
-                  value={subscriptionProgress}
-                  aria-label="Период доступа подписки"
-                  data-tone={subscriptionProgressTone}
-                  className="pulsar-progress w-full"
-                />
+            <div className="soft-panel flex flex-col gap-3 p-4">
+              <div className="flex items-center justify-between gap-3 text-sm">
+                <span className="text-muted-foreground">Период доступа</span>
+                <span className="font-medium">
+                  {subscription.expiresAt
+                    ? `до ${formatSubscriptionDate(subscription.expiresAt)}`
+                    : "без срока"}
+                </span>
               </div>
+              <Progress
+                value={subscriptionProgress}
+                aria-label="Период доступа подписки"
+                data-tone={subscriptionProgressTone}
+                className="pulsar-progress w-full"
+              />
+            </div>
 
-              {subscription.lastUserFriendlyError ? (
-                <Alert>
-                  <AlertCircleIcon />
-                  <AlertTitle>Нужна проверка</AlertTitle>
-                  <AlertDescription>
-                    {subscription.lastUserFriendlyError}
-                  </AlertDescription>
-                </Alert>
-              ) : null}
+            {subscription.lastUserFriendlyError ? (
+              <Alert>
+                <AlertCircleIcon />
+                <AlertTitle>Нужна проверка</AlertTitle>
+                <AlertDescription>
+                  {subscription.lastUserFriendlyError}
+                </AlertDescription>
+              </Alert>
+            ) : null}
 
-              {hasActiveSubscription && subscription.subscriptionUrl ? (
-                <a
-                  className={cn(
-                    buttonVariants({ size: "lg" }),
-                    "h-11 w-full rounded-[18px]"
-                  )}
-                  href={`happ://add/${subscription.subscriptionUrl}`}
-                >
-                  <Link2Icon data-icon="inline-start" />
-                  Подключить в Happ
-                </a>
-              ) : (
-                <SubscriptionPaymentAction
-                  settings={settings}
-                  triggerLabel="Продлить подписку"
-                />
-              )}
-            </>
-          ) : (
-            <SubscriptionEmptyState settings={settings} />
-          )}
-        </CardContent>
-      </Card>
+            {hasActiveSubscription && subscription.subscriptionUrl ? (
+              <a
+                className={pulsarLinkButtonClass()}
+                href={`happ://add/${subscription.subscriptionUrl}`}
+              >
+                <Link2Icon data-icon="inline-start" />
+                Подключить в Happ
+              </a>
+            ) : (
+              <SubscriptionPaymentAction
+                settings={settings}
+                triggerLabel="Продлить подписку"
+              />
+            )}
+          </>
+        ) : (
+          <SubscriptionEmptyState settings={settings} />
+        )}
+      </PulsarAssetCard>
 
       {hasSubscriptionRecord && subscription ? (
         <ConnectedDevicesCard
@@ -198,22 +189,21 @@ function SubscriptionEmptyState({
 
 function SubscriptionUrlCard({ url }: { url: string | null }) {
   return (
-    <div className="soft-panel flex items-center justify-between gap-3 p-3">
-      <div className="flex min-w-0 items-center gap-3">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-border/70 bg-background/40">
-          <KeyRoundIcon className="size-4" />
-        </div>
-        <div className="min-w-0">
-          <p className="text-xs text-muted-foreground">Ключ подписки</p>
-          <p className="truncate font-mono text-sm">
-            {url ? formatCompactSubscriptionUrl(url) : "Ссылка появится позже"}
-          </p>
-        </div>
-      </div>
-      {url ? (
-        <CopyButton value={url} label="Скопировать ключ" iconOnly />
-      ) : null}
-    </div>
+    <PulsarActionRow
+      icon={KeyRoundIcon}
+      title="Ключ подписки"
+      titleClassName="text-xs font-normal text-muted-foreground"
+      description={
+        <span className="font-mono text-sm text-foreground">
+          {url ? formatCompactSubscriptionUrl(url) : "Ссылка появится позже"}
+        </span>
+      }
+      action={
+        url ? (
+          <CopyButton value={url} label="Скопировать ключ" iconOnly />
+        ) : null
+      }
+    />
   )
 }
 
@@ -269,9 +259,7 @@ function ConnectedDevicesCard({
                 className="soft-panel flex items-center justify-between gap-3 p-3"
               >
                 <div className="flex min-w-0 items-center gap-3">
-                  <div className="flex size-10 shrink-0 items-center justify-center rounded-2xl border border-border/70 bg-background/40">
-                    <SmartphoneIcon className="size-4" />
-                  </div>
+                  <PulsarIconContainer icon={SmartphoneIcon} size="md" />
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium">
                       Добавить устройство
@@ -287,9 +275,7 @@ function ConnectedDevicesCard({
           </div>
         ) : (
           <div className="soft-panel flex items-center gap-3 p-4">
-            <div className="flex size-10 shrink-0 items-center justify-center rounded-2xl border border-border/70 bg-background/40">
-              <SmartphoneIcon className="size-4" />
-            </div>
+            <PulsarIconContainer icon={SmartphoneIcon} size="md" />
             <p className="text-sm text-muted-foreground">
               Оформите подписку, чтобы подключить устройства.
             </p>

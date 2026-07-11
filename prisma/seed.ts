@@ -1,166 +1,87 @@
-import "dotenv/config"
-
-import { PrismaPg } from "@prisma/adapter-pg"
 import {
-  AuthIdentityType,
-  IntegrationLogStatus,
-  IntegrationProvider,
+  AuthProvider,
   NodeProtocol,
   NodeStatus,
   NodeType,
-  PaymentProviderType,
+  PaymentProvider,
   PaymentStatus,
-  PayoutRequestStatus,
-  PrismaClient,
   ReferralInviteStatus,
-  ReferralRewardStatus,
-  SubscriptionFeatureType,
   SubscriptionStatus,
   SubscriptionSyncStatus,
-  SupportConversationStatus,
-  SupportMessageAuthorRole,
   UserRole,
   WalletLedgerDirection,
   WalletLedgerStatus,
   WalletLedgerType,
-} from "@prisma/client"
+} from "@/generated/prisma/client"
 
-const connectionString =
-  process.env.DATABASE_URL ??
-  "postgresql://pulsar:pulsar@localhost:5432/pulsar2?schema=public"
-
-const adapter = new PrismaPg({ connectionString })
-const prisma = new PrismaClient({ adapter })
+import { prisma } from "@/lib/db"
 
 const now = new Date()
-const daysFromNow = (days: number) =>
-  new Date(now.getTime() + days * 24 * 60 * 60 * 1000)
 
-async function upsertEmailIdentity(userId: string, email: string) {
+async function seedUser(
+  id: string,
+  email: string,
+  role: UserRole = UserRole.USER,
+  balanceRub = 0
+) {
+  const user = await prisma.user.upsert({
+    where: { id },
+    update: { role, balanceRub },
+    create: { id, role, balanceRub },
+  })
+
   await prisma.authIdentity.upsert({
     where: {
-      type_identifier: {
-        type: AuthIdentityType.EMAIL,
-        identifier: email,
+      provider_providerSubject: {
+        provider: AuthProvider.EMAIL,
+        providerSubject: email,
       },
     },
-    update: {
-      userId,
-      verifiedAt: now,
-    },
+    update: { userId: user.id, verifiedAt: now },
     create: {
-      userId,
-      type: AuthIdentityType.EMAIL,
-      identifier: email,
+      userId: user.id,
+      provider: AuthProvider.EMAIL,
+      providerSubject: email,
       verifiedAt: now,
     },
   })
+  await prisma.referralProfile.upsert({
+    where: { userId: user.id },
+    update: {},
+    create: { userId: user.id, inviteCode: `invite-${id}` },
+  })
+
+  return user
 }
 
 async function main() {
-  const admin = await prisma.user.upsert({
-    where: { email: "admin@pulsarr.space" },
-    update: {
-      role: UserRole.ADMIN,
-      balanceRub: 0,
-    },
-    create: {
-      id: "seed_admin",
-      email: "admin@pulsarr.space",
-      role: UserRole.ADMIN,
-      balanceRub: 0,
-    },
-  })
-
-  const user = await prisma.user.upsert({
-    where: { email: "user@pulsarr.space" },
-    update: {
-      role: UserRole.USER,
-      balanceRub: 0,
-    },
-    create: {
-      id: "seed_user",
-      email: "user@pulsarr.space",
-      role: UserRole.USER,
-      balanceRub: 0,
-    },
-  })
-
-  const activeUser = await prisma.user.upsert({
-    where: { email: "active@pulsarr.space" },
-    update: {
-      telegramId: "885112484",
-      role: UserRole.USER,
-      balanceRub: 150,
-    },
-    create: {
-      id: "seed_active_user",
-      email: "active@pulsarr.space",
-      telegramId: "885112484",
-      role: UserRole.USER,
-      balanceRub: 150,
-    },
-  })
-
-  const expiredUser = await prisma.user.upsert({
-    where: { email: "expired@pulsarr.space" },
-    update: {
-      role: UserRole.USER,
-      balanceRub: 0,
-    },
-    create: {
-      id: "seed_expired_user",
-      email: "expired@pulsarr.space",
-      role: UserRole.USER,
-      balanceRub: 0,
-    },
-  })
-
-  for (const item of [admin, user, activeUser, expiredUser]) {
-    if (item.email) {
-      await upsertEmailIdentity(item.id, item.email)
-    }
-  }
+  const admin = await seedUser("seed-admin", "admin@pulsarr.space", UserRole.ADMIN)
+  const user = await seedUser("seed-user", "user@pulsarr.space")
+  const activeUser = await seedUser("seed-active", "active@pulsarr.space", UserRole.USER, 225)
+  const expiredUser = await seedUser("seed-expired", "expired@pulsarr.space")
 
   await prisma.authIdentity.upsert({
     where: {
-      type_identifier: {
-        type: AuthIdentityType.TELEGRAM,
-        identifier: "885112484",
+      provider_providerSubject: {
+        provider: AuthProvider.TELEGRAM,
+        providerSubject: "100000001",
       },
     },
-    update: {
-      userId: activeUser.id,
-      verifiedAt: now,
-    },
+    update: { userId: activeUser.id },
     create: {
       userId: activeUser.id,
-      type: AuthIdentityType.TELEGRAM,
-      identifier: "885112484",
+      provider: AuthProvider.TELEGRAM,
+      providerSubject: "100000001",
       verifiedAt: now,
     },
   })
 
-  await prisma.pricingSettings.upsert({
-    where: { id: "default" },
-    update: {
-      baseMonthlyPriceRub: 119,
-      extraDeviceMonthlyPriceRub: 15,
-      minDeviceLimit: 1,
-      maxDeviceLimit: 5,
-      lteMonthlyPriceRub: 50,
-      durationDiscounts: [
-        { months: 1, discountPct: 0 },
-        { months: 3, discountPct: 10 },
-        { months: 6, discountPct: 15 },
-        { months: 12, discountPct: 30 },
-      ],
-      referralFriendDiscountPct: 50,
-      referralRewardRub: 75,
-      minimalPayoutRub: 150,
-    },
+  const pricing = await prisma.pricingVersion.upsert({
+    where: { version: 1 },
+    update: {},
     create: {
-      id: "default",
+      version: 1,
+      status: "ACTIVE",
       baseMonthlyPriceRub: 119,
       extraDeviceMonthlyPriceRub: 15,
       minDeviceLimit: 1,
@@ -175,438 +96,187 @@ async function main() {
       referralFriendDiscountPct: 50,
       referralRewardRub: 75,
       minimalPayoutRub: 150,
+      effectiveAt: now,
     },
   })
+
+  const activeExpiresAt = new Date(now)
+  activeExpiresAt.setMonth(activeExpiresAt.getMonth() + 2)
+  const expiredAt = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
 
   const activeSubscription = await prisma.subscription.upsert({
-    where: { id: "seed_subscription_active" },
+    where: { userId: activeUser.id },
     update: {
-      userId: activeUser.id,
       status: SubscriptionStatus.ACTIVE,
-      startsAt: daysFromNow(-10),
-      expiresAt: daysFromNow(20),
-      deviceLimit: 3,
-      lteEnabled: true,
-      subscriptionUrl: "https://pulsarr.space/sub/seed-active-user",
-      remnawaveUserId: "mock-rw-active-user",
-      syncStatus: SubscriptionSyncStatus.SYNCED,
-      lastUserFriendlyError: null,
-      lastTechnicalError: null,
+      expiresAt: activeExpiresAt,
     },
     create: {
-      id: "seed_subscription_active",
       userId: activeUser.id,
       status: SubscriptionStatus.ACTIVE,
-      startsAt: daysFromNow(-10),
-      expiresAt: daysFromNow(20),
+      startsAt: now,
+      expiresAt: activeExpiresAt,
       deviceLimit: 3,
       lteEnabled: true,
-      subscriptionUrl: "https://pulsarr.space/sub/seed-active-user",
-      remnawaveUserId: "mock-rw-active-user",
+      remnawaveUserId: "mock-rw-seed-active",
+      subscriptionUrl: "https://pulsarr.space/sub/mock-rw-seed-active",
       syncStatus: SubscriptionSyncStatus.SYNCED,
     },
   })
-
   await prisma.subscription.upsert({
-    where: { id: "seed_subscription_expired" },
-    update: {
-      userId: expiredUser.id,
-      status: SubscriptionStatus.EXPIRED,
-      startsAt: daysFromNow(-45),
-      expiresAt: daysFromNow(-5),
-      deviceLimit: 2,
-      lteEnabled: false,
-      subscriptionUrl: "https://pulsarr.space/sub/seed-expired-user",
-      remnawaveUserId: "mock-rw-expired-user",
-      syncStatus: SubscriptionSyncStatus.SYNCED,
-    },
+    where: { userId: expiredUser.id },
+    update: { status: SubscriptionStatus.EXPIRED, expiresAt: expiredAt },
     create: {
-      id: "seed_subscription_expired",
       userId: expiredUser.id,
       status: SubscriptionStatus.EXPIRED,
-      startsAt: daysFromNow(-45),
-      expiresAt: daysFromNow(-5),
-      deviceLimit: 2,
-      lteEnabled: false,
-      subscriptionUrl: "https://pulsarr.space/sub/seed-expired-user",
-      remnawaveUserId: "mock-rw-expired-user",
-      syncStatus: SubscriptionSyncStatus.SYNCED,
+      startsAt: new Date(now.getTime() - 40 * 24 * 60 * 60 * 1000),
+      expiresAt: expiredAt,
+      deviceLimit: 1,
     },
   })
 
-  for (const feature of [
-    {
-      type: SubscriptionFeatureType.REGULAR_ACCESS,
-      label: "Основные VPN-профили",
-    },
-    {
-      type: SubscriptionFeatureType.LTE_ACCESS,
-      label: "LTE add-on",
-    },
-  ]) {
-    await prisma.subscriptionFeature.upsert({
-      where: {
-        subscriptionId_type: {
-          subscriptionId: activeSubscription.id,
-          type: feature.type,
-        },
-      },
-      update: {
-        label: feature.label,
-        enabled: true,
-      },
-      create: {
-        subscriptionId: activeSubscription.id,
-        type: feature.type,
-        label: feature.label,
-        enabled: true,
-      },
-    })
-  }
-
-  await prisma.payment.upsert({
-    where: { id: "seed_payment_confirmed" },
-    update: {
+  const quote = await prisma.priceQuote.upsert({
+    where: { idempotencyKey: "seed:quote:active" },
+    update: {},
+    create: {
       userId: activeUser.id,
-      provider: PaymentProviderType.MOCK,
-      status: PaymentStatus.CONFIRMED,
-      amountRub: 387,
+      pricingVersionId: pricing.id,
       durationMonths: 3,
       deviceLimit: 3,
       lteEnabled: true,
-      confirmedAt: daysFromNow(-10),
-      checkoutUrl: "mock://payment/seed_payment_confirmed",
+      subtotalRub: 507,
+      discountRub: 51,
+      totalRub: 456,
+      pricingSnapshot: { seed: true },
+      idempotencyKey: "seed:quote:active",
+      expiresAt: activeExpiresAt,
+      consumedAt: now,
     },
+  })
+  const payment = await prisma.payment.upsert({
+    where: { idempotencyKey: "seed:payment:active" },
+    update: {},
     create: {
-      id: "seed_payment_confirmed",
       userId: activeUser.id,
-      provider: PaymentProviderType.MOCK,
-      status: PaymentStatus.CONFIRMED,
-      amountRub: 387,
+      quoteId: quote.id,
+      provider: PaymentProvider.MOCK,
+      status: PaymentStatus.SUCCEEDED,
+      amountRub: 456,
       durationMonths: 3,
       deviceLimit: 3,
       lteEnabled: true,
-      confirmedAt: daysFromNow(-10),
-      checkoutUrl: "mock://payment/seed_payment_confirmed",
+      idempotencyKey: "seed:payment:active",
+      externalPaymentId: "mock-seed-active",
+      confirmedAt: now,
     },
   })
-
-  await prisma.payment.upsert({
-    where: { id: "seed_payment_pending" },
-    update: {
-      userId: user.id,
-      provider: PaymentProviderType.MOCK,
-      status: PaymentStatus.PENDING,
-      amountRub: 119,
-      durationMonths: 1,
-      deviceLimit: 1,
-      lteEnabled: false,
-      checkoutUrl: "mock://payment/seed_payment_pending",
-    },
+  await prisma.subscriptionPeriod.upsert({
+    where: { paymentId: payment.id },
+    update: {},
     create: {
-      id: "seed_payment_pending",
-      userId: user.id,
-      provider: PaymentProviderType.MOCK,
-      status: PaymentStatus.PENDING,
-      amountRub: 119,
-      durationMonths: 1,
-      deviceLimit: 1,
-      lteEnabled: false,
-      checkoutUrl: "mock://payment/seed_payment_pending",
+      subscriptionId: activeSubscription.id,
+      paymentId: payment.id,
+      startsAt: now,
+      endsAt: activeExpiresAt,
+      deviceLimit: 3,
+      lteEnabled: true,
+      amountRub: payment.amountRub,
     },
   })
 
-  const ledgerEntries = [
-    {
-      id: "seed_ledger_referral_reward",
+  await prisma.referralProfile.update({
+    where: { userId: activeUser.id },
+    data: { isEnabled: true, enabledAt: now },
+  })
+  const invite = await prisma.referralInvite.upsert({
+    where: { invitedUserId: user.id },
+    update: {},
+    create: {
+      inviterId: activeUser.id,
+      invitedUserId: user.id,
+      inviteCodeSnapshot: "invite-seed-active",
+      status: ReferralInviteStatus.REGISTERED,
+    },
+  })
+
+  await prisma.walletLedgerEntry.upsert({
+    where: { idempotencyKey: "seed:wallet:reward" },
+    update: {},
+    create: {
       userId: activeUser.id,
       direction: WalletLedgerDirection.CREDIT,
-      amountRub: 300,
-      type: WalletLedgerType.REFERRAL_REWARD,
-      idempotencyKey: "seed:referral_reward",
-    },
-    {
-      id: "seed_ledger_payout_reserve",
-      userId: activeUser.id,
-      direction: WalletLedgerDirection.DEBIT,
-      amountRub: 150,
-      type: WalletLedgerType.PAYOUT_RESERVE,
-      idempotencyKey: "seed:payout_reserve",
-    },
-  ]
-
-  for (const entry of ledgerEntries) {
-    await prisma.walletLedgerEntry.upsert({
-      where: { id: entry.id },
-      update: {
-        userId: entry.userId,
-        direction: entry.direction,
-        amountRub: entry.amountRub,
-        type: entry.type,
-        status: WalletLedgerStatus.POSTED,
-        idempotencyKey: entry.idempotencyKey,
-      },
-      create: {
-        ...entry,
-        status: WalletLedgerStatus.POSTED,
-      },
-    })
-  }
-
-  for (const profile of [
-    {
-      userId: user.id,
-      inviteCode: "1726795",
-      inviteUrl: "https://pulsarr.space/?invite=1726795",
-      isEnabled: false,
-    },
-    {
-      userId: activeUser.id,
-      inviteCode: "8851124",
-      inviteUrl: "https://pulsarr.space/?invite=8851124",
-      isEnabled: true,
-    },
-  ]) {
-    await prisma.referralProfile.upsert({
-      where: { userId: profile.userId },
-      update: {
-        inviteCode: profile.inviteCode,
-        inviteUrl: profile.inviteUrl,
-        isEnabled: profile.isEnabled,
-        enabledAt: profile.isEnabled ? daysFromNow(-10) : null,
-      },
-      create: {
-        ...profile,
-        enabledAt: profile.isEnabled ? daysFromNow(-10) : null,
-      },
-    })
-  }
-
-  await prisma.referralInvite.upsert({
-    where: { invitedUserId: user.id },
-    update: {
-      inviterId: activeUser.id,
-      status: ReferralInviteStatus.REGISTERED,
-    },
-    create: {
-      id: "seed_referral_invite",
-      inviterId: activeUser.id,
-      invitedUserId: user.id,
-      status: ReferralInviteStatus.REGISTERED,
+      amountRub: 225,
+      type: WalletLedgerType.ADMIN_ADJUSTMENT,
+      status: WalletLedgerStatus.POSTED,
+      postedAt: now,
+      idempotencyKey: "seed:wallet:reward",
+      metadata: { inviteId: invite.id },
     },
   })
-
-  await prisma.referralReward.upsert({
-    where: { id: "seed_referral_reward" },
-    update: {
-      inviterId: activeUser.id,
-      invitedUserId: user.id,
-      paymentId: null,
-      amountRub: 75,
-      status: ReferralRewardStatus.AVAILABLE,
-      availableAt: daysFromNow(-3),
-    },
-    create: {
-      id: "seed_referral_reward",
-      inviterId: activeUser.id,
-      invitedUserId: user.id,
-      amountRub: 75,
-      status: ReferralRewardStatus.AVAILABLE,
-      availableAt: daysFromNow(-3),
-    },
-  })
-
   await prisma.payoutRequest.upsert({
-    where: { id: "seed_payout_pending" },
-    update: {
-      userId: activeUser.id,
-      amountRub: 150,
-      status: PayoutRequestStatus.PENDING,
-      payoutDetails: "СБП: +7 900 000-00-00",
-      adminNote: null,
-    },
+    where: { idempotencyKey: "seed:payout:active" },
+    update: {},
     create: {
-      id: "seed_payout_pending",
       userId: activeUser.id,
       amountRub: 150,
-      status: PayoutRequestStatus.PENDING,
-      payoutDetails: "СБП: +7 900 000-00-00",
+      payoutDetails: "Банк: тест; Реквизит: +79990000000",
+      idempotencyKey: "seed:payout:active",
     },
   })
 
-  const conversation = await prisma.supportConversation.upsert({
-    where: { id: "seed_support_conversation" },
-    update: {
-      userId: activeUser.id,
-      status: SupportConversationStatus.OPEN,
-      subject: "Настройка Happ",
-      lastMessageAt: daysFromNow(-1),
-    },
-    create: {
-      id: "seed_support_conversation",
-      userId: activeUser.id,
-      status: SupportConversationStatus.OPEN,
-      subject: "Настройка Happ",
-      lastMessageAt: daysFromNow(-1),
-    },
+  const conversation = await prisma.supportConversation.findFirst({
+    where: { userId: activeUser.id, status: "OPEN" },
+  }) ?? await prisma.supportConversation.create({
+    data: { userId: activeUser.id, subject: "Тестовый чат", lastMessageAt: now },
   })
-
-  for (const message of [
-    {
-      id: "seed_support_message_user",
+  await prisma.supportMessage.upsert({
+    where: { idempotencyKey: "seed:support:user" },
+    update: {},
+    create: {
+      conversationId: conversation.id,
       senderId: activeUser.id,
-      authorRole: SupportMessageAuthorRole.USER,
-      body: "Не получается добавить подписку в Happ.",
+      authorRole: "USER",
+      body: "Нужна помощь с подключением.",
+      idempotencyKey: "seed:support:user",
     },
-    {
-      id: "seed_support_message_admin",
+  })
+  await prisma.supportMessage.upsert({
+    where: { idempotencyKey: "seed:support:admin" },
+    update: {},
+    create: {
+      conversationId: conversation.id,
       senderId: admin.id,
-      authorRole: SupportMessageAuthorRole.ADMIN,
-      body: "Проверьте, что ссылка открывается через кнопку Подключить в Happ.",
+      authorRole: "ADMIN",
+      body: "Проверяем настройки.",
+      idempotencyKey: "seed:support:admin",
     },
-  ]) {
-    await prisma.supportMessage.upsert({
-      where: { id: message.id },
-      update: {
-        conversationId: conversation.id,
-        senderId: message.senderId,
-        authorRole: message.authorRole,
-        body: message.body,
-      },
-      create: {
-        ...message,
-        conversationId: conversation.id,
-      },
-    })
-  }
+  })
 
   const nodes = [
-    {
-      id: "seed_node_de_regular",
-      name: "Frankfurt Core",
-      country: "Germany",
-      city: "Frankfurt",
-      type: NodeType.REGULAR,
-      protocol: NodeProtocol.VLESS_REALITY,
-      domain: "de1.edge.pulsarr.space",
-      status: NodeStatus.ACTIVE,
-      capacity: 500,
-      sortOrder: 10,
-    },
-    {
-      id: "seed_node_nl_lte",
-      name: "Amsterdam LTE",
-      country: "Netherlands",
-      city: "Amsterdam",
-      type: NodeType.LTE,
-      protocol: NodeProtocol.VLESS_XHTTP_TLS,
-      domain: "lte-nl.edge.pulsarr.space",
-      status: NodeStatus.ACTIVE,
-      capacity: 150,
-      sortOrder: 20,
-    },
-    {
-      id: "seed_node_fi_gaming",
-      name: "Helsinki Gaming",
-      country: "Finland",
-      city: "Helsinki",
-      type: NodeType.GAMING,
-      protocol: NodeProtocol.HYSTERIA,
-      domain: "fi-game.edge.pulsarr.space",
-      status: NodeStatus.MAINTENANCE,
-      capacity: 200,
-      sortOrder: 30,
-    },
-  ]
-
-  for (const node of nodes) {
+    ["Moscow", "RU", "Moscow", NodeType.REGULAR, NodeProtocol.VLESS_REALITY, "ru-1.pulsarr.space", NodeStatus.ACTIVE],
+    ["LTE", "NL", "Amsterdam", NodeType.LTE, NodeProtocol.VLESS_XHTTP_TLS, "nl-lte.pulsarr.space", NodeStatus.ACTIVE],
+  ] as const
+  for (const [name, country, city, type, protocol, domain, status] of nodes) {
     await prisma.node.upsert({
-      where: { id: node.id },
-      update: node,
-      create: node,
+      where: { domain },
+      update: { status },
+      create: { name, country, city, type, protocol, domain, status, capacity: 1000 },
     })
   }
 
-  const legalDocuments = [
-    {
-      slug: "terms",
-      title: "Пользовательское соглашение",
-      content:
-        "PulsarVPN предоставляет доступ к VPN-подписке для личного использования. Пользователь обязуется соблюдать применимое законодательство и не использовать сервис для противоправных действий.",
-    },
-    {
-      slug: "privacy",
-      title: "Политика конфиденциальности",
-      content:
-        "Мы храним минимальный набор данных: email или Telegram identity, сведения о платежах, подписках и обращениях в поддержку. Секреты интеграций не публикуются и не отображаются пользователям.",
-    },
-    {
-      slug: "offer",
-      title: "Оферта",
-      content:
-        "Оплата подписки активирует доступ на выбранный срок, лимит устройств и дополнительные опции. LTE является отдельным платным add-on внутри мульти-подписки.",
-    },
-  ]
-
-  for (const doc of legalDocuments) {
-    await prisma.legalDocument.upsert({
-      where: { slug: doc.slug },
-      update: {
-        title: doc.title,
-        content: doc.content,
-        isPublished: true,
-      },
-      create: {
-        ...doc,
-        isPublished: true,
-      },
-    })
-  }
-
-  await prisma.integrationLog.upsert({
-    where: { id: "seed_integration_log" },
-    update: {
-      provider: IntegrationProvider.REMNAWAVE,
-      action: "mock.seed.syncSubscription",
-      status: IntegrationLogStatus.SUCCESS,
-      requestPayload: { subscriptionId: activeSubscription.id },
-      responsePayload: { synced: true },
-      error: null,
-    },
+  await prisma.auditEvent.upsert({
+    where: { idempotencyKey: "seed:audit" },
+    update: {},
     create: {
-      id: "seed_integration_log",
-      provider: IntegrationProvider.REMNAWAVE,
-      action: "mock.seed.syncSubscription",
-      status: IntegrationLogStatus.SUCCESS,
-      requestPayload: { subscriptionId: activeSubscription.id },
-      responsePayload: { synced: true },
-    },
-  })
-
-  await prisma.auditLog.upsert({
-    where: { id: "seed_audit_log" },
-    update: {
       actorUserId: admin.id,
-      action: "seed.initialized",
+      eventType: "seed.completed",
       entityType: "System",
-      entityId: "seed",
-      metadata: { source: "prisma/seed.ts" },
-    },
-    create: {
-      id: "seed_audit_log",
-      actorUserId: admin.id,
-      action: "seed.initialized",
-      entityType: "System",
-      entityId: "seed",
-      metadata: { source: "prisma/seed.ts" },
+      idempotencyKey: "seed:audit",
     },
   })
 }
 
 main()
-  .then(async () => {
-    await prisma.$disconnect()
-  })
+  .then(() => prisma.$disconnect())
   .catch(async (error) => {
     console.error(error)
     await prisma.$disconnect()

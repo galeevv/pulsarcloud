@@ -2,10 +2,15 @@
 
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
-import { NodeProtocol, NodeStatus, NodeType, SupportConversationStatus } from "@prisma/client"
+import { NodeProtocol, NodeStatus, NodeType, SupportConversationStatus, type Prisma } from "@/generated/prisma/client"
 
 import { requireAdmin } from "@/lib/auth"
 import { prisma } from "@/lib/db"
+import { runInTransaction } from "@/lib/transactions"
+import {
+  assertDeviceLimitCoveredByPayment,
+  assertLteCoveredByPayment,
+} from "@/lib/subscription-billing-policy"
 import { confirmMockPayment } from "@/src/server/services/billing/payment-service"
 import { createSubscriptionProvisioningService } from "@/src/server/services/provisioning/subscription-provisioning-service"
 import {
@@ -47,15 +52,7 @@ export async function extendSubscriptionAction(formData: FormData) {
       expiresAt,
     },
   })
-  await prisma.auditLog.create({
-    data: {
-      actorUserId: admin.id,
-      action: "subscription.extend",
-      entityType: "Subscription",
-      entityId: subscriptionId,
-      metadata: { months },
-    },
-  })
+  await audit(admin.id, "subscription.extend", "Subscription", subscriptionId, { months })
   revalidatePath("/admin/subscriptions")
 }
 
@@ -66,19 +63,21 @@ export async function changeSubscriptionDeviceLimitAction(formData: FormData) {
     formData.get("deviceLimit")
   )
 
+  const subscription = await prisma.subscription.findUniqueOrThrow({
+    where: { id: subscriptionId },
+    include: { periods: { orderBy: { createdAt: "desc" }, take: 1 } },
+  })
+  assertDeviceLimitCoveredByPayment(
+    subscription.deviceLimit,
+    deviceLimit,
+    subscription.periods[0]
+  )
+
   await createSubscriptionProvisioningService().updateDeviceLimit(
     subscriptionId,
     deviceLimit
   )
-  await prisma.auditLog.create({
-    data: {
-      actorUserId: admin.id,
-      action: "subscription.deviceLimit",
-      entityType: "Subscription",
-      entityId: subscriptionId,
-      metadata: { deviceLimit },
-    },
-  })
+  await audit(admin.id, "subscription.deviceLimit", "Subscription", subscriptionId, { deviceLimit })
   revalidatePath("/admin/subscriptions")
 }
 
@@ -87,16 +86,18 @@ export async function toggleSubscriptionLteAction(formData: FormData) {
   const subscriptionId = z.string().min(1).parse(formData.get("subscriptionId"))
   const enabled = formData.get("enabled") === "true"
 
-  await createSubscriptionProvisioningService().setLte(subscriptionId, enabled)
-  await prisma.auditLog.create({
-    data: {
-      actorUserId: admin.id,
-      action: "subscription.lte",
-      entityType: "Subscription",
-      entityId: subscriptionId,
-      metadata: { enabled },
-    },
+  const subscription = await prisma.subscription.findUniqueOrThrow({
+    where: { id: subscriptionId },
+    include: { periods: { orderBy: { createdAt: "desc" }, take: 1 } },
   })
+  assertLteCoveredByPayment(
+    subscription.lteEnabled,
+    enabled,
+    subscription.periods[0]
+  )
+
+  await createSubscriptionProvisioningService().setLte(subscriptionId, enabled)
+  await audit(admin.id, "subscription.lte", "Subscription", subscriptionId, { enabled })
   revalidatePath("/admin/subscriptions")
 }
 
@@ -107,14 +108,7 @@ export async function regenerateAdminSubscriptionUrlAction(formData: FormData) {
   await createSubscriptionProvisioningService().regenerateSubscriptionUrl(
     subscriptionId
   )
-  await prisma.auditLog.create({
-    data: {
-      actorUserId: admin.id,
-      action: "subscription.regenerateUrl",
-      entityType: "Subscription",
-      entityId: subscriptionId,
-    },
-  })
+  await audit(admin.id, "subscription.regenerateUrl", "Subscription", subscriptionId)
   revalidatePath("/admin/subscriptions")
 }
 
@@ -123,14 +117,7 @@ export async function syncAdminSubscriptionAction(formData: FormData) {
   const subscriptionId = z.string().min(1).parse(formData.get("subscriptionId"))
 
   await createSubscriptionProvisioningService().syncSubscription(subscriptionId)
-  await prisma.auditLog.create({
-    data: {
-      actorUserId: admin.id,
-      action: "subscription.mockSync",
-      entityType: "Subscription",
-      entityId: subscriptionId,
-    },
-  })
+  await audit(admin.id, "subscription.mockSync", "Subscription", subscriptionId)
   revalidatePath("/admin/subscriptions")
 }
 
@@ -184,14 +171,7 @@ export async function replySupportConversationAction(formData: FormData) {
     where: { id: conversationId },
     data: { lastMessageAt: new Date() },
   })
-  await prisma.auditLog.create({
-    data: {
-      actorUserId: admin.id,
-      action: "support.reply",
-      entityType: "SupportConversation",
-      entityId: conversationId,
-    },
-  })
+  await audit(admin.id, "support.reply", "SupportConversation", conversationId)
   revalidatePath("/admin/support")
 }
 
@@ -206,15 +186,7 @@ export async function setSupportConversationStatusAction(formData: FormData) {
     where: { id: conversationId },
     data: { status },
   })
-  await prisma.auditLog.create({
-    data: {
-      actorUserId: admin.id,
-      action: "support.status",
-      entityType: "SupportConversation",
-      entityId: conversationId,
-      metadata: { status },
-    },
-  })
+  await audit(admin.id, "support.status", "SupportConversation", conversationId, { status })
   revalidatePath("/admin/support")
 }
 
@@ -245,14 +217,7 @@ export async function createNodeAction(formData: FormData) {
     })
 
   const node = await prisma.node.create({ data })
-  await prisma.auditLog.create({
-    data: {
-      actorUserId: admin.id,
-      action: "node.create",
-      entityType: "Node",
-      entityId: node.id,
-    },
-  })
+  await audit(admin.id, "node.create", "Node", node.id)
   revalidatePath("/admin/nodes")
 }
 
@@ -276,17 +241,39 @@ export async function updatePricingSettingsAction(formData: FormData) {
       minimalPayoutRub: formData.get("minimalPayoutRub"),
     })
 
-  await prisma.pricingSettings.update({
-    where: { id: "default" },
-    data,
+  const pricing = await runInTransaction(prisma, async (tx) => {
+    const current = await tx.pricingVersion.findFirstOrThrow({
+      where: { status: "ACTIVE" },
+      orderBy: { version: "desc" },
+    })
+    await tx.pricingVersion.update({
+      where: { id: current.id },
+      data: { status: "RETIRED", retiredAt: new Date() },
+    })
+    return tx.pricingVersion.create({
+      data: {
+        ...data,
+        version: current.version + 1,
+        status: "ACTIVE",
+        effectiveAt: new Date(),
+        minDeviceLimit: current.minDeviceLimit,
+        maxDeviceLimit: current.maxDeviceLimit,
+        durationDiscounts: current.durationDiscounts as Prisma.InputJsonValue,
+      },
+    })
   })
-  await prisma.auditLog.create({
-    data: {
-      actorUserId: admin.id,
-      action: "settings.pricing",
-      entityType: "PricingSettings",
-      entityId: "default",
-    },
-  })
+  await audit(admin.id, "settings.pricing", "PricingVersion", pricing.id)
   revalidatePath("/admin/settings")
+}
+
+function audit(
+  actorUserId: string,
+  eventType: string,
+  entityType: string,
+  entityId?: string,
+  data?: object
+) {
+  return prisma.auditEvent.create({
+    data: { actorUserId, eventType, entityType, entityId, data },
+  })
 }

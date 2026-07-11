@@ -1,69 +1,75 @@
-import { AuthIdentityType } from "@prisma/client"
+import { randomBytes } from "node:crypto"
+
+import { AuthProvider, type Prisma } from "@/generated/prisma/client"
 
 import { prisma } from "@/lib/db"
+import { runInTransaction } from "@/lib/transactions"
 
-export async function getOrCreateEmailUser(email: string, invite?: string) {
-  const existing = await prisma.user.findUnique({
-    where: { email },
+export function getOrCreateEmailUser(email: string, invite?: string) {
+  return runInTransaction(prisma, (tx) =>
+    getOrCreateEmailUserInTransaction(tx, email, invite)
+  )
+}
+
+export async function getOrCreateEmailUserInTransaction(
+  tx: Prisma.TransactionClient,
+  rawEmail: string,
+  invite?: string
+) {
+  const email = rawEmail.trim().toLowerCase()
+  const existingIdentity = await tx.authIdentity.findUnique({
+    where: {
+      provider_providerSubject: {
+        provider: AuthProvider.EMAIL,
+        providerSubject: email,
+      },
+    },
+    include: { user: true },
   })
 
-  if (existing) {
-    await ensureEmailIdentity(existing.id, email)
-    return existing
+  if (existingIdentity) {
+    if (!existingIdentity.verifiedAt) {
+      await tx.authIdentity.update({
+        where: { id: existingIdentity.id },
+        data: { verifiedAt: new Date() },
+      })
+    }
+
+    return existingIdentity.user
   }
 
-  const user = await prisma.user.create({
+  const user = await tx.user.create({
     data: {
-      email,
       referralProfile: {
         create: {
           inviteCode: createInviteCode(),
-          inviteUrl: "",
-          isEnabled: false,
+        },
+      },
+      authIdentities: {
+        create: {
+          provider: AuthProvider.EMAIL,
+          providerSubject: email,
+          verifiedAt: new Date(),
         },
       },
     },
   })
 
-  await prisma.referralProfile.update({
-    where: { userId: user.id },
-    data: {
-      inviteUrl: `https://pulsarr.space/?invite=${user.id.slice(-7)}`,
-    },
-  })
-  await ensureEmailIdentity(user.id, email)
-  await captureInvite(user.id, invite)
+  await captureInvite(tx, user.id, invite)
 
   return user
 }
 
-async function ensureEmailIdentity(userId: string, email: string) {
-  await prisma.authIdentity.upsert({
-    where: {
-      type_identifier: {
-        type: AuthIdentityType.EMAIL,
-        identifier: email,
-      },
-    },
-    update: {
-      userId,
-      verifiedAt: new Date(),
-    },
-    create: {
-      userId,
-      type: AuthIdentityType.EMAIL,
-      identifier: email,
-      verifiedAt: new Date(),
-    },
-  })
-}
-
-async function captureInvite(invitedUserId: string, invite?: string) {
+async function captureInvite(
+  tx: Prisma.TransactionClient,
+  invitedUserId: string,
+  invite?: string
+) {
   if (!invite) {
     return
   }
 
-  const inviterProfile = await prisma.referralProfile.findUnique({
+  const inviterProfile = await tx.referralProfile.findUnique({
     where: { inviteCode: invite },
   })
 
@@ -71,18 +77,15 @@ async function captureInvite(invitedUserId: string, invite?: string) {
     return
   }
 
-  await prisma.referralInvite.upsert({
-    where: { invitedUserId },
-    update: {
-      inviterId: inviterProfile.userId,
-    },
-    create: {
+  await tx.referralInvite.create({
+    data: {
       inviterId: inviterProfile.userId,
       invitedUserId,
+      inviteCodeSnapshot: inviterProfile.inviteCode,
     },
   })
 }
 
 function createInviteCode() {
-  return String(Math.floor(1000000 + Math.random() * 9000000))
+  return randomBytes(9).toString("base64url")
 }

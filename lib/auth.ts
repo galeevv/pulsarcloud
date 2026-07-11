@@ -1,13 +1,22 @@
 import { cookies, headers } from "next/headers"
 import { redirect } from "next/navigation"
-import type { User } from "@prisma/client"
-import { UserRole } from "@prisma/client"
+
+import {
+  AuthProvider,
+  UserRole,
+  type User,
+} from "@/generated/prisma/client"
 
 import { prisma } from "@/lib/db"
 import { isDatabaseSetupError } from "@/lib/db-health"
 import { createRandomToken, hashValue } from "@/lib/security"
 
 const SESSION_TTL_DAYS = 30
+
+export type CurrentUser = User & {
+  email: string | null
+  telegramId: string | null
+}
 
 export function getSessionCookieName() {
   return process.env.SESSION_COOKIE_NAME ?? "pulsar_session"
@@ -19,14 +28,13 @@ function getSessionExpiresAt() {
 
 export async function createSession(userId: string) {
   const token = createRandomToken()
-  const tokenHash = hashValue(token)
   const expiresAt = getSessionExpiresAt()
   const headerStore = await headers()
 
   await prisma.session.create({
     data: {
       userId,
-      tokenHash,
+      tokenHash: hashValue(token),
       expiresAt,
       userAgent: headerStore.get("user-agent"),
       ipAddress: headerStore.get("x-forwarded-for"),
@@ -48,17 +56,16 @@ export async function clearCurrentSession() {
   const token = cookieStore.get(getSessionCookieName())?.value
 
   if (token) {
-    await prisma.session.deleteMany({
-      where: {
-        tokenHash: hashValue(token),
-      },
+    await prisma.session.updateMany({
+      where: { tokenHash: hashValue(token), revokedAt: null },
+      data: { revokedAt: new Date() },
     })
   }
 
   cookieStore.delete(getSessionCookieName())
 }
 
-export async function getCurrentUser(): Promise<User | null> {
+export async function getCurrentUser(): Promise<CurrentUser | null> {
   const cookieStore = await cookies()
   const token = cookieStore.get(getSessionCookieName())?.value
 
@@ -68,12 +75,8 @@ export async function getCurrentUser(): Promise<User | null> {
 
   const session = await prisma.session
     .findUnique({
-      where: {
-        tokenHash: hashValue(token),
-      },
-      include: {
-        user: true,
-      },
+      where: { tokenHash: hashValue(token) },
+      include: { user: { include: { authIdentities: true } } },
     })
     .catch((error: unknown) => {
       if (isDatabaseSetupError(error)) {
@@ -83,21 +86,29 @@ export async function getCurrentUser(): Promise<User | null> {
       throw error
     })
 
-  if (!session) {
+  if (!session || session.revokedAt) {
     return null
   }
 
   if (session.expiresAt <= new Date()) {
-    await prisma.session.delete({
-      where: {
-        id: session.id,
-      },
+    await prisma.session.updateMany({
+      where: { id: session.id, revokedAt: null },
+      data: { revokedAt: new Date() },
     })
 
     return null
   }
 
-  return session.user
+  const email =
+    session.user.authIdentities.find(
+      (identity) => identity.provider === AuthProvider.EMAIL
+    )?.providerSubject ?? null
+  const telegramId =
+    session.user.authIdentities.find(
+      (identity) => identity.provider === AuthProvider.TELEGRAM
+    )?.providerSubject ?? null
+
+  return { ...session.user, email, telegramId }
 }
 
 export async function requireUser() {

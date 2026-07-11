@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
 import { prisma } from "@/lib/db"
+import { getUserLabel } from "@/lib/user-identity"
 
 export default async function AdminSupportPage({
   searchParams,
@@ -17,7 +18,7 @@ export default async function AdminSupportPage({
   const conversations = await prisma.supportConversation.findMany({
     where: params.status ? { status: params.status } : undefined,
     include: {
-      user: true,
+      user: { include: { authIdentities: true } },
       messages: { orderBy: { createdAt: "asc" } },
     },
     orderBy: { updatedAt: "desc" },
@@ -29,7 +30,7 @@ export default async function AdminSupportPage({
         <Card key={conversation.id} className="glass-card rounded-3xl">
           <CardHeader>
             <CardTitle className="flex items-center justify-between gap-3">
-              <span>{conversation.user.email}</span>
+              <span>{getUserLabel(conversation.user.authIdentities)}</span>
               <Badge>{conversation.status}</Badge>
             </CardTitle>
           </CardHeader>

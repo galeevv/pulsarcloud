@@ -3,155 +3,210 @@ import {
   WalletLedgerDirection,
   WalletLedgerStatus,
   WalletLedgerType,
-} from "@prisma/client"
+  type Prisma,
+} from "@/generated/prisma/client"
 
+import { ConflictError, NotFoundError, ValidationError } from "@/lib/application-errors"
 import { prisma } from "@/lib/db"
+import { getActivePricingVersion } from "@/lib/pricing-data"
+import { runInTransaction } from "@/lib/transactions"
 
-export async function createPayoutRequest(
+export function createPayoutRequest(
   userId: string,
   amountRub: number,
-  payoutDetails: string
+  payoutDetails: string,
+  idempotencyKey: string
 ) {
-  const settings = await prisma.pricingSettings.findUniqueOrThrow({
-    where: { id: "default" },
-  })
-  const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } })
+  return runInTransaction(prisma, async (tx) => {
+    const existing = await tx.payoutRequest.findUnique({
+      where: { idempotencyKey },
+    })
 
-  if (amountRub < settings.minimalPayoutRub) {
-    throw new Error("Минимальная сумма вывода ещё не набрана.")
+    if (existing) {
+      return existing
+    }
+
+    const settings = await getActivePricingVersion(tx)
+
+    if (amountRub < settings.minimalPayoutRub) {
+      throw new ValidationError("Минимальная сумма вывода ещё не набрана.")
+    }
+
+    const reserved = await tx.user.updateMany({
+      where: { id: userId, balanceRub: { gte: amountRub } },
+      data: { balanceRub: { decrement: amountRub } },
+    })
+
+    if (reserved.count !== 1) {
+      throw new ConflictError("Недостаточно доступного баланса.")
+    }
+
+    const payout = await tx.payoutRequest.create({
+      data: {
+        userId,
+        amountRub,
+        payoutDetails,
+        idempotencyKey,
+      },
+    })
+    await tx.walletLedgerEntry.create({
+      data: {
+        userId,
+        payoutRequestId: payout.id,
+        direction: WalletLedgerDirection.DEBIT,
+        amountRub,
+        type: WalletLedgerType.PAYOUT_RESERVE,
+        status: WalletLedgerStatus.POSTED,
+        postedAt: new Date(),
+        idempotencyKey: `payout:${payout.id}:reserve`,
+      },
+    })
+
+    return payout
+  })
+}
+
+export function approvePayoutRequest(
+  payoutId: string,
+  adminUserId: string,
+  adminNote?: string
+) {
+  return transitionPayout(
+    payoutId,
+    [PayoutRequestStatus.PENDING],
+    PayoutRequestStatus.APPROVED,
+    adminUserId,
+    adminNote
+  )
+}
+
+export function markPayoutRequestPaid(
+  payoutId: string,
+  adminUserId: string,
+  adminNote?: string
+) {
+  return transitionPayout(
+    payoutId,
+    [PayoutRequestStatus.APPROVED],
+    PayoutRequestStatus.PAID,
+    adminUserId,
+    adminNote
+  )
+}
+
+export function rejectPayoutRequest(
+  payoutId: string,
+  adminUserId: string,
+  adminNote?: string
+) {
+  return runInTransaction(prisma, async (tx) => {
+    const payout = await getPayout(tx, payoutId)
+
+    if (
+      payout.status !== PayoutRequestStatus.PENDING &&
+      payout.status !== PayoutRequestStatus.APPROVED
+    ) {
+      throw new ConflictError("Payout cannot be rejected from its current state.", {
+        payoutId,
+        status: payout.status,
+      })
+    }
+
+    const changed = await tx.payoutRequest.updateMany({
+      where: {
+        id: payoutId,
+        status: { in: [PayoutRequestStatus.PENDING, PayoutRequestStatus.APPROVED] },
+      },
+      data: {
+        status: PayoutRequestStatus.REJECTED,
+        rejectedAt: new Date(),
+        rejectedById: adminUserId,
+        adminNote,
+      },
+    })
+
+    if (changed.count !== 1) {
+      throw new ConflictError("Payout state changed concurrently.", { payoutId })
+    }
+
+    await tx.walletLedgerEntry.create({
+      data: {
+        userId: payout.userId,
+        payoutRequestId: payout.id,
+        direction: WalletLedgerDirection.CREDIT,
+        amountRub: payout.amountRub,
+        type: WalletLedgerType.PAYOUT_RELEASE,
+        status: WalletLedgerStatus.POSTED,
+        postedAt: new Date(),
+        idempotencyKey: `payout:${payout.id}:release`,
+      },
+    })
+    await tx.user.update({
+      where: { id: payout.userId },
+      data: { balanceRub: { increment: payout.amountRub } },
+    })
+    await audit(tx, adminUserId, "payout.rejected", payout.id)
+
+    return tx.payoutRequest.findUniqueOrThrow({ where: { id: payout.id } })
+  })
+}
+
+function transitionPayout(
+  payoutId: string,
+  allowedStatuses: PayoutRequestStatus[],
+  nextStatus: PayoutRequestStatus,
+  adminUserId: string,
+  adminNote?: string
+) {
+  return runInTransaction(prisma, async (tx) => {
+    await getPayout(tx, payoutId)
+    const now = new Date()
+    const changed = await tx.payoutRequest.updateMany({
+      where: { id: payoutId, status: { in: allowedStatuses } },
+      data: {
+        status: nextStatus,
+        adminNote,
+        ...(nextStatus === PayoutRequestStatus.APPROVED
+          ? { approvedAt: now, approvedById: adminUserId }
+          : { paidAt: now, paidById: adminUserId }),
+      },
+    })
+
+    if (changed.count !== 1) {
+      throw new ConflictError("Payout cannot transition from its current state.", {
+        payoutId,
+        nextStatus,
+      })
+    }
+
+    await audit(tx, adminUserId, `payout.${nextStatus.toLowerCase()}`, payoutId)
+    return tx.payoutRequest.findUniqueOrThrow({ where: { id: payoutId } })
+  })
+}
+
+async function getPayout(tx: Prisma.TransactionClient, payoutId: string) {
+  const payout = await tx.payoutRequest.findUnique({ where: { id: payoutId } })
+
+  if (!payout) {
+    throw new NotFoundError("Payout not found.", { payoutId })
   }
 
-  if (amountRub > user.balanceRub) {
-    throw new Error("Недостаточно доступного баланса.")
-  }
-
-  const payout = await prisma.payoutRequest.create({
-    data: {
-      userId,
-      amountRub,
-      payoutDetails,
-      status: PayoutRequestStatus.PENDING,
-    },
-  })
-
-  await prisma.walletLedgerEntry.create({
-    data: {
-      userId,
-      direction: WalletLedgerDirection.DEBIT,
-      amountRub,
-      type: WalletLedgerType.PAYOUT_RESERVE,
-      status: WalletLedgerStatus.POSTED,
-      idempotencyKey: `payout:${payout.id}:reserve`,
-    },
-  })
-
-  await prisma.user.update({
-    where: { id: userId },
-    data: {
-      balanceRub: {
-        decrement: amountRub,
-      },
-    },
-  })
-
   return payout
 }
 
-export async function approvePayoutRequest(
-  payoutId: string,
-  adminUserId: string,
-  adminNote?: string
+function audit(
+  tx: Prisma.TransactionClient,
+  actorUserId: string,
+  eventType: string,
+  entityId: string
 ) {
-  const payout = await prisma.payoutRequest.update({
-    where: { id: payoutId },
-    data: {
-      status: PayoutRequestStatus.APPROVED,
-      approvedAt: new Date(),
-      approvedById: adminUserId,
-      adminNote,
-    },
-  })
-
-  await audit(adminUserId, "payout.approve", payout.id)
-
-  return payout
-}
-
-export async function markPayoutRequestPaid(
-  payoutId: string,
-  adminUserId: string,
-  adminNote?: string
-) {
-  const payout = await prisma.payoutRequest.update({
-    where: { id: payoutId },
-    data: {
-      status: PayoutRequestStatus.PAID,
-      paidAt: new Date(),
-      paidById: adminUserId,
-      adminNote,
-    },
-  })
-
-  await prisma.walletLedgerEntry.create({
-    data: {
-      userId: payout.userId,
-      direction: WalletLedgerDirection.DEBIT,
-      amountRub: payout.amountRub,
-      type: WalletLedgerType.PAYOUT_PAID,
-      status: WalletLedgerStatus.POSTED,
-      idempotencyKey: `payout:${payout.id}:paid`,
-    },
-  })
-  await audit(adminUserId, "payout.paid", payout.id)
-
-  return payout
-}
-
-export async function rejectPayoutRequest(
-  payoutId: string,
-  adminUserId: string,
-  adminNote?: string
-) {
-  const payout = await prisma.payoutRequest.update({
-    where: { id: payoutId },
-    data: {
-      status: PayoutRequestStatus.REJECTED,
-      rejectedAt: new Date(),
-      rejectedById: adminUserId,
-      adminNote,
-    },
-  })
-
-  await prisma.walletLedgerEntry.create({
-    data: {
-      userId: payout.userId,
-      direction: WalletLedgerDirection.CREDIT,
-      amountRub: payout.amountRub,
-      type: WalletLedgerType.PAYOUT_REFUND,
-      status: WalletLedgerStatus.POSTED,
-      idempotencyKey: `payout:${payout.id}:refund`,
-    },
-  })
-  await prisma.user.update({
-    where: { id: payout.userId },
-    data: {
-      balanceRub: {
-        increment: payout.amountRub,
-      },
-    },
-  })
-  await audit(adminUserId, "payout.reject", payout.id)
-
-  return payout
-}
-
-async function audit(actorUserId: string, action: string, entityId: string) {
-  await prisma.auditLog.create({
+  return tx.auditEvent.create({
     data: {
       actorUserId,
-      action,
+      eventType,
       entityType: "PayoutRequest",
       entityId,
+      idempotencyKey: `audit:${eventType}:${entityId}`,
     },
   })
 }

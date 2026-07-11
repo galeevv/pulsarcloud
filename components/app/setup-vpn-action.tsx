@@ -18,6 +18,10 @@ import { toast } from "sonner"
 
 import { Button, buttonVariants } from "@/components/ui/button"
 import {
+  pulsarControlClass,
+  pulsarCtaClass,
+} from "@/components/app/pulsar-primitives"
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -256,7 +260,7 @@ function SetupVpnFlow({
                 <Button
                   type="button"
                   size="lg"
-                  className="h-11 rounded-[18px]"
+                  className={pulsarControlClass}
                   onClick={() => {
                     setSelectedPlatform(detectCurrentPlatform())
                     setInstallReturnStep("start")
@@ -270,7 +274,7 @@ function SetupVpnFlow({
                   type="button"
                   size="lg"
                   variant="outline"
-                  className="h-11 rounded-[18px]"
+                  className={pulsarControlClass}
                   onClick={() => setStep("choose-device")}
                 >
                   Выбрать другое устройство
@@ -300,7 +304,7 @@ function SetupVpnFlow({
                       type="button"
                       size="lg"
                       variant="outline"
-                      className="h-11 rounded-[18px]"
+                      className={pulsarControlClass}
                       onClick={() => {
                         setSelectedPlatform(item.platform)
                         setInstallReturnStep("choose-device")
@@ -333,7 +337,7 @@ function SetupVpnFlow({
                     key={link.url}
                     className={cn(
                       buttonVariants({ size: "lg" }),
-                      "h-11 rounded-[18px]"
+                      pulsarControlClass
                     )}
                     href={link.url}
                     rel="noreferrer"
@@ -347,7 +351,7 @@ function SetupVpnFlow({
                   type="button"
                   size="lg"
                   variant="outline"
-                  className="h-11 rounded-[18px]"
+                  className={pulsarControlClass}
                   onClick={() => setStep("subscription")}
                 >
                   Далее
@@ -373,7 +377,10 @@ function SetupVpnFlow({
                   <SetupActions>
                     <button
                       type="button"
-                      className="flex h-11 min-w-0 items-center justify-between gap-3 rounded-[18px] border border-border/70 bg-background/40 px-3 text-left font-mono text-sm"
+                      className={cn(
+                        "flex min-w-0 items-center justify-between gap-3 border border-border/70 bg-background/40 px-3 text-left font-mono text-sm",
+                        pulsarControlClass
+                      )}
                       onClick={copySubscriptionUrl}
                     >
                       <span className="truncate">{displaySubscriptionUrl}</span>
@@ -382,7 +389,7 @@ function SetupVpnFlow({
                     <a
                       className={cn(
                         buttonVariants({ size: "lg" }),
-                        "h-11 rounded-[18px]"
+                        pulsarControlClass
                       )}
                       href={`happ://add/${effectiveSubscriptionUrl}`}
                     >
@@ -393,7 +400,7 @@ function SetupVpnFlow({
                       type="button"
                       size="lg"
                       variant="outline"
-                      className="h-11 rounded-[18px]"
+                      className={pulsarControlClass}
                       onClick={() => setStep("done")}
                     >
                       Продолжить
@@ -414,7 +421,7 @@ function SetupVpnFlow({
                       type="button"
                       size="lg"
                       variant="outline"
-                      className="h-11 rounded-[18px]"
+                      className={pulsarControlClass}
                       onClick={onOpenPayment}
                     >
                       <CreditCardIcon data-icon="inline-start" />
@@ -442,7 +449,7 @@ function SetupVpnFlow({
                 <Button
                   type="button"
                   size="lg"
-                  className="h-11 rounded-[18px]"
+                  className={pulsarControlClass}
                   onClick={onComplete}
                 >
                   Завершить
@@ -478,7 +485,7 @@ export function SetupVpnAction({
             type="button"
             size="lg"
             variant="outline"
-            className="h-11 w-full rounded-[18px]"
+            className={pulsarCtaClass}
           />
         }
       >

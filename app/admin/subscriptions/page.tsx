@@ -18,10 +18,11 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { prisma } from "@/lib/db"
+import { getUserLabel } from "@/lib/user-identity"
 
 export default async function AdminSubscriptionsPage() {
   const subscriptions = await prisma.subscription.findMany({
-    include: { user: true },
+    include: { user: { include: { authIdentities: true } } },
     orderBy: { createdAt: "desc" },
   })
 
@@ -46,7 +47,7 @@ export default async function AdminSubscriptionsPage() {
           <TableBody>
             {subscriptions.map((subscription) => (
               <TableRow key={subscription.id}>
-                <TableCell>{subscription.user.email ?? subscription.user.telegramId}</TableCell>
+                <TableCell>{getUserLabel(subscription.user.authIdentities)}</TableCell>
                 <TableCell><Badge>{subscription.status}</Badge></TableCell>
                 <TableCell>
                   {subscription.startsAt?.toLocaleDateString("ru-RU") ?? "—"} → {subscription.expiresAt?.toLocaleDateString("ru-RU") ?? "—"}

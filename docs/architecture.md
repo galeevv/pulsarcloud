@@ -1,39 +1,36 @@
 # Architecture
 
-Pulsar 2.0 is split into UI, server actions, business services, and integration adapters.
+Pulsar 2.0 runs as one Next.js App Router web process and one background worker.
+Both use one persistent SQLite database, `pulsar.db`, through Prisma 7 and
+`@prisma/adapter-better-sqlite3`. No network filesystem or additional web/worker
+replicas are supported by this topology.
 
-## Layers
+## Boundaries
 
-- `app/*`: App Router pages, layouts, server actions, and route surfaces.
-- `components/*`: shadcn/ui primitives and Pulsar UI composition.
-- `lib/*`: database singleton, auth/session helpers, pricing, subscription presentation helpers.
-- `src/server/services/*`: business services and integration boundaries.
-- `prisma/*`: schema, migration, seed.
+- `app/*`: pages, route handlers, and thin authenticated Server Actions.
+- `lib/db.ts`: the single process-wide Prisma client and mandatory SQLite startup checks.
+- `lib/transactions.ts`: short SQL transactions with bounded `SQLITE_BUSY` retry.
+- `src/server/services/*`: domain workflows and integration adapters.
+- `src/server/worker.ts`: one durable `Job` consumer.
+- `prisma/*`: schema, clean SQLite baseline migration, and development seed.
 
-UI never calls external APIs directly. Server actions validate session and input, then call services. Services use interfaces such as `RemnawaveClient`, `PaymentProvider`, and `TelegramAuthService`.
+External HTTP calls are never made inside SQL transactions. A transaction
+commits domain state and a `Job`; the worker performs I/O and commits the result
+in a second short transaction.
 
-## Domain Rules
+## Foundation entities
 
-- One user can have one current multi-subscription in the product flow.
-- A subscription exposes one `subscriptionUrl` to the user.
-- Multiple VPN profiles/hosts are internal and represented by features/nodes, not shown as inbound IDs.
-- LTE is a paid add-on on `Subscription.lteEnabled`.
-- Balance is cached on `User.balanceRub`, but `WalletLedgerEntry` is the source of history.
-- Referral UX exposes a link, not a separate user-facing referral-code entity.
+`User`, `AuthIdentity`, `AuthChallenge`, `Session`, `PricingVersion`,
+`PriceQuote`, `Payment`, `PaymentWebhookEvent`, `Subscription`,
+`SubscriptionPeriod`, `ReferralProfile`, `ReferralInvite`, `ReferralReward`,
+`WalletLedgerEntry`, `PayoutRequest`, `SupportConversation`, `SupportMessage`,
+`TelegramUpdate`, `Job`, and `AuditEvent`.
 
-## Security
+`Node` is retained as the VPN provisioning inventory used by the existing admin
+UX. Legal documents remain version-controlled markdown files.
 
-- No username/password auth.
-- Sessions are opaque random tokens stored hashed in `Session.tokenHash`.
-- Session cookie is HTTP-only, same-site lax, secure in production.
-- `requireUser()` protects user server actions and pages.
-- `requireAdmin()` protects admin server actions and pages.
-- Technical provisioning errors are stored in `Subscription.lastTechnicalError` and `IntegrationLog`, while users see `lastUserFriendlyError`.
+## SQLite safety
 
-## Database
-
-The Prisma schema includes all required entities:
-
-`User`, `AuthIdentity`, `Session`, `EmailOtp`, `LoginChallenge`, `Subscription`, `SubscriptionFeature`, `DeviceLimitChange`, `Payment`, `PaymentWebhookLog`, `WalletLedgerEntry`, `ReferralProfile`, `ReferralInvite`, `ReferralReward`, `PayoutRequest`, `SupportConversation`, `SupportMessage`, `LegalDocument`, `Node`, `IntegrationLog`, `AuditLog`, `PricingSettings`.
-
-Money is stored as integer RUB values.
+Every web/worker connection verifies a SQLite build containing the WAL-reset
+fix, then checks `journal_mode=WAL`, `foreign_keys=ON`, `synchronous=FULL`,
+`busy_timeout=5000`, and `temp_store=MEMORY`.

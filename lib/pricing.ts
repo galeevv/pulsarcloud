@@ -1,4 +1,4 @@
-import type { PricingSettings } from "@prisma/client"
+import type { PricingVersion } from "@/generated/prisma/client"
 
 export type DurationDiscount = {
   months: number
@@ -12,7 +12,7 @@ export type SubscriptionPriceInput = {
   referralDiscountPct?: number
 }
 
-export function getDurationDiscounts(settings: PricingSettings) {
+export function getDurationDiscounts(settings: PricingVersion) {
   if (!Array.isArray(settings.durationDiscounts)) {
     return []
   }
@@ -29,7 +29,14 @@ export function getDurationDiscounts(settings: PricingSettings) {
 }
 
 export function calculateSubscriptionPriceRub(
-  settings: PricingSettings,
+  settings: PricingVersion,
+  input: SubscriptionPriceInput
+) {
+  return calculateSubscriptionPrice(settings, input).totalRub
+}
+
+export function calculateSubscriptionPrice(
+  settings: PricingVersion,
   input: SubscriptionPriceInput
 ) {
   const normalizedDeviceLimit = Math.min(
@@ -50,10 +57,19 @@ export function calculateSubscriptionPriceRub(
   )
   const referralDiscountPct = input.referralDiscountPct ?? 0
 
-  return Math.max(
+  const totalRub = Math.max(
     0,
     Math.round(afterDurationDiscount * (1 - referralDiscountPct / 100))
   )
+
+  return {
+    monthlyRub: monthly,
+    subtotalRub: subtotal,
+    durationDiscountPct: durationDiscount,
+    referralDiscountPct,
+    discountRub: subtotal - totalRub,
+    totalRub,
+  }
 }
 
 export function formatRub(amountRub: number) {

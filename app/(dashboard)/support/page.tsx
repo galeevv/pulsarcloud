@@ -2,18 +2,11 @@ import { HeadphonesIcon } from "lucide-react"
 
 import { createSupportMessageAction } from "@/app/(dashboard)/actions"
 import { SupportComposer } from "@/components/app/support-composer"
-import { Bubble, BubbleContent, BubbleGroup } from "@/components/ui/bubble"
-import { Card, CardContent } from "@/components/ui/card"
 import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@/components/ui/empty"
-import { Marker, MarkerContent } from "@/components/ui/marker"
-import { Message, MessageContent, MessageFooter } from "@/components/ui/message"
-import { ScrollArea } from "@/components/ui/scroll-area"
+  SupportThread,
+  type SupportThreadMessage,
+} from "@/components/app/support-thread"
+import { Card, CardContent } from "@/components/ui/card"
 import { requireUser } from "@/lib/auth"
 import { prisma } from "@/lib/db"
 
@@ -28,7 +21,13 @@ export default async function SupportPage() {
       },
     },
   })
-  const messages = conversation?.messages ?? []
+  const messages: SupportThreadMessage[] =
+    conversation?.messages.map((message) => ({
+      authorRole: message.authorRole,
+      body: message.body,
+      createdAtLabel: formatMessageTime(message.createdAt),
+      id: message.id,
+    })) ?? []
 
   return (
     <main className="pulsar-container">
@@ -45,53 +44,7 @@ export default async function SupportPage() {
             </div>
           </div>
 
-          <ScrollArea className="min-h-0 flex-1">
-            <div className="flex min-h-full flex-col gap-4 px-3 py-4">
-              {messages.length ? (
-                <>
-                  <Marker variant="separator" className="text-xs">
-                    <MarkerContent>Сегодня</MarkerContent>
-                  </Marker>
-                  {messages.map((message) => {
-                    const isUser = message.authorRole === "USER"
-
-                    return (
-                      <Message
-                        key={message.id}
-                        align={isUser ? "end" : "start"}
-                      >
-                        <MessageContent>
-                          <BubbleGroup>
-                            <Bubble
-                              align={isUser ? "end" : "start"}
-                              variant={isUser ? "default" : "outline"}
-                            >
-                              <BubbleContent>{message.body}</BubbleContent>
-                            </Bubble>
-                          </BubbleGroup>
-                          <MessageFooter>
-                            {formatMessageTime(message.createdAt)}
-                          </MessageFooter>
-                        </MessageContent>
-                      </Message>
-                    )
-                  })}
-                </>
-              ) : (
-                <Empty className="min-h-64 border border-border/70 bg-background/25 p-6">
-                  <EmptyHeader>
-                    <EmptyMedia variant="icon">
-                      <HeadphonesIcon />
-                    </EmptyMedia>
-                    <EmptyTitle>Напишите нам</EmptyTitle>
-                    <EmptyDescription>
-                      Поможем с оплатой, подпиской или настройкой VPN.
-                    </EmptyDescription>
-                  </EmptyHeader>
-                </Empty>
-              )}
-            </div>
-          </ScrollArea>
+          <SupportThread messages={messages} />
 
           <SupportComposer action={createSupportMessageAction} />
         </CardContent>

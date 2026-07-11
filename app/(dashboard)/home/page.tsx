@@ -1,28 +1,30 @@
-import Image from "next/image"
 import Link from "next/link"
 import { ChevronRightIcon, GiftIcon } from "lucide-react"
 
+import {
+  PulsarAssetCard,
+  PulsarIconContainer,
+} from "@/components/app/pulsar-primitives"
 import { SetupVpnAction } from "@/components/app/setup-vpn-action"
 import { SubscriptionPaymentAction } from "@/components/app/subscription-payment-action"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
-import { Separator } from "@/components/ui/separator"
 import { requireUser } from "@/lib/auth"
 import { prisma } from "@/lib/db"
 import {
   getEffectiveSubscriptionStatus,
   getSubscriptionStatusLabel,
 } from "@/lib/subscription"
-import { SubscriptionStatus, type Subscription } from "@prisma/client"
+import { SubscriptionStatus, type Subscription } from "@/generated/prisma/client"
 
 export default async function HomePage() {
   const user = await requireUser()
   const [subscription, settings] = await Promise.all([
-    prisma.subscription.findFirst({
-      where: { userId: user.id },
-      orderBy: { createdAt: "desc" },
+    prisma.subscription.findUnique({ where: { userId: user.id } }),
+    prisma.pricingVersion.findFirstOrThrow({
+      where: { status: "ACTIVE" },
+      orderBy: { version: "desc" },
     }),
-    prisma.pricingSettings.findUniqueOrThrow({ where: { id: "default" } }),
   ])
   const status = getEffectiveSubscriptionStatus(subscription)
   const renewalLabel =
@@ -31,50 +33,40 @@ export default async function HomePage() {
 
   return (
     <main className="pulsar-container">
-      <Card className="gap-0 overflow-hidden rounded-3xl border border-border/70 bg-card/40 py-0">
-        <div className="relative aspect-[21/9] w-full">
-          <Image
-            src="/hero/pulsar.gif"
-            alt="PulsarVPN"
-            fill
-            className="object-contain"
-            sizes="(max-width: 768px) 100vw, 448px"
-            unoptimized
-            priority
-          />
+      <PulsarAssetCard
+        src="/hero/pulsar.gif"
+        alt="PulsarVPN"
+        contentClassName="flex min-h-56 flex-col items-center justify-center gap-5 text-center"
+      >
+        <div className="flex w-full flex-col items-center gap-4">
+          <div className="flex w-full flex-col items-center gap-1">
+            <p className="text-sm leading-5 text-muted-foreground">
+              {subscriptionSummary.caption}
+            </p>
+            <p className="w-full text-center text-[26px] leading-8 font-semibold tracking-normal whitespace-nowrap">
+              {subscriptionSummary.title}
+            </p>
+          </div>
+          <div className="flex flex-wrap justify-center gap-2">
+            <Badge>{getSubscriptionStatusLabel(status)}</Badge>
+            {subscription ? (
+              <Badge variant="secondary">
+                {formatDeviceLimit(subscription.deviceLimit)}
+              </Badge>
+            ) : null}
+            {subscription?.lteEnabled ? (
+              <Badge variant="secondary">LTE</Badge>
+            ) : null}
+          </div>
         </div>
-        <Separator className="my-0" />
-        <CardContent className="flex min-h-56 flex-col items-center justify-center gap-5 p-4 text-center">
-          <div className="flex w-full flex-col items-center gap-4">
-            <div className="flex w-full flex-col items-center gap-1">
-              <p className="text-sm leading-5 text-muted-foreground">
-                {subscriptionSummary.caption}
-              </p>
-              <p className="w-full text-center text-[26px] leading-8 font-semibold tracking-normal whitespace-nowrap">
-                {subscriptionSummary.title}
-              </p>
-            </div>
-            <div className="flex flex-wrap justify-center gap-2">
-              <Badge>{getSubscriptionStatusLabel(status)}</Badge>
-              {subscription ? (
-                <Badge variant="secondary">
-                  {formatDeviceLimit(subscription.deviceLimit)}
-                </Badge>
-              ) : null}
-              {subscription?.lteEnabled ? (
-                <Badge variant="secondary">LTE</Badge>
-              ) : null}
-            </div>
-          </div>
-          <div className="grid w-full gap-3">
-            <SubscriptionPaymentAction
-              settings={settings}
-              triggerLabel={renewalLabel}
-            />
-            <SetupVpnAction subscriptionUrl={subscription?.subscriptionUrl} />
-          </div>
-        </CardContent>
-      </Card>
+        <div className="grid w-full gap-3">
+          <SubscriptionPaymentAction
+            settings={settings}
+            triggerLabel={renewalLabel}
+          />
+          <SetupVpnAction subscriptionUrl={subscription?.subscriptionUrl} />
+        </div>
+      </PulsarAssetCard>
 
       <Link
         href="/referrals"
@@ -83,7 +75,11 @@ export default async function HomePage() {
       >
         <Card className="relative overflow-hidden rounded-3xl border border-border/70 bg-card/40 py-0 transition-colors hover:bg-card/55">
           <CardContent className="relative grid grid-cols-[auto_1fr_auto] items-center gap-3 p-4">
-            <GiftIcon className="size-8 text-muted-foreground transition-colors group-hover:text-foreground" />
+            <PulsarIconContainer
+              icon={GiftIcon}
+              size="md"
+              className="text-muted-foreground transition-colors group-hover:text-foreground"
+            />
             <div className="relative z-10 min-w-0">
               <p className="text-sm leading-5 text-muted-foreground transition-colors group-hover:text-foreground">
                 <span className="block">Друг получает 3 дня бесплатно.</span>

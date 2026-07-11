@@ -1,26 +1,16 @@
-# Auth Flow
+# Auth flow
 
-Pulsar 2.0 uses passwordless auth only.
+Pulsar uses passwordless identities. `AuthIdentity` is unique by
+`(provider, providerSubject)` and by `(userId, provider)`, so one account cannot
+silently acquire two email or two Telegram identities.
 
-## Email OTP
+Email OTP and magic link share one `AuthChallenge`. Only hashes are stored in
+the challenge, attempts are bounded, and consumption uses a conditional update
+inside a transaction. A consumed challenge cannot be reused concurrently.
 
-1. User enters email on `/`.
-2. `requestEmailOtpAction` creates:
-   - `EmailOtp`
-   - `LoginChallenge` with type `EMAIL_OTP`
-3. In dev mode, OTP appears in server logs and the login card.
-4. User enters OTP.
-5. `verifyEmailOtpAction` validates the latest unconsumed OTP.
-6. Existing user is logged in or a new user is created.
-7. `AuthIdentity` with type `EMAIL` is upserted.
-8. Session is created and stored in an HTTP-only cookie.
+Sessions use an opaque random cookie; only its SHA-256 hash is stored in
+`Session`. Logout revokes the row and clears the HTTP-only cookie.
 
-## Telegram Stub
-
-The login page has a Telegram button. Today it creates a `LoginChallenge` with type `TELEGRAM` through `MockTelegramAuthService` and returns “Скоро”.
-
-Future bot integration should complete the challenge, attach `AuthIdentity.TELEGRAM`, and create a session using the same session helper.
-
-## Invite Capture
-
-When a new user registers through `/?invite=...`, auth checks enabled `ReferralProfile.inviteCode` and creates `ReferralInvite`. Rewards are granted only after confirmed payment.
+Development may expose the OTP when `DEV_SHOW_OTP=true`. Production email and
+Telegram delivery are intentionally unimplemented until credentials are
+available; see `docs/integration-handoff.md`.

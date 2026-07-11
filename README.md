@@ -6,7 +6,7 @@ Clean Next.js foundation for the commercial PulsarVPN cabinet. This is a new pro
 
 - Next.js App Router, TypeScript, Tailwind v4
 - shadcn/ui preset `b1VlIttI`, Base UI primitives, Lucide icons
-- PostgreSQL + Prisma 7
+- SQLite + Prisma 7 + `@prisma/adapter-better-sqlite3`
 - Cookie-based sessions
 - Server actions and route handlers
 - Mobile-first dark premium UI
@@ -19,34 +19,26 @@ Clean Next.js foundation for the commercial PulsarVPN cabinet. This is a new pro
 npm install
 ```
 
-2. Start project Postgres in Docker:
-
-```bash
-docker compose up -d postgres
-```
-
-The project container is exposed on host port `5433` to avoid conflicts with a locally installed PostgreSQL on `5432`.
-
-3. Create `.env` from `.env.example`:
+2. Create `.env` from `.env.example`:
 
 ```bash
 cp .env.example .env
 ```
 
-4. Apply migrations and generate Prisma Client:
+3. Apply migrations and generate Prisma Client:
 
 ```bash
-npm run db:migrate
+npm run db:deploy
 npm run db:generate
 ```
 
-5. Seed demo data:
+4. Seed demo data:
 
 ```bash
 npm run db:seed
 ```
 
-6. Start dev server:
+5. Start the web process:
 
 ```bash
 npm run dev
@@ -54,12 +46,15 @@ npm run dev
 
 Open `http://localhost:3000`.
 
-For normal daily development, after the first setup you usually only need:
+6. Start the single background worker in another terminal:
 
 ```bash
-docker compose up -d postgres
-npm run dev
+npm run worker
 ```
+
+Both processes use the same local `pulsar.db`. Startup enables WAL, foreign
+keys, full synchronous durability, a 5-second busy timeout, and in-memory temp
+storage. SQLite versions without the WAL-reset fix are rejected.
 
 ## Dev Login
 
@@ -84,7 +79,7 @@ User routes:
 - `/referrals`
 - `/profile`
 - `/support`
-- `/legal/[slug]`
+- `/legal`
 
 Admin routes:
 
@@ -115,4 +110,5 @@ Admin is protected by `role ADMIN`. Regular users are redirected to `/home`.
 - Remnawave: implement a real `RemnawaveClient` without touching UI or server actions.
 - Telegram bot: implement `TelegramAuthService`, store Telegram identities in `AuthIdentity`, and complete `LoginChallenge`.
 
-See `/docs/architecture.md`, `/docs/auth.md`, `/docs/integrations.md`, and `/docs/seed.md`.
+See `/docs/architecture.md`, `/docs/auth.md`,
+`/docs/billing.md`, `/docs/integration-handoff.md`, and `/docs/seed.md`.

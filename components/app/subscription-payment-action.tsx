@@ -13,6 +13,10 @@ import {
 } from "lucide-react"
 
 import { createPaymentAction } from "@/app/(dashboard)/actions"
+import {
+  pulsarControlClass,
+  pulsarCtaClass,
+} from "@/components/app/pulsar-primitives"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -214,6 +218,7 @@ function PaymentFlow({ settings }: { settings: PaymentSettings }) {
   const [months, setMonths] = React.useState(durations[0]?.months ?? 1)
   const [deviceLimit, setDeviceLimit] = React.useState(defaultDeviceLimit)
   const [lteEnabled, setLteEnabled] = React.useState(false)
+  const [idempotencyKey] = React.useState(() => crypto.randomUUID())
   const price = calculateTotal(settings, months, deviceLimit, lteEnabled)
   const priceBreakdown = calculatePriceBreakdown(
     settings,
@@ -237,6 +242,7 @@ function PaymentFlow({ settings }: { settings: PaymentSettings }) {
       <input type="hidden" name="months" value={months} />
       <input type="hidden" name="deviceLimit" value={deviceLimit} />
       <input type="hidden" name="lteEnabled" value={lteEnabled ? "on" : ""} />
+      <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-2 pb-4 sm:px-1 sm:pt-0">
         <div className="flex flex-col gap-4">
@@ -410,7 +416,7 @@ function PaymentFlow({ settings }: { settings: PaymentSettings }) {
           <Button
             type="button"
             size="lg"
-            className="h-11 w-full rounded-[18px]"
+            className={pulsarCtaClass}
             onClick={() => setStep("confirm")}
           >
             <CreditCardIcon data-icon="inline-start" />
@@ -422,13 +428,13 @@ function PaymentFlow({ settings }: { settings: PaymentSettings }) {
               type="button"
               size="lg"
               variant="outline"
-              className="h-11 rounded-[18px]"
+              className={pulsarControlClass}
               aria-label="Вернуться к настройкам"
               onClick={() => setStep("config")}
             >
               <ArrowLeftIcon />
             </Button>
-            <Button type="submit" size="lg" className="h-11 rounded-[18px]">
+            <Button type="submit" size="lg" className={pulsarControlClass}>
               <CheckIcon data-icon="inline-start" />
               Создать платёж
             </Button>
@@ -485,7 +491,7 @@ export function SubscriptionPaymentAction({
             <Button
               type="button"
               size="lg"
-              className="h-11 w-full rounded-[18px] sm:hidden"
+              className={`${pulsarCtaClass} sm:hidden`}
             />
           }
         >
@@ -509,7 +515,7 @@ export function SubscriptionPaymentAction({
             <Button
               type="button"
               size="lg"
-              className="hidden h-11 w-full rounded-[18px] sm:inline-flex"
+              className={`hidden ${pulsarCtaClass} sm:inline-flex`}
             />
           }
         >

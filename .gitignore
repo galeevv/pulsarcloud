@@ -34,7 +34,14 @@ pnpm-debug.log*
 
 # local output artifacts
 stdout
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
 
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# generated Prisma Client
+/generated/prisma/

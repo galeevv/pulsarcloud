@@ -41,11 +41,13 @@ export function PaymentForm({
 }) {
   const [months, setMonths] = useState("1")
   const [lteEnabled, setLteEnabled] = useState(false)
+  const [idempotencyKey] = useState(() => crypto.randomUUID())
 
   return (
     <form action={createPaymentAction} className="flex w-full flex-col gap-3">
       <input type="hidden" name="months" value={months} />
       <input type="hidden" name="lteEnabled" value={lteEnabled ? "on" : ""} />
+      <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
       <FieldGroup>
         <Field>
           <FieldLabel htmlFor="months-trigger">Срок</FieldLabel>

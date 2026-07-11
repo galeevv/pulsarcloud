@@ -10,14 +10,13 @@ import {
 } from "@/components/ui/table"
 import { prisma } from "@/lib/db"
 import { formatRub } from "@/lib/pricing"
+import { getIdentitySubject } from "@/lib/user-identity"
 
 export default async function AdminUsersPage() {
   const users = await prisma.user.findMany({
     include: {
-      subscriptions: {
-        orderBy: { createdAt: "desc" },
-        take: 1,
-      },
+      subscription: true,
+      authIdentities: true,
     },
     orderBy: { createdAt: "desc" },
   })
@@ -42,11 +41,11 @@ export default async function AdminUsersPage() {
           <TableBody>
             {users.map((user) => (
               <TableRow key={user.id}>
-                <TableCell>{user.email ?? "—"}</TableCell>
-                <TableCell>{user.telegramId ?? "—"}</TableCell>
+                <TableCell>{getIdentitySubject(user.authIdentities, "EMAIL") ?? "—"}</TableCell>
+                <TableCell>{getIdentitySubject(user.authIdentities, "TELEGRAM") ?? "—"}</TableCell>
                 <TableCell><Badge>{user.role}</Badge></TableCell>
                 <TableCell>{formatRub(user.balanceRub)}</TableCell>
-                <TableCell>{user.subscriptions[0]?.status ?? "NONE"}</TableCell>
+                <TableCell>{user.subscription?.status ?? "NONE"}</TableCell>
                 <TableCell>{user.createdAt.toLocaleDateString("ru-RU")}</TableCell>
               </TableRow>
             ))}
