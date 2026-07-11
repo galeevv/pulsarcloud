@@ -2,10 +2,9 @@
 
 import { RefreshCwIcon } from "lucide-react"
 
-import { regenerateSubscriptionUrlAction } from "@/app/(dashboard)/actions"
+import { PreviewAlertAction } from "@/components/frontend-preview/preview-form"
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -27,16 +26,13 @@ export function RegenerateLinkDialog() {
         <AlertDialogHeader>
           <AlertDialogTitle>Перевыпустить ссылку?</AlertDialogTitle>
           <AlertDialogDescription>
-            Старая ссылка перестанет работать. Устройства, подключённые по старой ссылке, могут отвалиться.
+            Старая ссылка перестанет работать. Устройства, подключённые по
+            старой ссылке, могут отвалиться.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Отмена</AlertDialogCancel>
-          <form action={regenerateSubscriptionUrlAction}>
-            <AlertDialogAction render={<Button type="submit" />}>
-              Перевыпустить
-            </AlertDialogAction>
-          </form>
+          <PreviewAlertAction>Перевыпустить</PreviewAlertAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

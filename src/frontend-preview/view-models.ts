@@ -1,0 +1,39 @@
+export type PreviewIdentity = {
+  provider: "EMAIL" | "TELEGRAM"
+  providerSubject: string
+}
+
+export type PreviewSubscriptionStatus =
+  "NONE" | "TRIAL" | "ACTIVE" | "EXPIRED" | "CANCELED"
+
+export type PreviewSubscription = {
+  createdAt: Date
+  deviceLimit: number
+  expiresAt: Date | null
+  id: string
+  lastTechnicalError: string | null
+  lastUserFriendlyError: string | null
+  lteEnabled: boolean
+  startsAt: Date | null
+  status: PreviewSubscriptionStatus
+  subscriptionUrl: string | null
+  syncStatus: "NOT_CONNECTED"
+}
+
+export type PreviewDurationOption = {
+  discountPct: number
+  months: number
+  totalRub: number
+}
+
+export type PreviewPricing = {
+  baseMonthlyPriceRub: number
+  durationOptions: PreviewDurationOption[]
+  extraDeviceMonthlyPriceRub: number
+  lteMonthlyPriceRub: number
+  maxDeviceLimit: number
+  minDeviceLimit: number
+  minimalPayoutRub: number
+  referralFriendDiscountPct: number
+  referralRewardRub: number
+}

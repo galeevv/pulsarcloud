@@ -1,7 +1,5 @@
 import Link from "next/link"
 
-import { requireAdmin } from "@/lib/auth"
-
 const adminLinks = [
   ["/admin", "Dashboard"],
   ["/admin/users", "Users"],
@@ -16,13 +14,11 @@ const adminLinks = [
   ["/admin/settings", "Settings"],
 ]
 
-export default async function AdminLayout({
+export default function AdminLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  await requireAdmin()
-
   return (
     <div className="pulsar-admin-container">
       <header className="glass-card rounded-3xl border p-4">

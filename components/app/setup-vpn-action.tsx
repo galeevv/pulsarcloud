@@ -30,6 +30,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
+import { backendUnavailableMessage } from "@/src/frontend-preview/config"
 
 type SetupStep =
   "start" | "choose-device" | "install-app" | "subscription" | "done"
@@ -386,16 +387,17 @@ function SetupVpnFlow({
                       <span className="truncate">{displaySubscriptionUrl}</span>
                       <CopyIcon className="size-4 shrink-0" />
                     </button>
-                    <a
+                    <Button
+                      type="button"
                       className={cn(
                         buttonVariants({ size: "lg" }),
                         pulsarControlClass
                       )}
-                      href={`happ://add/${effectiveSubscriptionUrl}`}
+                      onClick={() => toast.info(backendUnavailableMessage)}
                     >
                       <Link2Icon data-icon="inline-start" />
                       Подключить в Happ
-                    </a>
+                    </Button>
                     <Button
                       type="button"
                       size="lg"

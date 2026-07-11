@@ -1,5 +1,4 @@
 import { GiftIcon, Link2Icon, UsersIcon, WalletIcon } from "lucide-react"
-import { SubscriptionStatus } from "@/generated/prisma/client"
 
 import { CopyButton } from "@/components/app/copy-button"
 import { PayoutDialog } from "@/components/app/payout-dialog"
@@ -25,41 +24,26 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty"
-import { requireUser } from "@/lib/auth"
-import { prisma } from "@/lib/db"
-import { formatRub } from "@/lib/pricing"
-import { getEffectiveSubscriptionStatus } from "@/lib/subscription"
+import { formatPreviewRub } from "@/src/frontend-preview/format"
+import { previewPricing } from "@/src/frontend-preview/fixtures/mock-pricing"
+import {
+  previewPayouts,
+  previewReferralInvites,
+  previewReferralProfile,
+} from "@/src/frontend-preview/fixtures/mock-referrals"
+import { previewSubscription } from "@/src/frontend-preview/fixtures/mock-subscription"
+import { previewUser } from "@/src/frontend-preview/fixtures/mock-user"
 
-export default async function ReferralsPage() {
-  const user = await requireUser()
-  const [profile, settings, subscription, invites, payouts] = await Promise.all(
-    [
-      prisma.referralProfile.findUnique({ where: { userId: user.id } }),
-      prisma.pricingVersion.findFirstOrThrow({
-        where: { status: "ACTIVE" },
-        orderBy: { version: "desc" },
-      }),
-      prisma.subscription.findUnique({ where: { userId: user.id } }),
-      prisma.referralInvite.findMany({
-        where: { inviterId: user.id },
-        include: {
-          invited: {
-            include: { authIdentities: true },
-          },
-        },
-        orderBy: { createdAt: "desc" },
-      }),
-      prisma.payoutRequest.findMany({
-        where: { userId: user.id },
-        orderBy: { createdAt: "desc" },
-        take: 10,
-      }),
-    ]
-  )
-  const subscriptionStatus = getEffectiveSubscriptionStatus(subscription)
+export default function ReferralsPage() {
+  const user = previewUser
+  const profile = previewReferralProfile
+  const settings = previewPricing
+  const subscription = previewSubscription
+  const invites = previewReferralInvites
+  const payouts = previewPayouts
+  const subscriptionStatus = subscription.status
   const shouldShowReferralEmpty =
-    !profile?.isEnabled &&
-    (!subscription || subscriptionStatus === SubscriptionStatus.NONE)
+    !profile?.isEnabled && (!subscription || subscriptionStatus === "NONE")
 
   if (shouldShowReferralEmpty) {
     return (
@@ -111,12 +95,12 @@ export default async function ReferralsPage() {
     (_, index) => invites[index]?.status === "CONVERTED"
   )
   const payoutItems = payouts.map((payout) => ({
-    amountLabel: formatRub(payout.amountRub),
+    amountLabel: formatPreviewRub(payout.amountRub),
     createdAtLabel: formatReferralDate(payout.createdAt),
     id: payout.id,
     statusLabel: formatReferralStatus(payout.status),
   }))
-  const inviteUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://pulsarr.space"}/?invite=${profile?.inviteCode ?? ""}`
+  const inviteUrl = `https://preview.invalid/?invite=${profile.inviteCode}`
 
   return (
     <main className="pulsar-container">
@@ -137,7 +121,7 @@ export default async function ReferralsPage() {
           titleClassName="text-[11px] leading-4 font-normal text-muted-foreground"
           description={
             <span className="text-base leading-5 font-semibold text-foreground">
-              {formatRub(user.balanceRub)}
+              {formatPreviewRub(user.balanceRub)}
             </span>
           }
           action={
@@ -161,7 +145,7 @@ export default async function ReferralsPage() {
           activeValue={String(activeCount)}
           invitedValue={String(invitedCount)}
           invites={inviteItems}
-          paidOutValue={formatRub(paidOutRub)}
+          paidOutValue={formatPreviewRub(paidOutRub)}
           payouts={payoutItems}
         />
 
@@ -273,8 +257,9 @@ function formatReferralStatus(status: string) {
 function getInvitedUserLabel(
   identities: Array<{ provider: string; providerSubject: string }>
 ) {
-  const email = identities.find((identity) => identity.provider === "EMAIL")
-    ?.providerSubject
+  const email = identities.find(
+    (identity) => identity.provider === "EMAIL"
+  )?.providerSubject
   const telegram = identities.find(
     (identity) => identity.provider === "TELEGRAM"
   )?.providerSubject

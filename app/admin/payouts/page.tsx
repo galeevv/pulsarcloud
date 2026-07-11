@@ -1,8 +1,4 @@
-import {
-  approvePayoutAction,
-  markPayoutPaidAction,
-  rejectPayoutAction,
-} from "@/app/admin/actions"
+import { PreviewForm } from "@/components/frontend-preview/preview-form"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -15,15 +11,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { prisma } from "@/lib/db"
-import { formatRub } from "@/lib/pricing"
-import { getUserLabel } from "@/lib/user-identity"
+import {
+  formatPreviewRub,
+  getPreviewUserLabel,
+} from "@/src/frontend-preview/format"
+import { previewAdminPayouts } from "@/src/frontend-preview/fixtures/mock-admin"
 
-export default async function AdminPayoutsPage() {
-  const payouts = await prisma.payoutRequest.findMany({
-    include: { user: { include: { authIdentities: true } } },
-    orderBy: { createdAt: "desc" },
-  })
+export default function AdminPayoutsPage() {
+  const payouts = previewAdminPayouts
 
   return (
     <Card className="glass-card rounded-3xl">
@@ -45,30 +40,18 @@ export default async function AdminPayoutsPage() {
             {payouts.map((payout) => (
               <TableRow key={payout.id}>
                 <TableCell>
-                  {getUserLabel(payout.user.authIdentities)}
+                  {getPreviewUserLabel(payout.user.authIdentities)}
                 </TableCell>
-                <TableCell>{formatRub(payout.amountRub)}</TableCell>
+                <TableCell>{formatPreviewRub(payout.amountRub)}</TableCell>
                 <TableCell>{payout.payoutDetails}</TableCell>
                 <TableCell>
                   <Badge>{payout.status}</Badge>
                 </TableCell>
                 <TableCell>
                   <div className="flex min-w-96 flex-col gap-2">
-                    <PayoutAction
-                      action={approvePayoutAction}
-                      payoutId={payout.id}
-                      label="Approve"
-                    />
-                    <PayoutAction
-                      action={markPayoutPaidAction}
-                      payoutId={payout.id}
-                      label="Mark paid"
-                    />
-                    <PayoutAction
-                      action={rejectPayoutAction}
-                      payoutId={payout.id}
-                      label="Reject"
-                    />
+                    <PayoutAction payoutId={payout.id} label="Approve" />
+                    <PayoutAction payoutId={payout.id} label="Mark paid" />
+                    <PayoutAction payoutId={payout.id} label="Reject" />
                   </div>
                 </TableCell>
               </TableRow>
@@ -81,21 +64,19 @@ export default async function AdminPayoutsPage() {
 }
 
 function PayoutAction({
-  action,
   payoutId,
   label,
 }: {
-  action: (formData: FormData) => Promise<void>
   payoutId: string
   label: string
 }) {
   return (
-    <form action={action} className="flex gap-2">
+    <PreviewForm className="flex gap-2">
       <input type="hidden" name="payoutId" value={payoutId} />
       <Input name="adminNote" placeholder="Admin note" />
       <Button type="submit" size="sm" variant="outline">
         {label}
       </Button>
-    </form>
+    </PreviewForm>
   )
 }

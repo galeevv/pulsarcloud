@@ -6,25 +6,17 @@ import {
 } from "lucide-react"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { prisma } from "@/lib/db"
-import { formatRub } from "@/lib/pricing"
+import { formatPreviewRub } from "@/src/frontend-preview/format"
+import { previewAdminMetrics } from "@/src/frontend-preview/fixtures/mock-admin"
 
-export default async function AdminDashboardPage() {
-  const [users, activeSubscriptions, pendingPayments, pendingPayouts, ledger] =
-    await Promise.all([
-      prisma.user.count(),
-      prisma.subscription.count({ where: { status: "ACTIVE" } }),
-      prisma.payment.count({ where: { status: "PENDING" } }),
-      prisma.payoutRequest.count({ where: { status: "PENDING" } }),
-      prisma.walletLedgerEntry.findMany({
-        where: {
-          status: "POSTED",
-          type: "PAYMENT_CAPTURE",
-          direction: "CREDIT",
-        },
-      }),
-    ])
-  const turnoverRub = ledger.reduce((sum, entry) => sum + entry.amountRub, 0)
+export default function AdminDashboardPage() {
+  const {
+    users,
+    activeSubscriptions,
+    pendingPayments,
+    pendingPayouts,
+    turnoverRub,
+  } = previewAdminMetrics
 
   return (
     <main className="grid gap-4 md:grid-cols-4">
@@ -49,7 +41,9 @@ export default async function AdminDashboardPage() {
           <CardTitle>Wallet ledger volume</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-3xl font-semibold">{formatRub(turnoverRub)}</p>
+          <p className="text-3xl font-semibold">
+            {formatPreviewRub(turnoverRub)}
+          </p>
         </CardContent>
       </Card>
     </main>

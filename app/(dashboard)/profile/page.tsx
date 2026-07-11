@@ -6,10 +6,8 @@ import {
   LogOutIcon,
 } from "lucide-react"
 
-import { logoutAction } from "@/app/(dashboard)/actions"
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -19,16 +17,17 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
+import { PreviewAlertAction } from "@/components/frontend-preview/preview-form"
 import {
   PulsarActionRow,
   PulsarAssetCard,
   pulsarCtaClass,
 } from "@/components/app/pulsar-primitives"
-import { requireUser } from "@/lib/auth"
 import { LoginMethodsManager } from "@/components/app/login-methods-manager"
+import { previewUser } from "@/src/frontend-preview/fixtures/mock-user"
 
-export default async function ProfilePage() {
-  const user = await requireUser()
+export default function ProfilePage() {
+  const user = previewUser
 
   return (
     <main className="pulsar-container">
@@ -91,15 +90,9 @@ function LogoutConfirmDialog() {
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Отмена</AlertDialogCancel>
-          <form action={logoutAction}>
-            <AlertDialogAction
-              type="submit"
-              variant="outline"
-              className="w-full text-destructive hover:bg-destructive/10 hover:text-destructive"
-            >
-              Выйти
-            </AlertDialogAction>
-          </form>
+          <PreviewAlertAction className="w-full text-destructive hover:bg-destructive/10 hover:text-destructive">
+            Выйти
+          </PreviewAlertAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

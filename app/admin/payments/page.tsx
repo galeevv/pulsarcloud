@@ -8,15 +8,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { prisma } from "@/lib/db"
-import { formatRub } from "@/lib/pricing"
-import { getUserLabel } from "@/lib/user-identity"
+import {
+  formatPreviewRub,
+  getPreviewUserLabel,
+} from "@/src/frontend-preview/format"
+import { previewAdminPayments } from "@/src/frontend-preview/fixtures/mock-admin"
 
-export default async function AdminPaymentsPage() {
-  const payments = await prisma.payment.findMany({
-    include: { user: { include: { authIdentities: true } } },
-    orderBy: { createdAt: "desc" },
-  })
+export default function AdminPaymentsPage() {
+  const payments = previewAdminPayments
 
   return (
     <Card className="glass-card rounded-3xl">
@@ -39,9 +38,9 @@ export default async function AdminPaymentsPage() {
             {payments.map((payment) => (
               <TableRow key={payment.id}>
                 <TableCell>
-                  {getUserLabel(payment.user.authIdentities)}
+                  {getPreviewUserLabel(payment.user.authIdentities)}
                 </TableCell>
-                <TableCell>{formatRub(payment.amountRub)}</TableCell>
+                <TableCell>{formatPreviewRub(payment.amountRub)}</TableCell>
                 <TableCell>
                   <Badge>{payment.status}</Badge>
                 </TableCell>

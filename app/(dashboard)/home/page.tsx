@@ -9,24 +9,17 @@ import { SetupVpnAction } from "@/components/app/setup-vpn-action"
 import { SubscriptionPaymentAction } from "@/components/app/subscription-payment-action"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
-import { requireUser } from "@/lib/auth"
-import { prisma } from "@/lib/db"
-import {
-  getEffectiveSubscriptionStatus,
-  getSubscriptionStatusLabel,
-} from "@/lib/subscription"
-import { SubscriptionStatus, type Subscription } from "@/generated/prisma/client"
+import { previewPricing } from "@/src/frontend-preview/fixtures/mock-pricing"
+import { previewSubscription } from "@/src/frontend-preview/fixtures/mock-subscription"
+import type {
+  PreviewSubscription,
+  PreviewSubscriptionStatus,
+} from "@/src/frontend-preview/view-models"
 
-export default async function HomePage() {
-  const user = await requireUser()
-  const [subscription, settings] = await Promise.all([
-    prisma.subscription.findUnique({ where: { userId: user.id } }),
-    prisma.pricingVersion.findFirstOrThrow({
-      where: { status: "ACTIVE" },
-      orderBy: { version: "desc" },
-    }),
-  ])
-  const status = getEffectiveSubscriptionStatus(subscription)
+export default function HomePage() {
+  const subscription = previewSubscription
+  const settings = previewPricing
+  const status = subscription.status
   const renewalLabel =
     status === "NONE" ? "Оплатить подписку" : "Продлить подписку"
   const subscriptionSummary = getHomeSubscriptionSummary(subscription, status)
@@ -97,20 +90,17 @@ export default async function HomePage() {
 }
 
 function getHomeSubscriptionSummary(
-  subscription: Subscription | null,
-  status: SubscriptionStatus
+  subscription: PreviewSubscription | null,
+  status: PreviewSubscriptionStatus
 ) {
-  if (!subscription || status === SubscriptionStatus.NONE) {
+  if (!subscription || status === "NONE") {
     return {
       caption: "Подписка не активна",
       title: "Оплатите подписку",
     }
   }
 
-  if (
-    status === SubscriptionStatus.EXPIRED ||
-    status === SubscriptionStatus.CANCELED
-  ) {
+  if (status === "EXPIRED" || status === "CANCELED") {
     return {
       caption: subscription.expiresAt
         ? `Доступ закончился ${formatSubscriptionDate(subscription.expiresAt)}`
@@ -132,6 +122,18 @@ function getHomeSubscriptionSummary(
     caption: `До ${formatSubscriptionDate(subscription.expiresAt)}`,
     title: `Осталось ${formatDaysLeftLabel(daysLeft)}`,
   }
+}
+
+function getSubscriptionStatusLabel(status: PreviewSubscriptionStatus) {
+  const labels: Record<PreviewSubscriptionStatus, string> = {
+    NONE: "Не активна",
+    TRIAL: "Пробный период",
+    ACTIVE: "Активна",
+    EXPIRED: "Истекла",
+    CANCELED: "Отменена",
+  }
+
+  return labels[status]
 }
 
 function formatSubscriptionDate(date: Date) {

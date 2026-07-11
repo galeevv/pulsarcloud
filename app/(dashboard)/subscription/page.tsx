@@ -8,14 +8,11 @@ import {
   RadioIcon,
   SmartphoneIcon,
 } from "lucide-react"
-import {
-  SubscriptionStatus,
-  type Subscription,
-} from "@/generated/prisma/client"
-
-import { changeOwnDeviceLimitAction } from "@/app/(dashboard)/actions"
 import { CopyButton } from "@/components/app/copy-button"
-import { PaymentStatusToast } from "@/components/app/payment-status-toast"
+import {
+  PreviewButton,
+  PreviewForm,
+} from "@/components/frontend-preview/preview-form"
 import {
   PulsarActionRow,
   PulsarAssetCard,
@@ -36,35 +33,20 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { Progress } from "@/components/ui/progress"
-import { requireUser } from "@/lib/auth"
-import { prisma } from "@/lib/db"
-import { formatRub } from "@/lib/pricing"
-import { getEffectiveSubscriptionStatus } from "@/lib/subscription"
+import { previewPricing } from "@/src/frontend-preview/fixtures/mock-pricing"
+import { previewSubscription } from "@/src/frontend-preview/fixtures/mock-subscription"
+import type {
+  PreviewSubscription,
+  PreviewSubscriptionStatus,
+} from "@/src/frontend-preview/view-models"
 
-export default async function SubscriptionPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ payment?: string; error?: string }>
-}) {
-  const user = await requireUser()
-  const params = await searchParams
-  const [subscription, settings, pendingPayment] = await Promise.all([
-    prisma.subscription.findUnique({ where: { userId: user.id } }),
-    prisma.pricingVersion.findFirstOrThrow({
-      where: { status: "ACTIVE" },
-      orderBy: { version: "desc" },
-    }),
-    prisma.payment.findFirst({
-      where: { userId: user.id, status: "PENDING" },
-      orderBy: { createdAt: "desc" },
-    }),
-  ])
-  const status = getEffectiveSubscriptionStatus(subscription)
+export default function SubscriptionPage() {
+  const subscription = previewSubscription
+  const settings = previewPricing
+  const status = subscription.status
   const hasActiveSubscription =
     subscription && ["ACTIVE", "TRIAL"].includes(status)
-  const hasSubscriptionRecord = Boolean(
-    subscription && status !== SubscriptionStatus.NONE
-  )
+  const hasSubscriptionRecord = Boolean(subscription && status !== "NONE")
   const subscriptionSummary = getSubscriptionSummary(subscription, status)
   const subscriptionProgress = subscription
     ? getRemainingSubscriptionProgress(subscription)
@@ -72,21 +54,9 @@ export default async function SubscriptionPage({
   const subscriptionProgressTone = subscription
     ? getProgressTone(subscription, status, subscriptionProgress)
     : "inactive"
-  const showPendingPayment = Boolean(
-    params.payment === "pending" || pendingPayment
-  )
 
   return (
     <main className="pulsar-container">
-      <PaymentStatusToast
-        amountLabel={
-          pendingPayment
-            ? formatRub(pendingPayment.amountRub)
-            : "ожидает оплаты"
-        }
-        error={params.error}
-        show={showPendingPayment}
-      />
       <PulsarAssetCard
         src="/details/observed.gif"
         alt="PulsarVPN"
@@ -134,13 +104,10 @@ export default async function SubscriptionPage({
             ) : null}
 
             {hasActiveSubscription && subscription.subscriptionUrl ? (
-              <a
-                className={pulsarLinkButtonClass()}
-                href={`happ://add/${subscription.subscriptionUrl}`}
-              >
+              <PreviewButton className={pulsarLinkButtonClass()}>
                 <Link2Icon data-icon="inline-start" />
                 Подключить в Happ
-              </a>
+              </PreviewButton>
             ) : (
               <SubscriptionPaymentAction
                 settings={settings}
@@ -217,7 +184,7 @@ function ConnectedDevicesCard({
 }: {
   maxDeviceLimit: number
   minDeviceLimit: number
-  subscription: Subscription | null
+  subscription: PreviewSubscription | null
 }) {
   const deviceLimit = subscription?.deviceLimit ?? 0
 
@@ -303,7 +270,7 @@ function DeviceLimitButton({
   const Icon = icon === "minus" ? MinusIcon : PlusIcon
 
   return (
-    <form action={changeOwnDeviceLimitAction}>
+    <PreviewForm>
       <input type="hidden" name="deviceLimit" value={value} />
       <Button
         type="submit"
@@ -314,24 +281,21 @@ function DeviceLimitButton({
       >
         <Icon />
       </Button>
-    </form>
+    </PreviewForm>
   )
 }
 
 function getSubscriptionSummary(
-  subscription: Subscription | null,
-  status: SubscriptionStatus
+  subscription: PreviewSubscription | null,
+  status: PreviewSubscriptionStatus
 ) {
-  if (!subscription || status === SubscriptionStatus.NONE) {
+  if (!subscription || status === "NONE") {
     return {
       title: "Оплатите подписку",
     }
   }
 
-  if (
-    status === SubscriptionStatus.EXPIRED ||
-    status === SubscriptionStatus.CANCELED
-  ) {
+  if (status === "EXPIRED" || status === "CANCELED") {
     return {
       title: "Подписка закончилась",
     }

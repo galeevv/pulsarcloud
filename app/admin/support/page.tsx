@@ -1,13 +1,10 @@
-import {
-  replySupportConversationAction,
-  setSupportConversationStatusAction,
-} from "@/app/admin/actions"
+import { PreviewForm } from "@/components/frontend-preview/preview-form"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
-import { prisma } from "@/lib/db"
-import { getUserLabel } from "@/lib/user-identity"
+import { getPreviewUserLabel } from "@/src/frontend-preview/format"
+import { previewAdminConversations } from "@/src/frontend-preview/fixtures/mock-admin"
 
 export default async function AdminSupportPage({
   searchParams,
@@ -15,14 +12,11 @@ export default async function AdminSupportPage({
   searchParams: Promise<{ status?: "OPEN" | "CLOSED" }>
 }) {
   const params = await searchParams
-  const conversations = await prisma.supportConversation.findMany({
-    where: params.status ? { status: params.status } : undefined,
-    include: {
-      user: { include: { authIdentities: true } },
-      messages: { orderBy: { createdAt: "asc" } },
-    },
-    orderBy: { updatedAt: "desc" },
-  })
+  const conversations = params.status
+    ? previewAdminConversations.filter(
+        (conversation) => conversation.status === params.status
+      )
+    : previewAdminConversations
 
   return (
     <div className="flex flex-col gap-4">
@@ -30,7 +24,9 @@ export default async function AdminSupportPage({
         <Card key={conversation.id} className="glass-card rounded-3xl">
           <CardHeader>
             <CardTitle className="flex items-center justify-between gap-3">
-              <span>{getUserLabel(conversation.user.authIdentities)}</span>
+              <span>
+                {getPreviewUserLabel(conversation.user.authIdentities)}
+              </span>
               <Badge>{conversation.status}</Badge>
             </CardTitle>
           </CardHeader>
@@ -48,10 +44,7 @@ export default async function AdminSupportPage({
                 </div>
               ))}
             </div>
-            <form
-              action={replySupportConversationAction}
-              className="flex flex-col gap-2"
-            >
+            <PreviewForm className="flex flex-col gap-2">
               <input
                 type="hidden"
                 name="conversationId"
@@ -59,8 +52,8 @@ export default async function AdminSupportPage({
               />
               <Textarea name="body" placeholder="Ответ администратора" />
               <Button type="submit">Ответить</Button>
-            </form>
-            <form action={setSupportConversationStatusAction}>
+            </PreviewForm>
+            <PreviewForm>
               <input
                 type="hidden"
                 name="conversationId"
@@ -74,7 +67,7 @@ export default async function AdminSupportPage({
               <Button type="submit" variant="outline">
                 {conversation.status === "OPEN" ? "Закрыть" : "Открыть"}
               </Button>
-            </form>
+            </PreviewForm>
           </CardContent>
         </Card>
       ))}

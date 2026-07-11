@@ -39,6 +39,11 @@ stdout
 *.db-wal
 *.db-journal
 
+# local database, export, and backup directories
+prisma/dev.db
+data/
+backups/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

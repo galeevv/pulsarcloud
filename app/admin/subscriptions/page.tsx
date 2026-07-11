@@ -1,10 +1,4 @@
-import {
-  changeSubscriptionDeviceLimitAction,
-  extendSubscriptionAction,
-  regenerateAdminSubscriptionUrlAction,
-  syncAdminSubscriptionAction,
-  toggleSubscriptionLteAction,
-} from "@/app/admin/actions"
+import { PreviewForm } from "@/components/frontend-preview/preview-form"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -17,14 +11,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { prisma } from "@/lib/db"
-import { getUserLabel } from "@/lib/user-identity"
+import { getPreviewUserLabel } from "@/src/frontend-preview/format"
+import { previewAdminSubscriptions } from "@/src/frontend-preview/fixtures/mock-admin"
 
-export default async function AdminSubscriptionsPage() {
-  const subscriptions = await prisma.subscription.findMany({
-    include: { user: { include: { authIdentities: true } } },
-    orderBy: { createdAt: "desc" },
-  })
+export default function AdminSubscriptionsPage() {
+  const subscriptions = previewAdminSubscriptions
 
   return (
     <Card className="glass-card rounded-3xl">
@@ -48,7 +39,7 @@ export default async function AdminSubscriptionsPage() {
             {subscriptions.map((subscription) => (
               <TableRow key={subscription.id}>
                 <TableCell>
-                  {getUserLabel(subscription.user.authIdentities)}
+                  {getPreviewUserLabel(subscription.user.authIdentities)}
                 </TableCell>
                 <TableCell>
                   <Badge>{subscription.status}</Badge>
@@ -69,10 +60,7 @@ export default async function AdminSubscriptionsPage() {
                 </TableCell>
                 <TableCell>
                   <div className="flex min-w-80 flex-col gap-2">
-                    <form
-                      action={extendSubscriptionAction}
-                      className="flex gap-2"
-                    >
+                    <PreviewForm className="flex gap-2">
                       <input
                         type="hidden"
                         name="subscriptionId"
@@ -87,11 +75,8 @@ export default async function AdminSubscriptionsPage() {
                       <Button type="submit" size="sm">
                         Продлить
                       </Button>
-                    </form>
-                    <form
-                      action={changeSubscriptionDeviceLimitAction}
-                      className="flex gap-2"
-                    >
+                    </PreviewForm>
+                    <PreviewForm className="flex gap-2">
                       <input
                         type="hidden"
                         name="subscriptionId"
@@ -106,9 +91,9 @@ export default async function AdminSubscriptionsPage() {
                       <Button type="submit" size="sm" variant="outline">
                         Лимит
                       </Button>
-                    </form>
+                    </PreviewForm>
                     <div className="flex flex-wrap gap-2">
-                      <form action={toggleSubscriptionLteAction}>
+                      <PreviewForm>
                         <input
                           type="hidden"
                           name="subscriptionId"
@@ -122,8 +107,8 @@ export default async function AdminSubscriptionsPage() {
                         <Button type="submit" size="sm" variant="outline">
                           {subscription.lteEnabled ? "LTE off" : "LTE on"}
                         </Button>
-                      </form>
-                      <form action={regenerateAdminSubscriptionUrlAction}>
+                      </PreviewForm>
+                      <PreviewForm>
                         <input
                           type="hidden"
                           name="subscriptionId"
@@ -132,8 +117,8 @@ export default async function AdminSubscriptionsPage() {
                         <Button type="submit" size="sm" variant="outline">
                           Новая ссылка
                         </Button>
-                      </form>
-                      <form action={syncAdminSubscriptionAction}>
+                      </PreviewForm>
+                      <PreviewForm>
                         <input
                           type="hidden"
                           name="subscriptionId"
@@ -142,7 +127,7 @@ export default async function AdminSubscriptionsPage() {
                         <Button type="submit" size="sm" variant="outline">
                           Sync
                         </Button>
-                      </form>
+                      </PreviewForm>
                     </div>
                   </div>
                 </TableCell>

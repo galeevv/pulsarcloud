@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 
-import { createNodeAction } from "@/app/admin/actions"
+import { PreviewForm } from "@/components/frontend-preview/preview-form"
 import { Button } from "@/components/ui/button"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -25,7 +25,7 @@ export function AdminNodeForm() {
   const [status, setStatus] = useState("ACTIVE")
 
   return (
-    <form action={createNodeAction} className="flex flex-col gap-3">
+    <PreviewForm className="flex flex-col gap-3">
       <input type="hidden" name="type" value={type} />
       <input type="hidden" name="protocol" value={protocol} />
       <input type="hidden" name="status" value={status} />
@@ -74,7 +74,7 @@ export function AdminNodeForm() {
         />
       </FieldGroup>
       <Button type="submit">Create</Button>
-    </form>
+    </PreviewForm>
   )
 }
 

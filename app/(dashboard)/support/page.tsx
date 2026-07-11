@@ -1,33 +1,22 @@
 import { HeadphonesIcon } from "lucide-react"
 
-import { createSupportMessageAction } from "@/app/(dashboard)/actions"
 import { SupportComposer } from "@/components/app/support-composer"
 import {
   SupportThread,
   type SupportThreadMessage,
 } from "@/components/app/support-thread"
 import { Card, CardContent } from "@/components/ui/card"
-import { requireUser } from "@/lib/auth"
-import { prisma } from "@/lib/db"
+import { previewSupportMessages } from "@/src/frontend-preview/fixtures/mock-support"
 
-export default async function SupportPage() {
-  const user = await requireUser()
-  const conversation = await prisma.supportConversation.findFirst({
-    where: { userId: user.id },
-    orderBy: { updatedAt: "desc" },
-    include: {
-      messages: {
-        orderBy: { createdAt: "asc" },
-      },
-    },
-  })
-  const messages: SupportThreadMessage[] =
-    conversation?.messages.map((message) => ({
+export default function SupportPage() {
+  const messages: SupportThreadMessage[] = previewSupportMessages.map(
+    (message) => ({
       authorRole: message.authorRole,
       body: message.body,
       createdAtLabel: formatMessageTime(message.createdAt),
       id: message.id,
-    })) ?? []
+    })
+  )
 
   return (
     <main className="pulsar-container">
@@ -46,7 +35,7 @@ export default async function SupportPage() {
 
           <SupportThread messages={messages} />
 
-          <SupportComposer action={createSupportMessageAction} />
+          <SupportComposer />
         </CardContent>
       </Card>
     </main>

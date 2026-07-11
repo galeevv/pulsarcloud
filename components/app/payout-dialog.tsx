@@ -3,8 +3,8 @@
 import { useMemo, useState } from "react"
 import { WalletIcon } from "lucide-react"
 
-import { createPayoutRequestAction } from "@/app/(dashboard)/actions"
 import { pulsarCtaClass } from "@/components/app/pulsar-primitives"
+import { PreviewForm } from "@/components/frontend-preview/preview-form"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -24,7 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { formatRub } from "@/lib/pricing"
+import { formatPreviewRub } from "@/src/frontend-preview/format"
 
 const bankItems = [
   { label: "Сбербанк", value: "sber" },
@@ -50,7 +50,6 @@ export function PayoutDialog({
   const [bank, setBank] = useState(bankItems[0].value)
   const [otherBank, setOtherBank] = useState("")
   const [destination, setDestination] = useState("")
-  const [idempotencyKey] = useState(() => crypto.randomUUID())
   const selectedBankLabel = useMemo(() => {
     if (bank === "other") {
       return otherBank.trim() || "Другой банк"
@@ -79,14 +78,10 @@ export function PayoutDialog({
         <DialogHeader>
           <DialogTitle>Заявка на вывод</DialogTitle>
           <DialogDescription>
-            Минимальная сумма: {formatRub(minimalPayoutRub)}.
+            Минимальная сумма: {formatPreviewRub(minimalPayoutRub)}.
           </DialogDescription>
         </DialogHeader>
-        <form
-          action={createPayoutRequestAction}
-          className="flex flex-col gap-3"
-        >
-          <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
+        <PreviewForm className="flex flex-col gap-3">
           <input type="hidden" name="payoutDetails" value={payoutDetails} />
           <FieldGroup>
             <Field>
@@ -155,7 +150,7 @@ export function PayoutDialog({
             </Field>
           </FieldGroup>
           <Button type="submit">Создать заявку</Button>
-        </form>
+        </PreviewForm>
       </DialogContent>
     </Dialog>
   )

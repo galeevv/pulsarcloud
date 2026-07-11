@@ -1,16 +1,12 @@
-import { updatePricingSettingsAction } from "@/app/admin/actions"
+import { PreviewForm } from "@/components/frontend-preview/preview-form"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { prisma } from "@/lib/db"
-import { getDurationDiscounts } from "@/lib/pricing"
+import { previewPricing } from "@/src/frontend-preview/fixtures/mock-pricing"
 
-export default async function AdminSettingsPage() {
-  const settings = await prisma.pricingVersion.findFirstOrThrow({
-    where: { status: "ACTIVE" },
-    orderBy: { version: "desc" },
-  })
+export default function AdminSettingsPage() {
+  const settings = previewPricing
   const legalDocuments = [
     {
       id: "agreement",
@@ -25,24 +21,13 @@ export default async function AdminSettingsPage() {
     },
   ]
   const discounts = new Map(
-    getDurationDiscounts(settings).map((item) => [
-      item.months,
-      item.discountPct,
-    ])
+    settings.durationOptions.map((item) => [item.months, item.discountPct])
   )
   const integrations = [
-    [
-      "Platega",
-      Boolean(process.env.PLATEGA_MERCHANT_ID && process.env.PLATEGA_SECRET),
-    ],
-    ["Resend", Boolean(process.env.RESEND_API_KEY && process.env.EMAIL_FROM)],
-    [
-      "Telegram",
-      Boolean(
-        process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_WEBHOOK_SECRET
-      ),
-    ],
-    ["Remnawave", process.env.REMNAWAVE_PROVIDER === "HTTP"],
+    ["Payments", false],
+    ["Email", false],
+    ["Telegram", false],
+    ["VPN provisioning", false],
   ] as const
 
   return (
@@ -52,10 +37,7 @@ export default async function AdminSettingsPage() {
           <CardTitle>Pricing Settings</CardTitle>
         </CardHeader>
         <CardContent>
-          <form
-            action={updatePricingSettingsAction}
-            className="flex flex-col gap-3"
-          >
+          <PreviewForm className="flex flex-col gap-3">
             <FieldGroup>
               <Field>
                 <FieldLabel>Base monthly price</FieldLabel>
@@ -137,7 +119,7 @@ export default async function AdminSettingsPage() {
               ))}
             </FieldGroup>
             <Button type="submit">Save settings</Button>
-          </form>
+          </PreviewForm>
         </CardContent>
       </Card>
       <Card className="glass-card rounded-3xl">

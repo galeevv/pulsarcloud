@@ -2,21 +2,13 @@
 
 import * as React from "react"
 import { CheckIcon, MailIcon, SendIcon } from "lucide-react"
+import { toast } from "sonner"
 
-import {
-  requestEmailBindingAction,
-  startTelegramBindingAction,
-  verifyEmailBindingAction,
-  type EmailBindingState,
-  type TelegramBindingState,
-} from "@/app/(dashboard)/profile/actions"
 import { PulsarIconContainer } from "@/components/app/pulsar-primitives"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-
-const emailInitial: EmailBindingState = { ok: false }
-const telegramInitial: TelegramBindingState = { ok: false }
+import { backendUnavailableMessage } from "@/src/frontend-preview/config"
 
 export function LoginMethodsManager({
   email,
@@ -25,18 +17,10 @@ export function LoginMethodsManager({
   email: string | null
   telegramId: string | null
 }) {
-  const [emailState, requestEmail, requestingEmail] = React.useActionState(
-    requestEmailBindingAction,
-    emailInitial
-  )
-  const [verifyState, verifyEmail, verifyingEmail] = React.useActionState(
-    verifyEmailBindingAction,
-    emailInitial
-  )
-  const [telegramState, startTelegram, startingTelegram] = React.useActionState(
-    async () => startTelegramBindingAction(),
-    telegramInitial
-  )
+  function handlePreviewSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    toast.info(backendUnavailableMessage)
+  }
 
   return (
     <div className="soft-panel flex flex-col gap-3 p-3">
@@ -48,41 +32,17 @@ export function LoginMethodsManager({
         connected={Boolean(email)}
       />
       {!email ? (
-        emailState.challengeId ? (
-          <form action={verifyEmail} className="flex flex-col gap-2">
-            <input
-              type="hidden"
-              name="challengeId"
-              value={emailState.challengeId}
-            />
-            <input type="hidden" name="email" value={emailState.email} />
-            <Input
-              name="otp"
-              inputMode="numeric"
-              pattern="[0-9]{6}"
-              maxLength={6}
-              placeholder="Код из письма"
-              required
-            />
-            <Button type="submit" disabled={verifyingEmail}>
-              Подтвердить email
-            </Button>
-            <Message value={verifyState.message ?? emailState.message} />
-          </form>
-        ) : (
-          <form action={requestEmail} className="flex gap-2">
-            <Input
-              name="email"
-              type="email"
-              placeholder="you@example.com"
-              required
-            />
-            <Button type="submit" variant="outline" disabled={requestingEmail}>
-              Привязать
-            </Button>
-            <Message value={emailState.message} />
-          </form>
-        )
+        <form onSubmit={handlePreviewSubmit} className="flex gap-2">
+          <Input
+            name="email"
+            type="email"
+            placeholder="you@example.com"
+            required
+          />
+          <Button type="submit" variant="outline">
+            Привязать
+          </Button>
+        </form>
       ) : null}
 
       <MethodRow
@@ -92,20 +52,10 @@ export function LoginMethodsManager({
         connected={Boolean(telegramId)}
       />
       {!telegramId ? (
-        <form action={startTelegram} className="flex flex-col gap-2">
-          <Button type="submit" variant="outline" disabled={startingTelegram}>
+        <form onSubmit={handlePreviewSubmit} className="flex flex-col gap-2">
+          <Button type="submit" variant="outline">
             Привязать Telegram
           </Button>
-          {telegramState.url ? (
-            <Button
-              render={
-                <a href={telegramState.url} target="_blank" rel="noreferrer" />
-              }
-            >
-              Открыть Telegram
-            </Button>
-          ) : null}
-          <Message value={telegramState.message} />
         </form>
       ) : null}
     </div>
@@ -140,8 +90,4 @@ function MethodRow({
       ) : null}
     </div>
   )
-}
-
-function Message({ value }: { value?: string }) {
-  return value ? <p className="text-xs text-muted-foreground">{value}</p> : null
 }

@@ -8,18 +8,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { prisma } from "@/lib/db"
-import { formatRub } from "@/lib/pricing"
-import { getIdentitySubject } from "@/lib/user-identity"
+import { formatPreviewRub } from "@/src/frontend-preview/format"
+import { previewAdminUsers } from "@/src/frontend-preview/fixtures/mock-admin"
 
-export default async function AdminUsersPage() {
-  const users = await prisma.user.findMany({
-    include: {
-      subscription: true,
-      authIdentities: true,
-    },
-    orderBy: { createdAt: "desc" },
-  })
+export default function AdminUsersPage() {
+  const users = previewAdminUsers
 
   return (
     <Card className="glass-card rounded-3xl">
@@ -42,15 +35,18 @@ export default async function AdminUsersPage() {
             {users.map((user) => (
               <TableRow key={user.id}>
                 <TableCell>
-                  {getIdentitySubject(user.authIdentities, "EMAIL") ?? "—"}
+                  {user.authIdentities.find((item) => item.provider === "EMAIL")
+                    ?.providerSubject ?? "—"}
                 </TableCell>
                 <TableCell>
-                  {getIdentitySubject(user.authIdentities, "TELEGRAM") ?? "—"}
+                  {user.authIdentities.find(
+                    (item) => item.provider === "TELEGRAM"
+                  )?.providerSubject ?? "—"}
                 </TableCell>
                 <TableCell>
                   <Badge>{user.role}</Badge>
                 </TableCell>
-                <TableCell>{formatRub(user.balanceRub)}</TableCell>
+                <TableCell>{formatPreviewRub(user.balanceRub)}</TableCell>
                 <TableCell>{user.subscription?.status ?? "NONE"}</TableCell>
                 <TableCell>
                   {user.createdAt.toLocaleDateString("ru-RU")}

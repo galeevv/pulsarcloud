@@ -8,30 +8,20 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { prisma } from "@/lib/db"
-import { formatRub } from "@/lib/pricing"
-import { getUserLabel } from "@/lib/user-identity"
+import {
+  formatPreviewRub,
+  getPreviewUserLabel,
+} from "@/src/frontend-preview/format"
+import {
+  previewAdminReferralInvites,
+  previewAdminReferralProfiles,
+  previewAdminReferralRewards,
+} from "@/src/frontend-preview/fixtures/mock-admin"
 
-export default async function AdminReferralsPage() {
-  const [profiles, invites, rewards] = await Promise.all([
-    prisma.referralProfile.findMany({
-      include: { user: { include: { authIdentities: true } } },
-    }),
-    prisma.referralInvite.findMany({
-      include: {
-        inviter: { include: { authIdentities: true } },
-        invited: { include: { authIdentities: true } },
-      },
-      orderBy: { createdAt: "desc" },
-    }),
-    prisma.referralReward.findMany({
-      include: {
-        inviter: { include: { authIdentities: true } },
-        invited: { include: { authIdentities: true } },
-      },
-      orderBy: { createdAt: "desc" },
-    }),
-  ])
+export default function AdminReferralsPage() {
+  const profiles = previewAdminReferralProfiles
+  const invites = previewAdminReferralInvites
+  const rewards = previewAdminReferralRewards
 
   return (
     <div className="flex flex-col gap-4">
@@ -52,7 +42,7 @@ export default async function AdminReferralsPage() {
               {profiles.map((profile) => (
                 <TableRow key={profile.userId}>
                   <TableCell>
-                    {getUserLabel(profile.user.authIdentities)}
+                    {getPreviewUserLabel(profile.user.authIdentities)}
                   </TableCell>
                   <TableCell>{profile.inviteCode}</TableCell>
                   <TableCell>
@@ -86,15 +76,15 @@ export default async function AdminReferralsPage() {
                 return (
                   <TableRow key={invite.id}>
                     <TableCell>
-                      {getUserLabel(invite.inviter.authIdentities)}
+                      {getPreviewUserLabel(invite.inviter.authIdentities)}
                     </TableCell>
                     <TableCell>
-                      {getUserLabel(invite.invited.authIdentities)}
+                      {getPreviewUserLabel(invite.invited.authIdentities)}
                     </TableCell>
                     <TableCell>{invite.status}</TableCell>
                     <TableCell>
                       {reward
-                        ? `${formatRub(reward.amountRub)} · ${reward.status}`
+                        ? `${formatPreviewRub(reward.amountRub)} · ${reward.status}`
                         : "—"}
                     </TableCell>
                   </TableRow>

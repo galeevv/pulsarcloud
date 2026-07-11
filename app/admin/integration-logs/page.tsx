@@ -8,14 +8,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { prisma } from "@/lib/db"
+import { previewAdminIntegrationLogs } from "@/src/frontend-preview/fixtures/mock-admin"
 
-export default async function AdminIntegrationLogsPage() {
-  const logs = await prisma.auditEvent.findMany({
-    where: { eventType: { startsWith: "integration." } },
-    orderBy: { createdAt: "desc" },
-    take: 100,
-  })
+export default function AdminIntegrationLogsPage() {
+  const logs = previewAdminIntegrationLogs
 
   return (
     <Card className="glass-card rounded-3xl">

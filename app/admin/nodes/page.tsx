@@ -8,10 +8,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { prisma } from "@/lib/db"
+import { previewAdminNodes } from "@/src/frontend-preview/fixtures/mock-admin"
 
-export default async function AdminNodesPage() {
-  const nodes = await prisma.node.findMany({ orderBy: { sortOrder: "asc" } })
+export default function AdminNodesPage() {
+  const nodes = previewAdminNodes
 
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_360px]">

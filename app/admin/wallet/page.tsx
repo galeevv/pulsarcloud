@@ -8,16 +8,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { prisma } from "@/lib/db"
-import { formatRub } from "@/lib/pricing"
-import { getUserLabel } from "@/lib/user-identity"
+import {
+  formatPreviewRub,
+  getPreviewUserLabel,
+} from "@/src/frontend-preview/format"
+import { previewAdminWalletEntries } from "@/src/frontend-preview/fixtures/mock-admin"
 
-export default async function AdminWalletPage() {
-  const entries = await prisma.walletLedgerEntry.findMany({
-    include: { user: { include: { authIdentities: true } } },
-    orderBy: { createdAt: "desc" },
-    take: 100,
-  })
+export default function AdminWalletPage() {
+  const entries = previewAdminWalletEntries
 
   return (
     <Card className="glass-card rounded-3xl">
@@ -39,9 +37,11 @@ export default async function AdminWalletPage() {
           <TableBody>
             {entries.map((entry) => (
               <TableRow key={entry.id}>
-                <TableCell>{getUserLabel(entry.user.authIdentities)}</TableCell>
+                <TableCell>
+                  {getPreviewUserLabel(entry.user.authIdentities)}
+                </TableCell>
                 <TableCell>{entry.direction}</TableCell>
-                <TableCell>{formatRub(entry.amountRub)}</TableCell>
+                <TableCell>{formatPreviewRub(entry.amountRub)}</TableCell>
                 <TableCell>
                   <Badge variant="secondary">{entry.type}</Badge>
                 </TableCell>
