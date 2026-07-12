@@ -8,7 +8,6 @@ and will be rebuilt separately.
 
 - User routes: `/`, `/auth/verify`, `/home`, `/subscription`, `/referrals`,
   `/profile`, `/support`, and `/legal`.
-- Existing admin routes under `/admin`.
 - The original responsive layout, navigation, shadcn/Base UI components,
   forms, dialogs, drawers, styles, animations, and public assets.
 - Read-only fixtures under `src/frontend-preview` for visual review.

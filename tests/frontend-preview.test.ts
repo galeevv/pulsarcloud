@@ -14,17 +14,6 @@ const routeFiles = [
   "app/(dashboard)/profile/page.tsx",
   "app/(dashboard)/support/page.tsx",
   "app/(dashboard)/legal/page.tsx",
-  "app/admin/page.tsx",
-  "app/admin/users/page.tsx",
-  "app/admin/subscriptions/page.tsx",
-  "app/admin/payments/page.tsx",
-  "app/admin/wallet/page.tsx",
-  "app/admin/referrals/page.tsx",
-  "app/admin/payouts/page.tsx",
-  "app/admin/support/page.tsx",
-  "app/admin/nodes/page.tsx",
-  "app/admin/integration-logs/page.tsx",
-  "app/admin/settings/page.tsx",
 ]
 
 async function collectFiles(directory: string): Promise<string[]> {
@@ -45,7 +34,7 @@ async function collectFiles(directory: string): Promise<string[]> {
   return files
 }
 
-test("all frontend and admin route modules remain present", async () => {
+test("all user frontend route modules remain present", async () => {
   for (const route of routeFiles) {
     const source = await readFile(path.join(root, route), "utf8")
     assert.match(source, /export default/)

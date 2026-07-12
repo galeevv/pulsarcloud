@@ -45,10 +45,7 @@ secret names.
 
 - User routes: `/`, `/auth/verify`, `/home`, `/subscription`, `/referrals`,
   `/profile`, `/support`, `/legal`.
-- Admin routes: `/admin`, `/admin/users`, `/admin/subscriptions`,
-  `/admin/payments`, `/admin/wallet`, `/admin/referrals`, `/admin/payouts`,
-  `/admin/support`, `/admin/nodes`, `/admin/integration-logs`, `/admin/settings`.
-- Root/dashboard/admin layouts, bottom navigation, responsive behavior, forms,
+- Root/dashboard layouts, bottom navigation, responsive behavior, forms,
   dialogs, drawers, cards, empty states, notifications and animations.
 - shadcn/Base UI components, Tailwind styles, metadata, icons, images and GIFs.
 - Static legal documents: `agreement.md`, `offer.md`, `confidentiality.md`.
@@ -58,7 +55,7 @@ secret names.
 
 `src/frontend-preview` contains explicit preview configuration, UI view-model
 types, formatting helpers, and read-only fixtures for user, subscription,
-pricing display, referrals, support and admin pages. `PreviewForm` prevents
+pricing display, referrals and support pages. `PreviewForm` prevents
 submission, performs no HTTP request or write, and displays: “Действие доступно
 после подключения нового backend”. Checkout confirmation explicitly says that
 the backend is not connected and cannot create a real payment.
@@ -79,9 +76,6 @@ that it is not current Pulsar 2.0 architecture.
 - Referrals: balance, invite link, invite metrics/history and payout history;
   payout command.
 - Support: ordered message view models and send-message command.
-- Admin: summary metrics and list view models for users, subscriptions,
-  payments, wallet, referrals, payouts, support, nodes and integration status;
-  the corresponding future admin commands.
 - Legal: the existing static document contract can remain file-backed.
 
 ## Remaining work and non-obvious points
@@ -89,9 +83,9 @@ that it is not current Pulsar 2.0 architecture.
 The new backend must define authentication, authorization, persistence,
 commercial pricing, payments, subscription lifecycle, provisioning, referrals,
 wallet/payouts, support and operations from scratch. Preview amounts and records
-are presentation fixtures, not accepted commercial rules or seed data. Admin
-pages intentionally remain visible for design review and are not protected by
-real authorization. `/auth/verify/link` was a handler rather than a visual page
+are presentation fixtures, not accepted commercial rules or seed data. The old
+`/admin` interface was removed completely and will be developed again.
+`/auth/verify/link` was a handler rather than a visual page
 and was removed; `/auth/verify` remains. Legal pages still read versioned local
 Markdown files on the server, which is frontend content loading rather than a
 production database integration.

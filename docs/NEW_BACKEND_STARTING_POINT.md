@@ -13,8 +13,6 @@ does not prescribe the new backend architecture or business rules.
 | `/profile` | email and Telegram identity display | link identity, logout, open support/legal |
 | `/support` | ordered message list with author, body and display time | send message |
 | `/legal` | agreement, offer and privacy Markdown | switch document tab |
-| `/admin` | aggregate display metrics | none |
-| Admin lists | users, subscriptions, payments, wallet, referrals, payouts, conversations, nodes, integration events, settings | future admin mutations shown by existing forms |
 
 ## View models to preserve
 
@@ -37,7 +35,6 @@ They are UI contracts, not database entities.
 - `mock-pricing.ts`: read-only checkout and settings display options.
 - `mock-referrals.ts`: referral metrics/history and payouts.
 - `mock-support.ts`: support thread display.
-- `mock-admin.ts`: all admin tables and metrics.
 - `PreviewForm`: local no-write replacement for every former mutation.
 
 When the new backend is connected, replace fixtures at page boundaries with
