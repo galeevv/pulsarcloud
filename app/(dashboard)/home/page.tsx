@@ -1,5 +1,11 @@
 import Link from "next/link"
-import { ChevronRightIcon, GiftIcon } from "lucide-react"
+import type { Metadata } from "next"
+import {
+  AlertCircleIcon,
+  ChevronRightIcon,
+  GiftIcon,
+  InfoIcon,
+} from "lucide-react"
 
 import {
   PulsarAssetCard,
@@ -7,22 +13,39 @@ import {
 } from "@/components/app/pulsar-primitives"
 import { SetupVpnAction } from "@/components/app/setup-vpn-action"
 import { SubscriptionPaymentAction } from "@/components/app/subscription-payment-action"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
-import { previewPricing } from "@/src/frontend-preview/fixtures/mock-pricing"
-import { previewSubscription } from "@/src/frontend-preview/fixtures/mock-subscription"
+import { formatPreviewRub } from "@/src/frontend-preview/format"
+import {
+  getPricingView,
+  getSubscriptionView,
+} from "@/src/server/queries/user-dashboard"
+import { requireWebSession } from "@/src/server/transport/web/session"
 import type {
   PreviewSubscription,
   PreviewSubscriptionStatus,
 } from "@/src/frontend-preview/view-models"
 
-export default function HomePage() {
-  const subscription = previewSubscription
-  const settings = previewPricing
-  const status = subscription.status
+export const metadata: Metadata = {
+  title: "Главная",
+}
+
+export default async function HomePage() {
+  const session = await requireWebSession("USER")
+  const [subscription, settings] = await Promise.all([
+    getSubscriptionView(session.userId),
+    getPricingView(),
+  ])
+  const status = subscription?.status ?? "NONE"
   const renewalLabel =
     status === "NONE" ? "Оплатить подписку" : "Продлить подписку"
   const subscriptionSummary = getHomeSubscriptionSummary(subscription, status)
+  const isActiveProvisioning = Boolean(
+    subscription &&
+    ["ACTIVE", "TRIAL"].includes(status) &&
+    (subscription.syncStatus !== "SYNCED" || !subscription.subscriptionUrl)
+  )
 
   return (
     <main className="pulsar-container">
@@ -36,9 +59,9 @@ export default function HomePage() {
             <p className="text-sm leading-5 text-muted-foreground">
               {subscriptionSummary.caption}
             </p>
-            <p className="w-full text-center text-[26px] leading-8 font-semibold tracking-normal whitespace-nowrap">
+            <h1 className="w-full text-center text-[26px] leading-8 font-semibold tracking-normal whitespace-nowrap">
               {subscriptionSummary.title}
-            </p>
+            </h1>
           </div>
           <div className="flex flex-wrap justify-center gap-2">
             <Badge>{getSubscriptionStatusLabel(status)}</Badge>
@@ -53,11 +76,48 @@ export default function HomePage() {
           </div>
         </div>
         <div className="grid w-full gap-3">
-          <SubscriptionPaymentAction
-            settings={settings}
-            triggerLabel={renewalLabel}
-          />
-          <SetupVpnAction subscriptionUrl={subscription?.subscriptionUrl} />
+          {isActiveProvisioning && subscription ? (
+            <Alert
+              variant={
+                subscription.syncStatus === "FAILED" ? "destructive" : "default"
+              }
+              className="text-left"
+            >
+              {subscription.syncStatus === "FAILED" ? (
+                <AlertCircleIcon />
+              ) : (
+                <InfoIcon />
+              )}
+              <AlertTitle>
+                {subscription.syncStatus === "FAILED"
+                  ? "Не удалось подготовить подключение"
+                  : "Готовим подключение"}
+              </AlertTitle>
+              <AlertDescription>
+                {subscription.syncStatus === "FAILED"
+                  ? (subscription.lastUserFriendlyError ??
+                    "Мы повторим синхронизацию автоматически. Повторная оплата не требуется.")
+                  : "Подписка уже активна. Ссылка появится после синхронизации, повторная оплата не требуется."}
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <>
+              <SubscriptionPaymentAction
+                settings={settings}
+                triggerLabel={renewalLabel}
+                initialDeviceLimit={
+                  subscription?.nextDeviceLimit ?? subscription?.deviceLimit
+                }
+                initialLteEnabled={
+                  subscription?.nextLteEnabled ?? subscription?.lteEnabled
+                }
+                renewsActiveSubscription={Boolean(
+                  subscription && ["ACTIVE", "TRIAL"].includes(status)
+                )}
+              />
+              <SetupVpnAction subscriptionUrl={subscription?.subscriptionUrl} />
+            </>
+          )}
         </div>
       </PulsarAssetCard>
 
@@ -75,9 +135,13 @@ export default function HomePage() {
             />
             <div className="relative z-10 min-w-0">
               <p className="text-sm leading-5 text-muted-foreground transition-colors group-hover:text-foreground">
-                <span className="block">Друг получает 3 дня бесплатно.</span>
                 <span className="block">
-                  Вы получаете 75 ₽ после его оплаты.
+                  Друг получает {formatDaysLabel(settings.referralTrialDays)}{" "}
+                  бесплатно.
+                </span>
+                <span className="block">
+                  Вы получаете {formatPreviewRub(settings.referralRewardRub)}{" "}
+                  после его оплаты.
                 </span>
               </p>
             </div>
@@ -151,6 +215,10 @@ function formatDaysLeft(expiresAt: Date) {
 }
 
 function formatDaysLeftLabel(days: number) {
+  return formatDaysLabel(days)
+}
+
+function formatDaysLabel(days: number) {
   return `${days} ${pluralizeRu(days, ["день", "дня", "дней"])}`
 }
 

@@ -14,10 +14,13 @@ export type PreviewSubscription = {
   lastTechnicalError: string | null
   lastUserFriendlyError: string | null
   lteEnabled: boolean
+  nextDeviceLimit: number | null
+  nextLteEnabled: boolean | null
+  nextParametersAt: Date | null
   startsAt: Date | null
   status: PreviewSubscriptionStatus
   subscriptionUrl: string | null
-  syncStatus: "NOT_CONNECTED"
+  syncStatus: "NOT_REQUIRED" | "PENDING" | "SYNCED" | "FAILED"
 }
 
 export type PreviewDurationOption = {
@@ -36,4 +39,5 @@ export type PreviewPricing = {
   minimalPayoutRub: number
   referralFriendDiscountPct: number
   referralRewardRub: number
+  referralTrialDays: number
 }

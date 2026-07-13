@@ -1,22 +1,23 @@
+import type { Metadata } from "next"
 import { HeadphonesIcon } from "lucide-react"
 
 import { SupportComposer } from "@/components/app/support-composer"
-import {
-  SupportThread,
-  type SupportThreadMessage,
-} from "@/components/app/support-thread"
+import { toSupportThreadMessage } from "@/components/app/support-message"
+import { SupportThread } from "@/components/app/support-thread"
 import { Card, CardContent } from "@/components/ui/card"
-import { previewSupportMessages } from "@/src/frontend-preview/fixtures/mock-support"
+import { getUserView } from "@/src/server/queries/user-dashboard"
+import { requireWebSession } from "@/src/server/transport/web/session"
 
-export default function SupportPage() {
-  const messages: SupportThreadMessage[] = previewSupportMessages.map(
-    (message) => ({
-      authorRole: message.authorRole,
-      body: message.body,
-      createdAtLabel: formatMessageTime(message.createdAt),
-      id: message.id,
-    })
-  )
+export const metadata: Metadata = {
+  title: "Поддержка",
+}
+
+export default async function SupportPage() {
+  const session = await requireWebSession("USER")
+  const { user } = await getUserView(session.userId)
+  const messages = [...(user.supportConversation?.messages ?? [])]
+    .reverse()
+    .map(toSupportThreadMessage)
 
   return (
     <main className="pulsar-container">
@@ -27,9 +28,9 @@ export default function SupportPage() {
               <div className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-border/70 bg-background/40">
                 <HeadphonesIcon className="size-4" />
               </div>
-              <p className="truncate text-sm leading-5 font-medium">
+              <h1 className="truncate text-sm leading-5 font-medium">
                 Чат поддержки
-              </p>
+              </h1>
             </div>
           </div>
 
@@ -40,11 +41,4 @@ export default function SupportPage() {
       </Card>
     </main>
   )
-}
-
-function formatMessageTime(date: Date) {
-  return new Intl.DateTimeFormat("ru-RU", {
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date)
 }

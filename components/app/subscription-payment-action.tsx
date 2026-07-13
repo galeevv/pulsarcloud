@@ -2,20 +2,16 @@
 
 import * as React from "react"
 import {
-  ArrowLeftIcon,
-  CheckIcon,
   CreditCardIcon,
+  InfoIcon,
   MinusIcon,
   PlusIcon,
   SmartphoneIcon,
   ZapIcon,
 } from "lucide-react"
-
-import { PreviewForm } from "@/components/frontend-preview/preview-form"
-import {
-  pulsarCtaClass,
-  pulsarControlClass,
-} from "@/components/app/pulsar-primitives"
+import { toast } from "sonner"
+import { pulsarCtaClass } from "@/components/app/pulsar-primitives"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -35,245 +31,220 @@ import {
   DrawerTrigger,
 } from "@/components/ui/drawer"
 import { Switch } from "@/components/ui/switch"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { formatPreviewRub } from "@/src/frontend-preview/format"
 import type { PreviewPricing } from "@/src/frontend-preview/view-models"
+import { cn } from "@/lib/utils"
 
-type CheckoutStep = "config" | "confirm"
-
-function getMonthsLabel(months: number) {
-  return `${months} ${months === 1 ? "месяц" : months < 5 ? "месяца" : "месяцев"}`
-}
-
-function PaymentFlow({ settings }: { settings: PreviewPricing }) {
-  const [step, setStep] = React.useState<CheckoutStep>("config")
+function PaymentFlow({
+  settings,
+  initialDeviceLimit,
+  initialLteEnabled,
+  renewsActiveSubscription,
+}: {
+  settings: PreviewPricing
+  initialDeviceLimit?: number
+  initialLteEnabled?: boolean
+  renewsActiveSubscription?: boolean
+}) {
   const [months, setMonths] = React.useState(
     settings.durationOptions[0]?.months ?? 1
   )
   const [deviceLimit, setDeviceLimit] = React.useState(
-    Math.min(Math.max(3, settings.minDeviceLimit), settings.maxDeviceLimit)
+    initialDeviceLimit ?? settings.minDeviceLimit
   )
-  const [lteEnabled, setLteEnabled] = React.useState(false)
-  const selectedDuration =
+  const [lteEnabled, setLteEnabled] = React.useState(initialLteEnabled ?? false)
+  const [pending, setPending] = React.useState(false)
+  const idempotencyKey = React.useRef("")
+  React.useEffect(() => {
+    idempotencyKey.current = ""
+  }, [months, deviceLimit, lteEnabled])
+  const duration =
     settings.durationOptions.find((item) => item.months === months) ??
     settings.durationOptions[0]
+  const monthlyExtras =
+    Math.max(0, deviceLimit - settings.minDeviceLimit) *
+      settings.extraDeviceMonthlyPriceRub +
+    (lteEnabled ? settings.lteMonthlyPriceRub : 0)
+  const totalRub = duration
+    ? Math.round(
+        (duration.totalRub +
+          monthlyExtras * months * (1 - duration.discountPct / 100)) *
+          100
+      ) / 100
+    : 0
 
-  function changeDeviceLimit(nextValue: number) {
-    setDeviceLimit(
-      Math.min(
-        Math.max(nextValue, settings.minDeviceLimit),
-        settings.maxDeviceLimit
+  async function submit(event: React.FormEvent) {
+    event.preventDefault()
+    setPending(true)
+    idempotencyKey.current ||= globalThis.crypto.randomUUID()
+    try {
+      const response = await fetch("/api/payments/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          durationMonths: months,
+          deviceLimit,
+          lteEnabled,
+          idempotencyKey: idempotencyKey.current,
+        }),
+      })
+      const result = (await response.json()) as {
+        checkoutUrl?: string
+        error?: string
+        message?: string
+      }
+      if (!response.ok || !result.checkoutUrl) {
+        const message =
+          result.error === "SUBSCRIPTION_UPGRADE_REQUIRES_PAYMENT"
+            ? "Параметры активного периода нельзя изменить мгновенно. Оформите полное продление — новые параметры вступят в силу после его окончания."
+            : (result.message ?? "Не удалось создать платёж.")
+        throw new Error(message)
+      }
+      window.location.assign(result.checkoutUrl)
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Не удалось создать платёж."
       )
-    )
+      setPending(false)
+    }
   }
 
   return (
-    <PreviewForm className="flex min-h-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-2 pb-4 sm:px-1 sm:pt-0">
-        <div className="flex flex-col gap-4">
-          {step === "config" ? (
-            <>
-              <div className="flex flex-col gap-2">
-                {settings.durationOptions.map((duration) => (
-                  <Button
-                    key={duration.months}
-                    type="button"
-                    variant={
-                      months === duration.months ? "secondary" : "outline"
-                    }
-                    className="h-auto w-full justify-between rounded-[18px] px-3 py-3"
-                    onClick={() => setMonths(duration.months)}
-                  >
-                    <span className="grid min-w-0 flex-1 grid-cols-[1fr_auto] gap-x-3 gap-y-1 text-left">
-                      <span className="font-medium">
-                        {getMonthsLabel(duration.months)}
-                      </span>
-                      <span className="text-right font-semibold">
-                        {formatPreviewRub(duration.totalRub)}
-                      </span>
-                      <span className="text-xs text-muted-foreground">
-                        Предпросмотр тарифа
-                      </span>
-                      <span className="flex justify-end">
-                        {duration.discountPct > 0 ? (
-                          <Badge variant="secondary">
-                            -{duration.discountPct}%
-                          </Badge>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">
-                            базовый
-                          </span>
-                        )}
-                      </span>
-                    </span>
-                  </Button>
-                ))}
-              </div>
-
-              <div className="soft-panel flex items-center justify-between gap-3 p-4">
-                <div className="flex min-w-0 items-center gap-3">
-                  <div className="flex size-10 shrink-0 items-center justify-center rounded-2xl border border-border/70 bg-background/40">
-                    <SmartphoneIcon />
-                  </div>
-                  <div>
-                    <p className="font-medium">Устройства</p>
-                    <p className="text-sm text-muted-foreground">
-                      {deviceLimit} устройства
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    size="icon-sm"
-                    variant="outline"
-                    aria-label="Уменьшить лимит устройств"
-                    disabled={deviceLimit <= settings.minDeviceLimit}
-                    onClick={() => changeDeviceLimit(deviceLimit - 1)}
-                  >
-                    <MinusIcon />
-                  </Button>
-                  <span className="w-6 text-center text-sm font-semibold tabular-nums">
-                    {deviceLimit}
-                  </span>
-                  <Button
-                    type="button"
-                    size="icon-sm"
-                    variant="outline"
-                    aria-label="Увеличить лимит устройств"
-                    disabled={deviceLimit >= settings.maxDeviceLimit}
-                    onClick={() => changeDeviceLimit(deviceLimit + 1)}
-                  >
-                    <PlusIcon />
-                  </Button>
-                </div>
-              </div>
-
-              <div className="soft-panel flex items-center justify-between gap-4 p-4">
-                <div className="flex min-w-0 gap-3">
-                  <div className="flex size-10 shrink-0 items-center justify-center rounded-2xl border border-border/70 bg-background/40">
-                    <ZapIcon />
-                  </div>
-                  <div className="flex min-w-0 flex-col gap-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-medium">LTE-доступ</p>
-                      <Badge variant="secondary">
-                        +{formatPreviewRub(settings.lteMonthlyPriceRub)} / месяц
-                      </Badge>
-                    </div>
-                    <p className="truncate text-sm leading-5 text-muted-foreground">
-                      Стабильнее с мобильного интернета.
-                    </p>
-                  </div>
-                </div>
-                <Switch
-                  checked={lteEnabled}
-                  aria-label="Подключить LTE-доступ"
-                  onCheckedChange={setLteEnabled}
-                />
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="soft-panel flex flex-col gap-2 p-4 text-sm">
-                <div className="flex justify-between gap-3">
-                  <span className="text-muted-foreground">
-                    {getMonthsLabel(months)}
-                  </span>
-                  <span>
-                    {selectedDuration
-                      ? formatPreviewRub(selectedDuration.totalRub)
-                      : "—"}
-                  </span>
-                </div>
-                <div className="flex justify-between gap-3">
-                  <span className="text-muted-foreground">Устройства</span>
-                  <span>{deviceLimit}</span>
-                </div>
-                <div className="flex justify-between gap-3">
-                  <span className="text-muted-foreground">LTE-доступ</span>
-                  <span>{lteEnabled ? "есть" : "нет"}</span>
-                </div>
-              </div>
-              <div className="rounded-[22px] border border-border/70 bg-primary px-4 py-4 text-primary-foreground">
-                <p className="text-sm opacity-75">Предпросмотр</p>
-                <p className="text-xl font-semibold tracking-normal">
-                  Backend не подключен
-                </p>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-
-      <div className="flex shrink-0 flex-col gap-2 border-t border-border/70 p-4 sm:px-0 sm:pb-0">
-        {step === "config" ? (
-          <Button
-            type="button"
-            size="lg"
-            className={pulsarCtaClass}
-            onClick={() => setStep("confirm")}
-          >
-            <CreditCardIcon data-icon="inline-start" />
-            Продолжить
-          </Button>
-        ) : (
-          <div className="grid grid-cols-[auto_1fr] gap-2">
+    <form className="flex min-h-0 flex-1 flex-col" onSubmit={submit}>
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pt-2 pb-4 sm:px-1 sm:pt-0">
+        <ToggleGroup
+          value={[String(months)]}
+          onValueChange={(values) => values[0] && setMonths(Number(values[0]))}
+          className="grid w-full grid-cols-2"
+          aria-label="Срок подписки"
+        >
+          {settings.durationOptions.map((item) => (
+            <ToggleGroupItem
+              key={item.months}
+              value={String(item.months)}
+              variant="outline"
+              className="h-auto min-h-14 flex-col items-start px-3 py-2"
+            >
+              <span>{item.months} мес.</span>
+              <span className="text-xs text-muted-foreground">
+                {formatPreviewRub(item.totalRub)}{" "}
+                {item.discountPct ? `· −${item.discountPct}%` : ""}
+              </span>
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+        {renewsActiveSubscription ? (
+          <Alert>
+            <InfoIcon />
+            <AlertTitle>Параметры следующего периода</AlertTitle>
+            <AlertDescription>
+              Продление начнётся после текущей подписки. Выбранные лимит
+              устройств и LTE вступят в силу в новом периоде.
+            </AlertDescription>
+          </Alert>
+        ) : null}
+        <div className="soft-panel flex items-center justify-between gap-3 p-4">
+          <div className="flex items-center gap-3">
+            <SmartphoneIcon />
+            <div>
+              <p className="font-medium">Устройства</p>
+              <p className="text-sm text-muted-foreground">
+                {deviceLimit} из {settings.maxDeviceLimit}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
             <Button
               type="button"
-              size="lg"
+              size="icon-sm"
               variant="outline"
-              className={pulsarControlClass}
-              aria-label="Вернуться к настройкам"
-              onClick={() => setStep("config")}
+              aria-label="Уменьшить лимит"
+              disabled={deviceLimit <= settings.minDeviceLimit}
+              onClick={() => setDeviceLimit((value) => value - 1)}
             >
-              <ArrowLeftIcon />
+              <MinusIcon />
             </Button>
-            <Button type="submit" size="lg" className={pulsarControlClass}>
-              <CheckIcon data-icon="inline-start" />
-              Создать платёж
+            <span className="w-6 text-center text-sm font-semibold">
+              {deviceLimit}
+            </span>
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="outline"
+              aria-label="Увеличить лимит"
+              disabled={deviceLimit >= settings.maxDeviceLimit}
+              onClick={() => setDeviceLimit((value) => value + 1)}
+            >
+              <PlusIcon />
             </Button>
           </div>
-        )}
+        </div>
+        <div className="soft-panel flex items-center justify-between gap-4 p-4">
+          <div className="flex items-center gap-3">
+            <ZapIcon />
+            <div>
+              <p className="font-medium">LTE-доступ</p>
+              <Badge variant="secondary">
+                +{formatPreviewRub(settings.lteMonthlyPriceRub)} / мес.
+              </Badge>
+            </div>
+          </div>
+          <Switch
+            checked={lteEnabled}
+            onCheckedChange={setLteEnabled}
+            aria-label="Подключить LTE-доступ"
+          />
+        </div>
+        <div className="rounded-[22px] border border-border/70 bg-primary px-4 py-4 text-primary-foreground">
+          <p className="text-sm opacity-75">К оплате</p>
+          <p className="text-xl font-semibold">{formatPreviewRub(totalRub)}</p>
+        </div>
       </div>
-    </PreviewForm>
+      <div className="border-t border-border/70 p-4 sm:px-0 sm:pb-0">
+        <Button
+          type="submit"
+          size="lg"
+          className={pulsarCtaClass}
+          disabled={pending}
+        >
+          <CreditCardIcon data-icon="inline-start" />
+          {pending ? "Создаём платёж…" : "Перейти к оплате"}
+        </Button>
+      </div>
+    </form>
   )
 }
 
 export function SubscriptionPaymentAction({
   settings,
   triggerLabel,
+  initialDeviceLimit,
+  initialLteEnabled,
+  renewsActiveSubscription = false,
 }: {
   settings: PreviewPricing
   triggerLabel: string
+  initialDeviceLimit?: number
+  initialLteEnabled?: boolean
+  renewsActiveSubscription?: boolean
 }) {
-  const [isDrawerOpen, setIsDrawerOpen] = React.useState(false)
-  const [isDialogOpen, setIsDialogOpen] = React.useState(false)
-
+  const [drawerOpen, setDrawerOpen] = React.useState(false)
+  const [dialogOpen, setDialogOpen] = React.useState(false)
   React.useEffect(() => {
-    function openPaymentCheckout() {
-      if (window.matchMedia("(min-width: 640px)").matches) {
-        setIsDialogOpen(true)
-      } else {
-        setIsDrawerOpen(true)
-      }
-    }
-
-    window.addEventListener(
-      "pulsar:open-subscription-payment",
-      openPaymentCheckout
-    )
+    const open = () =>
+      window.matchMedia("(min-width: 640px)").matches
+        ? setDialogOpen(true)
+        : setDrawerOpen(true)
+    window.addEventListener("pulsar:open-subscription-payment", open)
     return () =>
-      window.removeEventListener(
-        "pulsar:open-subscription-payment",
-        openPaymentCheckout
-      )
+      window.removeEventListener("pulsar:open-subscription-payment", open)
   }, [])
-
   return (
     <>
       <Drawer
-        open={isDrawerOpen}
-        onOpenChange={setIsDrawerOpen}
+        open={drawerOpen}
+        onOpenChange={setDrawerOpen}
         showSwipeHandle
         swipeDirection="down"
       >
@@ -282,7 +253,7 @@ export function SubscriptionPaymentAction({
             <Button
               type="button"
               size="lg"
-              className={`${pulsarCtaClass} sm:hidden`}
+              className={cn(pulsarCtaClass, "sm:hidden")}
             />
           }
         >
@@ -293,20 +264,24 @@ export function SubscriptionPaymentAction({
           <DrawerHeader className="sr-only">
             <DrawerTitle>{triggerLabel}</DrawerTitle>
             <DrawerDescription>
-              Настройте параметры подписки перед оплатой.
+              Настройте подписку перед оплатой.
             </DrawerDescription>
           </DrawerHeader>
-          <PaymentFlow settings={settings} />
+          <PaymentFlow
+            settings={settings}
+            initialDeviceLimit={initialDeviceLimit}
+            initialLteEnabled={initialLteEnabled}
+            renewsActiveSubscription={renewsActiveSubscription}
+          />
         </DrawerContent>
       </Drawer>
-
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogTrigger
           render={
             <Button
               type="button"
               size="lg"
-              className={`hidden ${pulsarCtaClass} sm:inline-flex`}
+              className={cn("hidden sm:inline-flex", pulsarCtaClass)}
             />
           }
         >
@@ -317,10 +292,15 @@ export function SubscriptionPaymentAction({
           <DialogHeader className="sr-only">
             <DialogTitle>{triggerLabel}</DialogTitle>
             <DialogDescription>
-              Настройте параметры подписки перед оплатой.
+              Настройте подписку перед оплатой.
             </DialogDescription>
           </DialogHeader>
-          <PaymentFlow settings={settings} />
+          <PaymentFlow
+            settings={settings}
+            initialDeviceLimit={initialDeviceLimit}
+            initialLteEnabled={initialLteEnabled}
+            renewsActiveSubscription={renewsActiveSubscription}
+          />
         </DialogContent>
       </Dialog>
     </>

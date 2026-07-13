@@ -1,18 +1,16 @@
+import type { Metadata } from "next"
 import type { ComponentProps } from "react"
 import {
   AlertCircleIcon,
+  CalendarClockIcon,
+  InfoIcon,
   KeyRoundIcon,
   Link2Icon,
-  MinusIcon,
-  PlusIcon,
   RadioIcon,
   SmartphoneIcon,
 } from "lucide-react"
 import { CopyButton } from "@/components/app/copy-button"
-import {
-  PreviewButton,
-  PreviewForm,
-} from "@/components/frontend-preview/preview-form"
+import { RegenerateLinkDialog } from "@/components/app/regenerate-link-dialog"
 import {
   PulsarActionRow,
   PulsarAssetCard,
@@ -22,8 +20,14 @@ import {
 import { SubscriptionPaymentAction } from "@/components/app/subscription-payment-action"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
 import {
   Empty,
   EmptyContent,
@@ -33,17 +37,27 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty"
 import { Progress } from "@/components/ui/progress"
-import { previewPricing } from "@/src/frontend-preview/fixtures/mock-pricing"
-import { previewSubscription } from "@/src/frontend-preview/fixtures/mock-subscription"
+import {
+  getPricingView,
+  getSubscriptionView,
+} from "@/src/server/queries/user-dashboard"
+import { requireWebSession } from "@/src/server/transport/web/session"
 import type {
   PreviewSubscription,
   PreviewSubscriptionStatus,
 } from "@/src/frontend-preview/view-models"
 
-export default function SubscriptionPage() {
-  const subscription = previewSubscription
-  const settings = previewPricing
-  const status = subscription.status
+export const metadata: Metadata = {
+  title: "Подписка",
+}
+
+export default async function SubscriptionPage() {
+  const session = await requireWebSession("USER")
+  const [subscription, settings] = await Promise.all([
+    getSubscriptionView(session.userId),
+    getPricingView(),
+  ])
+  const status = subscription?.status ?? "NONE"
   const hasActiveSubscription =
     subscription && ["ACTIVE", "TRIAL"].includes(status)
   const hasSubscriptionRecord = Boolean(subscription && status !== "NONE")
@@ -64,17 +78,21 @@ export default function SubscriptionPage() {
       >
         {hasSubscriptionRecord ? (
           <div className="flex flex-col items-center text-center">
-            <p className="text-[26px] leading-8 font-semibold tracking-normal">
+            <h1 className="text-[26px] leading-8 font-semibold tracking-normal">
               {subscriptionSummary.title}
-            </p>
+            </h1>
           </div>
-        ) : null}
+        ) : (
+          <h1 className="sr-only">Подписка</h1>
+        )}
 
         {!hasSubscriptionRecord ? (
           <SubscriptionEmptyState settings={settings} />
         ) : subscription ? (
           <>
-            <SubscriptionUrlCard url={subscription.subscriptionUrl} />
+            {hasActiveSubscription ? (
+              <SubscriptionUrlCard url={subscription.subscriptionUrl} />
+            ) : null}
 
             <div className="soft-panel flex flex-col gap-3 p-4">
               <div className="flex items-center justify-between gap-3 text-sm">
@@ -93,7 +111,29 @@ export default function SubscriptionPage() {
               />
             </div>
 
-            {subscription.lastUserFriendlyError ? (
+            {subscription.nextDeviceLimit !== null ||
+            subscription.nextLteEnabled !== null ? (
+              <Alert>
+                <CalendarClockIcon />
+                <AlertTitle>Параметры следующего периода</AlertTitle>
+                <AlertDescription>
+                  {subscription.nextParametersAt
+                    ? `С ${formatSubscriptionDate(subscription.nextParametersAt)} — `
+                    : "После окончания текущего периода — "}
+                  {formatDeviceLimit(
+                    subscription.nextDeviceLimit ?? subscription.deviceLimit
+                  )}
+                  ,{" "}
+                  {(subscription.nextLteEnabled ?? subscription.lteEnabled)
+                    ? "с LTE"
+                    : "без LTE"}
+                  .
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
+            {subscription.lastUserFriendlyError &&
+            subscription.syncStatus !== "FAILED" ? (
               <Alert>
                 <AlertCircleIcon />
                 <AlertTitle>Нужна проверка</AlertTitle>
@@ -103,15 +143,43 @@ export default function SubscriptionPage() {
               </Alert>
             ) : null}
 
-            {hasActiveSubscription && subscription.subscriptionUrl ? (
-              <PreviewButton className={pulsarLinkButtonClass()}>
-                <Link2Icon data-icon="inline-start" />
-                Подключить в Happ
-              </PreviewButton>
+            {hasActiveSubscription ? (
+              subscription.syncStatus === "SYNCED" &&
+              subscription.subscriptionUrl ? (
+                <div className="flex flex-col gap-3">
+                  <a
+                    href={subscription.subscriptionUrl}
+                    className={pulsarLinkButtonClass()}
+                  >
+                    <Link2Icon data-icon="inline-start" />
+                    Подключить в Happ
+                  </a>
+                  <RegenerateLinkDialog />
+                  <SubscriptionPaymentAction
+                    settings={settings}
+                    triggerLabel="Продлить подписку"
+                    initialDeviceLimit={
+                      subscription.nextDeviceLimit ?? subscription.deviceLimit
+                    }
+                    initialLteEnabled={
+                      subscription.nextLteEnabled ?? subscription.lteEnabled
+                    }
+                    renewsActiveSubscription
+                  />
+                </div>
+              ) : (
+                <ProvisioningStatus subscription={subscription} />
+              )
             ) : (
               <SubscriptionPaymentAction
                 settings={settings}
-                triggerLabel="Продлить подписку"
+                triggerLabel="Возобновить подписку"
+                initialDeviceLimit={
+                  subscription.nextDeviceLimit ?? subscription.deviceLimit
+                }
+                initialLteEnabled={
+                  subscription.nextLteEnabled ?? subscription.lteEnabled
+                }
               />
             )}
           </>
@@ -121,11 +189,7 @@ export default function SubscriptionPage() {
       </PulsarAssetCard>
 
       {hasSubscriptionRecord && subscription ? (
-        <ConnectedDevicesCard
-          maxDeviceLimit={settings.maxDeviceLimit}
-          minDeviceLimit={settings.minDeviceLimit}
-          subscription={subscription}
-        />
+        <SubscriptionDevicesCard subscription={subscription} />
       ) : null}
     </main>
   )
@@ -177,111 +241,63 @@ function SubscriptionUrlCard({ url }: { url: string | null }) {
   )
 }
 
-function ConnectedDevicesCard({
-  maxDeviceLimit,
-  minDeviceLimit,
+function SubscriptionDevicesCard({
   subscription,
 }: {
-  maxDeviceLimit: number
-  minDeviceLimit: number
-  subscription: PreviewSubscription | null
+  subscription: PreviewSubscription
 }) {
-  const deviceLimit = subscription?.deviceLimit ?? 0
-
   return (
     <Card className="rounded-3xl border border-border/70 bg-card/40 py-0">
-      <CardContent className="flex flex-col gap-4 p-4">
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <p className="font-semibold">Подключенные устройства</p>
-            <p className="text-sm text-muted-foreground">
-              {subscription
-                ? `Активно: 0 из ${formatDeviceLimit(deviceLimit)}`
-                : "Появятся после оплаты подписки"}
-            </p>
-          </div>
-          {subscription ? (
-            <div className="flex items-center gap-2">
-              <DeviceLimitButton
-                ariaLabel="Уменьшить лимит устройств"
-                disabled={deviceLimit <= minDeviceLimit}
-                icon="minus"
-                value={deviceLimit - 1}
-              />
-              <span className="w-6 text-center text-sm font-semibold tabular-nums">
-                {deviceLimit}
-              </span>
-              <DeviceLimitButton
-                ariaLabel="Увеличить лимит устройств"
-                disabled={deviceLimit >= maxDeviceLimit}
-                icon="plus"
-                value={deviceLimit + 1}
-              />
-            </div>
-          ) : null}
+      <CardHeader className="p-4 pb-0">
+        <CardTitle>Устройства</CardTitle>
+        <CardDescription>
+          По тарифу можно подключить до{" "}
+          {formatDeviceLimit(subscription.deviceLimit)}.
+        </CardDescription>
+        <CardAction>
+          <Badge variant="secondary">Лимит: {subscription.deviceLimit}</Badge>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="p-4">
+        <div className="soft-panel flex items-center gap-3 p-4">
+          <PulsarIconContainer icon={SmartphoneIcon} size="md" />
+          <p className="text-sm text-muted-foreground">
+            Фактическая статистика подключений появится после синхронизации с
+            Remnawave.
+          </p>
         </div>
-
-        {subscription ? (
-          <div className="grid gap-3">
-            {Array.from({ length: deviceLimit }).map((_, index) => (
-              <div
-                key={index}
-                className="soft-panel flex items-center justify-between gap-3 p-3"
-              >
-                <div className="flex min-w-0 items-center gap-3">
-                  <PulsarIconContainer icon={SmartphoneIcon} size="md" />
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">
-                      Добавить устройство
-                    </p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      VPN ещё на одном устройстве
-                    </p>
-                  </div>
-                </div>
-                <Badge variant="secondary">Свободно</Badge>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="soft-panel flex items-center gap-3 p-4">
-            <PulsarIconContainer icon={SmartphoneIcon} size="md" />
-            <p className="text-sm text-muted-foreground">
-              Оформите подписку, чтобы подключить устройства.
-            </p>
-          </div>
-        )}
       </CardContent>
     </Card>
   )
 }
 
-function DeviceLimitButton({
-  ariaLabel,
-  disabled,
-  icon,
-  value,
+function ProvisioningStatus({
+  subscription,
 }: {
-  ariaLabel: string
-  disabled: boolean
-  icon: "minus" | "plus"
-  value: number
+  subscription: PreviewSubscription
 }) {
-  const Icon = icon === "minus" ? MinusIcon : PlusIcon
+  if (subscription.syncStatus === "FAILED") {
+    return (
+      <Alert variant="destructive">
+        <AlertCircleIcon />
+        <AlertTitle>Не удалось подготовить подключение</AlertTitle>
+        <AlertDescription>
+          {subscription.lastUserFriendlyError ??
+            "Мы повторим синхронизацию автоматически. Если ссылка не появится, напишите в поддержку."}
+        </AlertDescription>
+      </Alert>
+    )
+  }
 
   return (
-    <PreviewForm>
-      <input type="hidden" name="deviceLimit" value={value} />
-      <Button
-        type="submit"
-        size="icon-sm"
-        variant="outline"
-        aria-label={ariaLabel}
-        disabled={disabled}
-      >
-        <Icon />
-      </Button>
-    </PreviewForm>
+    <Alert>
+      <InfoIcon />
+      <AlertTitle>Готовим подключение</AlertTitle>
+      <AlertDescription>
+        Подписка уже активна. Ссылка для Happ появится после синхронизации —
+        повторная оплата не требуется.
+      </AlertDescription>
+    </Alert>
   )
 }
 

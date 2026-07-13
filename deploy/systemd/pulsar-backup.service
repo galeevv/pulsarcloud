@@ -1,0 +1,18 @@
+[Unit]
+Description=Consistent Pulsar SQLite backup
+
+[Service]
+Type=oneshot
+User=pulsar
+Group=pulsar
+Environment=PULSAR_DB_PATH=/var/lib/pulsar/pulsar.db
+Environment=PULSAR_BACKUP_DIR=/var/backups/pulsar
+ExecStart=/usr/bin/bash /opt/pulsar/current/scripts/backup-sqlite.sh
+RequiresMountsFor=/var/lib/pulsar /var/backups/pulsar
+TimeoutStartSec=300
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

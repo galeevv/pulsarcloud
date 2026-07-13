@@ -1,8 +1,13 @@
 "use client"
 
 import * as React from "react"
-import { HeadphonesIcon } from "lucide-react"
+import { ArrowDownIcon, HeadphonesIcon } from "lucide-react"
 
+import {
+  SUPPORT_MESSAGES_REFRESH_EVENT,
+  toSupportThreadMessage,
+  type SupportThreadMessage,
+} from "@/components/app/support-message"
 import { Bubble, BubbleContent, BubbleGroup } from "@/components/ui/bubble"
 import {
   Empty,
@@ -13,74 +18,144 @@ import {
 } from "@/components/ui/empty"
 import { Marker, MarkerContent } from "@/components/ui/marker"
 import { Message, MessageContent, MessageFooter } from "@/components/ui/message"
-import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from "@/components/ui/message-scroller"
 
-export type SupportThreadMessage = {
-  authorRole: string
-  body: string
-  createdAtLabel: string
-  id: string
-}
+export type { SupportThreadMessage } from "@/components/app/support-message"
 
 export function SupportThread({
-  messages,
+  messages: initialMessages,
 }: {
   messages: SupportThreadMessage[]
 }) {
-  const bottomRef = React.useRef<HTMLDivElement>(null)
-  const lastMessageId = messages.at(-1)?.id
+  const [threadState, setThreadState] = React.useState(() => ({
+    messages: initialMessages,
+    source: initialMessages,
+  }))
+  const messages =
+    threadState.source === initialMessages
+      ? threadState.messages
+      : initialMessages
 
   React.useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      bottomRef.current?.scrollIntoView({ block: "end" })
-    })
+    let active = true
 
-    return () => window.cancelAnimationFrame(frame)
-  }, [lastMessageId, messages.length])
+    const refresh = async () => {
+      try {
+        const response = await fetch("/api/support/messages", {
+          cache: "no-store",
+        })
+        if (!response.ok) return
+        const result = (await response.json()) as {
+          messages?: Array<{
+            id: string
+            authorRole: string
+            body: string
+            createdAt: string
+          }>
+        }
+
+        if (!active || !Array.isArray(result.messages)) return
+
+        setThreadState({
+          messages: result.messages.map(toSupportThreadMessage),
+          source: initialMessages,
+        })
+      } catch {
+        // A transient polling failure does not disrupt the conversation UI.
+      }
+    }
+
+    const handleRefresh = () => {
+      void refresh()
+    }
+
+    window.addEventListener(SUPPORT_MESSAGES_REFRESH_EVENT, handleRefresh)
+    const timer = window.setInterval(refresh, 10_000)
+
+    return () => {
+      active = false
+      window.removeEventListener(SUPPORT_MESSAGES_REFRESH_EVENT, handleRefresh)
+      window.clearInterval(timer)
+    }
+  }, [initialMessages])
 
   return (
-    <ScrollArea className="min-h-0 flex-1">
-      <div className="flex min-h-full flex-col gap-4 px-3 py-4">
-        {messages.length ? (
-          <>
-            <Marker variant="separator" className="text-xs">
-              <MarkerContent>Сегодня</MarkerContent>
-            </Marker>
-            {messages.map((message) => {
-              const isUser = message.authorRole === "USER"
+    <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+      <MessageScroller className="min-h-0 flex-1">
+        <MessageScrollerViewport aria-label="Сообщения поддержки">
+          <MessageScrollerContent
+            aria-live="polite"
+            aria-relevant="additions text"
+            className="gap-4 px-3 py-4"
+          >
+            {messages.length ? (
+              messages.map((message, index) => {
+                const isUser = message.authorRole === "USER"
+                const startsDay =
+                  index === 0 ||
+                  messages[index - 1]?.createdAtDayKey !==
+                    message.createdAtDayKey
 
-              return (
-                <Message key={message.id} align={isUser ? "end" : "start"}>
-                  <MessageContent>
-                    <BubbleGroup>
-                      <Bubble
-                        align={isUser ? "end" : "start"}
-                        variant={isUser ? "default" : "outline"}
-                      >
-                        <BubbleContent>{message.body}</BubbleContent>
-                      </Bubble>
-                    </BubbleGroup>
-                    <MessageFooter>{message.createdAtLabel}</MessageFooter>
-                  </MessageContent>
-                </Message>
-              )
-            })}
-          </>
-        ) : (
-          <Empty className="min-h-64 border border-border/70 bg-background/25 p-6">
-            <EmptyHeader>
-              <EmptyMedia variant="icon">
-                <HeadphonesIcon />
-              </EmptyMedia>
-              <EmptyTitle>Напишите нам</EmptyTitle>
-              <EmptyDescription>
-                Поможем с оплатой, подпиской или настройкой VPN.
-              </EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        )}
-        <div ref={bottomRef} aria-hidden="true" />
-      </div>
-    </ScrollArea>
+                return (
+                  <React.Fragment key={message.id}>
+                    {startsDay ? (
+                      <MessageScrollerItem>
+                        <Marker variant="separator" className="text-xs">
+                          <MarkerContent>
+                            {message.createdAtDayLabel}
+                          </MarkerContent>
+                        </Marker>
+                      </MessageScrollerItem>
+                    ) : null}
+                    <MessageScrollerItem messageId={message.id}>
+                      <Message align={isUser ? "end" : "start"}>
+                        <MessageContent>
+                          <BubbleGroup>
+                            <Bubble
+                              align={isUser ? "end" : "start"}
+                              variant={isUser ? "default" : "outline"}
+                            >
+                              <BubbleContent>{message.body}</BubbleContent>
+                            </Bubble>
+                          </BubbleGroup>
+                          <MessageFooter>
+                            {message.createdAtLabel}
+                          </MessageFooter>
+                        </MessageContent>
+                      </Message>
+                    </MessageScrollerItem>
+                  </React.Fragment>
+                )
+              })
+            ) : (
+              <MessageScrollerItem>
+                <Empty className="min-h-64 border border-border/70 bg-background/25 p-6">
+                  <EmptyHeader>
+                    <EmptyMedia variant="icon">
+                      <HeadphonesIcon />
+                    </EmptyMedia>
+                    <EmptyTitle>Напишите нам</EmptyTitle>
+                    <EmptyDescription>
+                      Поможем с оплатой, подпиской или настройкой VPN.
+                    </EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              </MessageScrollerItem>
+            )}
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
+        <MessageScrollerButton>
+          <ArrowDownIcon data-icon="inline-start" />
+          <span className="sr-only">К последнему сообщению</span>
+        </MessageScrollerButton>
+      </MessageScroller>
+    </MessageScrollerProvider>
   )
 }

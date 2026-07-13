@@ -1,0 +1,13 @@
+# Payments
+
+`PaymentProvider` exposes create checkout, verify webhook, and status lookup. `test` is fully functional. `platega` implements the current official contract: `POST /v2/transaction/process`, `GET /transaction/{id}`, `X-MerchantId`/`X-Secret`, and callbacks containing transaction ID, amount, currency, and status.
+
+Platega callbacks are accepted at `POST /api/integrations/payments/webhook`. Credentials are compared before parsing business data. `(provider,eventId)` is unique. Confirmation verifies provider, external ID, amount, and currency, then atomically confirms payment, extends subscription, creates history, converts referral, updates wallet, enables the buyer's referral profile, and writes provisioning/notification outbox jobs. A duplicate event cannot extend twice.
+
+Checkout also creates a delayed `RECONCILE_PAYMENT` outbox job. The worker performs bounded status polling with increasing delays and feeds a terminal provider response, including the provider-reported amount and currency, through the same idempotent confirmation state machine. An hourly maintenance sweep continues checking stale `PENDING` payments for seven days; older unresolved items stay visible for operator/provider investigation and are never guessed or manually confirmed in production.
+
+SQLite enforces one `CREATED`/`PENDING` checkout per user with a partial unique index. The immutable local payment ID is sent as Platega payload; if a signed callback includes that payload after a local persistence interruption, Pulsar may attach the external ID only after provider/amount/currency validation. Persistence is busy-retried and a post-provider write failure leaves the local order uncertain rather than falsely marking it failed. Since Platega does not expose a client-generated transaction idempotency key, operators must still inspect any `PERSIST_CHECKOUT` alert against the provider dashboard.
+
+Live checkout additionally requires `BILLING_ENABLED=true`. Keep it false until Platega credentials, the callback, the real Remnawave boundary, and a sandbox payment-to-provisioning flow have all passed acceptance.
+
+Configure `PAYMENT_PROVIDER=platega`, `PLATEGA_MERCHANT_ID`, `PLATEGA_SECRET`, and the HTTPS callback in Platega. The adapter follows [Platega authorization](https://docs.platega.io/) and its [callback contract](https://docs.platega.io/callback-%D0%BE%D0%B1-%D0%B8%D0%B7%D0%BC%D0%B5%D0%BD%D0%B5%D0%BD%D0%B8%D0%B8-%D1%81%D1%82%D0%B0%D1%82%D1%83%D1%81%D0%B0-%D1%82%D1%80%D0%B0%D0%BD%D0%B7%D0%B0%D0%BA%D1%86%D0%B8%D0%B8-29209725e0). Credentials and a merchant-side test are still required before claiming live acceptance.

@@ -1,10 +1,10 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import * as React from "react"
+import { useRouter } from "next/navigation"
 import { WalletIcon } from "lucide-react"
-
+import { toast } from "sonner"
 import { pulsarCtaClass } from "@/components/app/pulsar-primitives"
-import { PreviewForm } from "@/components/frontend-preview/preview-form"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -16,23 +16,7 @@ import {
 } from "@/components/ui/dialog"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { formatPreviewRub } from "@/src/frontend-preview/format"
-
-const bankItems = [
-  { label: "Сбербанк", value: "sber" },
-  { label: "Альфа-Банк", value: "alfa" },
-  { label: "Т-Банк", value: "tbank" },
-  { label: "Ozon Банк", value: "ozon" },
-  { label: "Другой", value: "other" },
-]
 
 export function PayoutDialog({
   buttonIcon = true,
@@ -47,20 +31,35 @@ export function PayoutDialog({
   minimalPayoutRub: number
   triggerClassName?: string
 }) {
-  const [bank, setBank] = useState(bankItems[0].value)
-  const [otherBank, setOtherBank] = useState("")
-  const [destination, setDestination] = useState("")
-  const selectedBankLabel = useMemo(() => {
-    if (bank === "other") {
-      return otherBank.trim() || "Другой банк"
-    }
-
-    return bankItems.find((item) => item.value === bank)?.label ?? bank
-  }, [bank, otherBank])
-  const payoutDetails = `Банк: ${selectedBankLabel}; Реквизит: ${destination.trim()}`
-
+  const router = useRouter()
+  const [open, setOpen] = React.useState(false)
+  const [pending, setPending] = React.useState(false)
+  const key = React.useRef("")
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setPending(true)
+    key.current ||= globalThis.crypto.randomUUID()
+    const data = new FormData(event.currentTarget)
+    const response = await fetch("/api/wallet/payouts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        amountMinor: Math.round(Number(data.get("amountRub")) * 100),
+        details: `Банк: ${data.get("bank")}; Реквизит: ${data.get("destination")}`,
+        idempotencyKey: key.current,
+      }),
+    })
+    const result = (await response.json()) as { message?: string }
+    if (response.ok) {
+      key.current = ""
+      toast.success("Заявка создана.")
+      setOpen(false)
+      router.refresh()
+    } else toast.error(result.message ?? "Не удалось создать заявку.")
+    setPending(false)
+  }
   return (
-    <Dialog>
+    <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger
         render={
           <Button
@@ -71,8 +70,7 @@ export function PayoutDialog({
           />
         }
       >
-        {buttonIcon ? <WalletIcon data-icon="inline-start" /> : null}
-        Вывести
+        {buttonIcon ? <WalletIcon data-icon="inline-start" /> : null}Вывести
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
@@ -81,62 +79,24 @@ export function PayoutDialog({
             Минимальная сумма: {formatPreviewRub(minimalPayoutRub)}.
           </DialogDescription>
         </DialogHeader>
-        <PreviewForm className="flex flex-col gap-3">
-          <input type="hidden" name="payoutDetails" value={payoutDetails} />
+        <form className="flex flex-col gap-3" onSubmit={submit}>
           <FieldGroup>
             <Field>
-              <FieldLabel htmlFor="payout-bank-trigger">Банк</FieldLabel>
-              <Select
-                items={bankItems}
-                value={bank}
-                onValueChange={(value) => {
-                  if (value) {
-                    setBank(value)
-                  }
-                }}
-              >
-                <SelectTrigger id="payout-bank-trigger" className="w-full">
-                  <SelectValue placeholder="Выберите банк" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    {bankItems.map((item) => (
-                      <SelectItem key={item.value} value={item.value}>
-                        {item.label}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
+              <FieldLabel htmlFor="payout-bank">Банк</FieldLabel>
+              <Input id="payout-bank" name="bank" required maxLength={80} />
             </Field>
-
-            {bank === "other" ? (
-              <Field>
-                <FieldLabel htmlFor="otherBank">Название банка</FieldLabel>
-                <Input
-                  id="otherBank"
-                  value={otherBank}
-                  onChange={(event) => setOtherBank(event.target.value)}
-                  placeholder="Укажите банк"
-                  required
-                />
-              </Field>
-            ) : null}
-
             <Field>
-              <FieldLabel htmlFor="payoutDestination">
-                Номер телефона или карты
+              <FieldLabel htmlFor="payout-destination">
+                Телефон или номер карты
               </FieldLabel>
               <Input
-                id="payoutDestination"
-                value={destination}
-                onChange={(event) => setDestination(event.target.value)}
-                placeholder="+7 900 000-00-00 или номер карты"
+                id="payout-destination"
+                name="destination"
                 autoComplete="off"
                 required
+                maxLength={100}
               />
             </Field>
-
             <Field>
               <FieldLabel htmlFor="amountRub">Сумма</FieldLabel>
               <Input
@@ -144,13 +104,16 @@ export function PayoutDialog({
                 name="amountRub"
                 type="number"
                 min={minimalPayoutRub}
+                step="0.01"
                 defaultValue={defaultAmountRub}
                 required
               />
             </Field>
           </FieldGroup>
-          <Button type="submit">Создать заявку</Button>
-        </PreviewForm>
+          <Button type="submit" disabled={pending}>
+            {pending ? "Создаём…" : "Создать заявку"}
+          </Button>
+        </form>
       </DialogContent>
     </Dialog>
   )

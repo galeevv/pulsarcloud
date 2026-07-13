@@ -1,4 +1,5 @@
 import Link from "next/link"
+import type { Metadata } from "next"
 import {
   ChevronRightIcon,
   FileTextIcon,
@@ -17,17 +18,29 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
-import { PreviewAlertAction } from "@/components/frontend-preview/preview-form"
+import { LogoutAction } from "@/components/app/logout-action"
 import {
   PulsarActionRow,
   PulsarAssetCard,
   pulsarCtaClass,
 } from "@/components/app/pulsar-primitives"
 import { LoginMethodsManager } from "@/components/app/login-methods-manager"
-import { previewUser } from "@/src/frontend-preview/fixtures/mock-user"
+import { getUserView } from "@/src/server/queries/user-dashboard"
+import { requireWebSession } from "@/src/server/transport/web/session"
 
-export default function ProfilePage() {
-  const user = previewUser
+export const metadata: Metadata = {
+  title: "Профиль",
+}
+
+export default async function ProfilePage() {
+  const session = await requireWebSession("USER")
+  const { user } = await getUserView(session.userId)
+  const email =
+    user.identities.find((identity) => identity.provider === "EMAIL")
+      ?.emailNormalized ?? null
+  const telegramId =
+    user.identities.find((identity) => identity.provider === "TELEGRAM")
+      ?.telegramId ?? null
 
   return (
     <main className="pulsar-container">
@@ -37,12 +50,24 @@ export default function ProfilePage() {
         contentClassName="flex min-h-56 flex-col justify-center gap-4"
       >
         <div className="flex flex-col items-center gap-1 text-center">
-          <p className="text-[26px] leading-8 font-semibold tracking-normal">
+          <h1 className="text-[26px] leading-8 font-semibold tracking-normal">
             Профиль
-          </p>
+          </h1>
         </div>
 
-        <LoginMethodsManager email={user.email} telegramId={user.telegramId} />
+        <LoginMethodsManager
+          email={email}
+          telegramId={telegramId}
+          telegramSettings={
+            user.telegramProfile
+              ? {
+                  transactional:
+                    user.telegramProfile.transactionalNotificationsEnabled,
+                  news: user.telegramProfile.newsNotificationsEnabled,
+                }
+              : undefined
+          }
+        />
 
         <Link href="/support" className="group block">
           <PulsarActionRow
@@ -90,9 +115,7 @@ function LogoutConfirmDialog() {
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Отмена</AlertDialogCancel>
-          <PreviewAlertAction className="w-full text-destructive hover:bg-destructive/10 hover:text-destructive">
-            Выйти
-          </PreviewAlertAction>
+          <LogoutAction />
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

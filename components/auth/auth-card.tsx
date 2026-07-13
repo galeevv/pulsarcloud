@@ -3,7 +3,6 @@
 import * as React from "react"
 import { ArrowLeftIcon, ArrowRightIcon, SendIcon } from "lucide-react"
 import { toast } from "sonner"
-
 import {
   PulsarAssetCard,
   pulsarCtaClass,
@@ -28,27 +27,130 @@ import {
   InputOTPSlot,
 } from "@/components/ui/input-otp"
 import { Separator } from "@/components/ui/separator"
-import { backendUnavailableMessage } from "@/src/frontend-preview/config"
+
+type ApiError = { message?: string }
+
+function authLinkErrorMessage(authError?: "expired" | "used") {
+  if (!authError) return null
+  return authError === "used"
+    ? "Ссылка уже использована. Запросите новый код."
+    : "Ссылка устарела. Запросите новый код."
+}
 
 export function AuthCard({
   authError,
   invite,
+  admin = false,
 }: {
   authError?: "expired" | "used"
   invite?: string
+  admin?: boolean
 }) {
   const [email, setEmail] = React.useState("")
-  const [isLinkSent, setIsLinkSent] = React.useState(false)
+  const [challengeId, setChallengeId] = React.useState<string>()
   const [otp, setOtp] = React.useState("")
-  const authErrorMessage =
-    authError === "used"
-      ? "Ссылка уже использована. Запросите новую ссылку для входа."
-      : authError === "expired"
-        ? "Ссылка устарела. Запросите новую ссылку для входа."
-        : null
+  const [pending, setPending] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(() =>
+    authLinkErrorMessage(authError)
+  )
+  const otpRef = React.useRef<HTMLInputElement>(null)
+  const verifyingRef = React.useRef(false)
 
-  function showUnavailable() {
-    toast.info(backendUnavailableMessage)
+  React.useEffect(() => {
+    const message = authLinkErrorMessage(authError)
+    if (!message) return
+    toast.error(message)
+  }, [authError])
+
+  function showError(message: string) {
+    setError(message)
+    toast.error(message)
+  }
+
+  async function requestCode(event: React.FormEvent) {
+    event.preventDefault()
+    setPending(true)
+    setError(null)
+    try {
+      const response = await fetch("/api/auth/email/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email,
+          invite,
+          purpose: admin ? "ADMIN_LOGIN" : "USER_LOGIN",
+        }),
+      })
+      const result = (await response.json()) as {
+        challengeId?: string
+        devOtp?: string
+      } & ApiError
+      if (!response.ok || !result.challengeId)
+        throw new Error(result.message ?? "Не удалось отправить код.")
+      setChallengeId(result.challengeId)
+      if (result.devOtp) toast.info(`Test mode: код ${result.devOtp}`)
+    } catch (cause) {
+      showError(
+        cause instanceof Error ? cause.message : "Не удалось отправить код."
+      )
+    } finally {
+      setPending(false)
+    }
+  }
+
+  async function verifyCode(value: string) {
+    if (!challengeId || verifyingRef.current) return
+    verifyingRef.current = true
+    setPending(true)
+    setError(null)
+    let shouldRefocus = false
+    try {
+      const response = await fetch("/api/auth/email/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ challengeId, otp: value }),
+      })
+      const result = (await response.json()) as {
+        redirectTo?: string
+      } & ApiError
+      if (!response.ok || !result.redirectTo)
+        throw new Error(result.message ?? "Не удалось подтвердить код.")
+      window.location.assign(result.redirectTo)
+    } catch (cause) {
+      showError(
+        cause instanceof Error ? cause.message : "Не удалось подтвердить код."
+      )
+      setOtp("")
+      shouldRefocus = true
+    } finally {
+      verifyingRef.current = false
+      setPending(false)
+      if (shouldRefocus) window.setTimeout(() => otpRef.current?.focus(), 0)
+    }
+  }
+
+  async function startTelegram() {
+    setPending(true)
+    setError(null)
+    try {
+      const response = await fetch("/api/auth/telegram/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          invite,
+          purpose: admin ? "ADMIN_LOGIN" : "USER_LOGIN",
+        }),
+      })
+      const result = (await response.json()) as { url?: string } & ApiError
+      if (!response.ok || !result.url)
+        throw new Error(result.message ?? "Telegram временно недоступен.")
+      window.location.assign(result.url)
+    } catch (cause) {
+      showError(
+        cause instanceof Error ? cause.message : "Telegram временно недоступен."
+      )
+      setPending(false)
+    }
   }
 
   return (
@@ -59,7 +161,7 @@ export function AuthCard({
         cardClassName="w-full max-w-md"
         contentClassName="relative flex min-h-56 flex-col justify-center gap-4"
       >
-        {isLinkSent ? (
+        {challengeId ? (
           <Button
             type="button"
             size="icon-sm"
@@ -67,86 +169,83 @@ export function AuthCard({
             className="absolute top-4 left-4"
             aria-label="Изменить email"
             onClick={() => {
-              setIsLinkSent(false)
+              setChallengeId(undefined)
               setOtp("")
+              setError(null)
             }}
           >
             <ArrowLeftIcon />
           </Button>
         ) : null}
         <CardHeader className="items-center gap-1.5 p-0 text-center">
-          <CardTitle>
-            {isLinkSent ? "Введите код" : "Добро пожаловать"}
+          <CardTitle className="text-lg font-semibold">
+            {challengeId
+              ? "Введите код"
+              : admin
+                ? "Вход администратора"
+                : "Добро пожаловать"}
           </CardTitle>
           <CardDescription>
-            {isLinkSent
+            {challengeId
               ? `Код отправлен на ${email}`
-              : "Подключиться к pulsar с помощью"}
+              : "Подключиться к Pulsar с помощью"}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4 p-0">
-          {isLinkSent ? (
-            <div className="flex flex-col gap-4">
-              <form
-                className="flex flex-col gap-3"
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  showUnavailable()
-                }}
-              >
-                <input type="hidden" name="email" value={email} />
-                <input type="hidden" name="invite" value={invite ?? ""} />
-                <FieldGroup>
-                  <Field>
-                    <FieldLabel className="sr-only">Код из письма</FieldLabel>
-                    <InputOTP
-                      name="otp"
-                      value={otp}
-                      onChange={(value) =>
-                        setOtp(value.replace(/\D/g, "").slice(0, 6))
-                      }
-                      maxLength={6}
-                      inputMode="numeric"
-                      autoComplete="one-time-code"
-                      pattern="[0-9]*"
-                      containerClassName="justify-center"
-                    >
+          {challengeId ? (
+            <div className="flex flex-col gap-3">
+              <FieldGroup>
+                <Field data-invalid={Boolean(error)}>
+                  <FieldLabel className="sr-only">Код из письма</FieldLabel>
+                  <InputOTP
+                    ref={otpRef}
+                    name="otp"
+                    value={otp}
+                    onChange={(value) => {
+                      setOtp(value.replace(/\D/g, "").slice(0, 6))
+                      setError(null)
+                    }}
+                    onComplete={(value) => void verifyCode(value)}
+                    maxLength={6}
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    pattern="[0-9]*"
+                    containerClassName="justify-center"
+                    disabled={pending}
+                  >
+                    {
                       <InputOTPGroup>
                         {Array.from({ length: 6 }).map((_, index) => (
-                          <InputOTPSlot key={index} index={index} />
+                          <InputOTPSlot
+                            key={index}
+                            index={index}
+                            aria-invalid={Boolean(error)}
+                          />
                         ))}
                       </InputOTPGroup>
-                    </InputOTP>
-                  </Field>
-                </FieldGroup>
-                <Button type="submit" disabled={otp.length !== 6}>
-                  Продолжить
-                </Button>
-              </form>
+                    }
+                  </InputOTP>
+                </Field>
+              </FieldGroup>
               <Button
                 type="button"
                 size="sm"
                 variant="link"
                 className="h-auto px-0 text-sm"
-                onClick={showUnavailable}
+                disabled={pending}
+                onClick={() => {
+                  setChallengeId(undefined)
+                  setOtp("")
+                }}
               >
-                Отправить новую ссылку
+                Отправить новый код
               </Button>
             </div>
           ) : (
             <>
-              <form
-                className="flex flex-col gap-4"
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  if (!email) return
-                  setIsLinkSent(true)
-                  showUnavailable()
-                }}
-              >
-                <input type="hidden" name="invite" value={invite ?? ""} />
+              <form className="flex flex-col gap-4" onSubmit={requestCode}>
                 <FieldGroup>
-                  <Field>
+                  <Field data-invalid={Boolean(error)}>
                     <FieldLabel htmlFor="email" className="sr-only">
                       Email
                     </FieldLabel>
@@ -159,7 +258,12 @@ export function AuthCard({
                         placeholder="Email"
                         required
                         value={email}
-                        onChange={(event) => setEmail(event.target.value)}
+                        onChange={(event) => {
+                          setEmail(event.target.value)
+                          setError(null)
+                        }}
+                        aria-invalid={Boolean(error)}
+                        disabled={pending}
                       />
                       <InputGroupAddon align="inline-end" className="pr-1.5">
                         <InputGroupButton
@@ -167,6 +271,7 @@ export function AuthCard({
                           size="icon-sm"
                           variant="default"
                           aria-label="Продолжить"
+                          disabled={pending}
                         >
                           <ArrowRightIcon />
                         </InputGroupButton>
@@ -174,24 +279,26 @@ export function AuthCard({
                     </InputGroup>
                   </Field>
                 </FieldGroup>
-                {authErrorMessage ? (
-                  <p className="text-sm text-destructive">{authErrorMessage}</p>
-                ) : null}
               </form>
-
               <div className="flex items-center gap-3">
                 <Separator className="flex-1" />
                 <span className="text-xs text-muted-foreground">или</span>
                 <Separator className="flex-1" />
               </div>
-
               <Button
                 type="button"
+                size="lg"
                 variant="outline"
                 className={pulsarCtaClass}
-                onClick={showUnavailable}
+                onClick={startTelegram}
+                disabled={pending}
               >
-                <SendIcon data-icon="inline-start" />С помощью Telegram
+                <span className="flex w-full items-center justify-between px-2">
+                  <span className="flex items-center gap-2">
+                    <SendIcon data-icon="inline-start" />С помощью Telegram
+                  </span>
+                  <ArrowRightIcon data-icon="inline-end" />
+                </span>
               </Button>
             </>
           )}

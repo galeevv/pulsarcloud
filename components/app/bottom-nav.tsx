@@ -7,10 +7,10 @@ import { GiftIcon, HomeIcon, RadioIcon, UserIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const navItems = [
-  { href: "/home", label: "Home", icon: HomeIcon },
-  { href: "/subscription", label: "Subscription", icon: RadioIcon },
-  { href: "/referrals", label: "Referrals", icon: GiftIcon },
-  { href: "/profile", label: "Profile", icon: UserIcon },
+  { href: "/home", label: "Главная", icon: HomeIcon },
+  { href: "/subscription", label: "Подписка", icon: RadioIcon },
+  { href: "/referrals", label: "Рефералы", icon: GiftIcon },
+  { href: "/profile", label: "Профиль", icon: UserIcon },
 ]
 
 export function BottomNav() {
@@ -32,6 +32,7 @@ export function BottomNav() {
                 active && "bg-primary text-primary-foreground"
               )}
               aria-label={item.label}
+              aria-current={active ? "page" : undefined}
             >
               <Icon
                 className={cn(

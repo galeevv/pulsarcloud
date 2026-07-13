@@ -1,0 +1,639 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  BLOCKED
+  DELETED
+}
+
+enum AuthProvider {
+  EMAIL
+  TELEGRAM
+}
+
+enum ChallengeChannel {
+  EMAIL
+  TELEGRAM
+}
+
+enum ChallengePurpose {
+  USER_LOGIN
+  LINK_EMAIL
+  LINK_TELEGRAM
+  ADMIN_LOGIN
+}
+
+enum ChallengeStatus {
+  PENDING
+  COMPLETED
+  EXPIRED
+  LOCKED
+  CANCELED
+}
+
+enum SessionKind {
+  USER
+  ADMIN
+}
+
+enum PaymentStatus {
+  CREATED
+  PENDING
+  CONFIRMED
+  FAILED
+  CANCELED
+  EXPIRED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  CANCELED
+  SUSPENDED
+}
+
+enum SyncStatus {
+  NOT_REQUIRED
+  PENDING
+  SYNCED
+  FAILED
+}
+
+enum TrialReason {
+  REFERRAL
+}
+
+enum ReferralInviteStatus {
+  REGISTERED
+  TRIAL_GRANTED
+  PAID
+  REWARD_REVERSED
+}
+
+enum ReferralRewardStatus {
+  AVAILABLE
+  RESERVED
+  PAID_OUT
+  REVERSED
+  MANUAL_REVIEW
+}
+
+enum WalletLedgerType {
+  REFERRAL_REWARD
+  REFERRAL_REWARD_REVERSAL
+  PAYOUT_RESERVE
+  PAYOUT_RELEASE
+  PAYOUT_PAID
+  ADMIN_ADJUSTMENT
+}
+
+enum PayoutStatus {
+  PENDING
+  APPROVED
+  PAID
+  REJECTED
+  CANCELED
+}
+
+enum SupportStatus {
+  OPEN
+  CLOSED
+}
+
+enum SupportAuthorRole {
+  USER
+  ADMIN
+  SYSTEM
+}
+
+enum SupportSource {
+  WEB
+  ADMIN
+  SYSTEM
+}
+
+enum BroadcastStatus {
+  DRAFT
+  QUEUED
+  SENDING
+  COMPLETED
+  CANCELED
+}
+
+enum BroadcastTarget {
+  NEWS_OPTED_IN
+  ALL_REACHABLE
+}
+
+enum DeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
+enum JobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  DEAD
+}
+
+enum AuditActorType {
+  USER
+  ADMIN
+  SYSTEM
+}
+
+model User {
+  id                      String                      @id @default(cuid())
+  role                    UserRole                    @default(USER)
+  status                  UserStatus                  @default(ACTIVE)
+  isTest                  Boolean                     @default(false)
+  createdAt               DateTime                    @default(now())
+  updatedAt               DateTime                    @updatedAt
+  lastLoginAt             DateTime?
+  identities              AuthIdentity[]
+  sessions                Session[]
+  loginChallenges         LoginChallenge[]            @relation("ChallengeRequester")
+  wallet                  WalletAccount?
+  referralProfile         ReferralProfile?
+  invitedReferral         ReferralInvite?             @relation("InvitedUser")
+  sentInvites             ReferralInvite[]            @relation("Inviter")
+  referralRewards         ReferralReward[]            @relation("RewardInviter")
+  receivedReferralRewards ReferralReward[]            @relation("RewardInvited")
+  subscription            Subscription?
+  subscriptionEvents      SubscriptionEvent[]         @relation("SubscriptionActor")
+  trialGrant              TrialGrant?
+  payments                Payment[]
+  payouts                 PayoutRequest[]             @relation("PayoutOwner")
+  reviewedPayouts         PayoutRequest[]             @relation("PayoutReviewer")
+  supportConversation     SupportConversation?
+  supportMessages         SupportMessage[]
+  telegramProfile         TelegramProfile?
+  broadcasts              TelegramBroadcast[]
+  broadcastDeliveries     TelegramBroadcastDelivery[]
+
+  @@index([createdAt])
+  @@index([status, role])
+}
+
+model AuthIdentity {
+  id               String       @id @default(cuid())
+  userId           String
+  provider         AuthProvider
+  providerSubject  String
+  emailNormalized  String?      @unique
+  telegramId       String?      @unique
+  telegramUsername String?
+  verifiedAt       DateTime
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerSubject])
+  @@unique([userId, provider])
+  @@index([userId])
+}
+
+model LoginChallenge {
+  id                     String           @id @default(cuid())
+  channel                ChallengeChannel
+  purpose                ChallengePurpose
+  status                 ChallengeStatus  @default(PENDING)
+  emailNormalized        String?
+  telegramId             String?
+  requestedByUserId      String?
+  otpHash                String?
+  magicLinkTokenHash     String?          @unique
+  telegramStartTokenHash String?          @unique
+  completionTokenHash    String?          @unique
+  inviteCodeSnapshot     String?
+  attempts               Int              @default(0)
+  maxAttempts            Int              @default(5)
+  expiresAt              DateTime
+  consumedAt             DateTime?
+  requestedIpHash        String?
+  userAgentHash          String?
+  devOtpEncrypted        String?
+  createdAt              DateTime         @default(now())
+  requestedByUser        User?            @relation("ChallengeRequester", fields: [requestedByUserId], references: [id], onDelete: Cascade)
+
+  @@index([emailNormalized, createdAt])
+  @@index([requestedIpHash, createdAt])
+  @@index([status, expiresAt])
+}
+
+model Session {
+  id                String      @id @default(cuid())
+  userId            String
+  kind              SessionKind
+  tokenHash         String      @unique
+  createdAt         DateTime    @default(now())
+  lastSeenAt        DateTime    @default(now())
+  idleExpiresAt     DateTime
+  absoluteExpiresAt DateTime
+  revokedAt         DateTime?
+  userAgentHash     String?
+  ipPrefixHash      String?
+  user              User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, kind, revokedAt])
+  @@index([idleExpiresAt, absoluteExpiresAt])
+}
+
+model PricingSettings {
+  id                           String   @id @default(cuid())
+  key                          String   @unique @default("default")
+  baseMonthlyPriceMinor        Int
+  extraDeviceMonthlyPriceMinor Int
+  lteMonthlyPriceMinor         Int
+  durationDiscountsJson        String
+  minDeviceLimit               Int      @default(1)
+  maxDeviceLimit               Int      @default(5)
+  referralRewardMinor          Int      @default(7500)
+  referralTrialDays            Int      @default(3)
+  minimalPayoutMinor           Int      @default(15000)
+  version                      Int      @default(1)
+  updatedAt                    DateTime @updatedAt
+}
+
+model Payment {
+  id                     String              @id @default(cuid())
+  userId                 String
+  provider               String
+  externalPaymentId      String?             @unique
+  idempotencyKey         String              @unique
+  status                 PaymentStatus       @default(CREATED)
+  amountMinor            Int
+  currency               String              @default("RUB")
+  durationDays           Int
+  deviceLimit            Int
+  lteEnabled             Boolean
+  basePriceMinor         Int
+  extraDevicesPriceMinor Int
+  ltePriceMinor          Int
+  discountMinor          Int
+  priceSnapshotJson      String
+  pricingVersion         Int
+  checkoutUrl            String?
+  providerCreatedAt      DateTime?
+  confirmedAt            DateTime?
+  refundedAt             DateTime?
+  expiresAt              DateTime?
+  isTest                 Boolean             @default(false)
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+  user                   User                @relation(fields: [userId], references: [id], onDelete: Restrict)
+  webhookLogs            PaymentWebhookLog[]
+  subscriptionEvents     SubscriptionEvent[]
+  referralReward         ReferralReward?
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+}
+
+model PaymentWebhookLog {
+  id                String    @id @default(cuid())
+  provider          String
+  eventId           String
+  eventType         String
+  externalPaymentId String?
+  paymentId         String?
+  signatureValid    Boolean
+  payloadJson       String
+  receivedAt        DateTime  @default(now())
+  processedAt       DateTime?
+  processingError   String?
+  payment           Payment?  @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  @@unique([provider, eventId])
+  @@index([externalPaymentId])
+  @@index([processedAt])
+}
+
+model Subscription {
+  id                    String              @id @default(cuid())
+  userId                String              @unique
+  status                SubscriptionStatus
+  startedAt             DateTime
+  expiresAt             DateTime
+  deviceLimit           Int
+  lteEnabled            Boolean             @default(false)
+  nextDeviceLimit       Int?
+  nextLteEnabled        Boolean?
+  nextParametersAt      DateTime?
+  subscriptionUrl       String?
+  remnawaveUserId       String?             @unique
+  syncStatus            SyncStatus          @default(PENDING)
+  syncVersion           Int                 @default(1)
+  lastSyncedAt          DateTime?
+  lastUserFriendlyError String?
+  lastTechnicalError    String?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  user                  User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  events                SubscriptionEvent[]
+
+  @@index([status, expiresAt])
+  @@index([syncStatus, updatedAt])
+}
+
+model SubscriptionEvent {
+  id                String       @id @default(cuid())
+  subscriptionId    String
+  type              String
+  paymentId         String?
+  actorUserId       String?
+  previousStateJson String?
+  newStateJson      String?
+  idempotencyKey    String       @unique
+  createdAt         DateTime     @default(now())
+  subscription      Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  payment           Payment?     @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  actor             User?        @relation("SubscriptionActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([subscriptionId, createdAt])
+  @@index([paymentId])
+}
+
+model TrialGrant {
+  id               String          @id @default(cuid())
+  userId           String          @unique
+  reason           TrialReason
+  referralInviteId String?         @unique
+  days             Int
+  grantedAt        DateTime        @default(now())
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  referralInvite   ReferralInvite? @relation(fields: [referralInviteId], references: [id], onDelete: SetNull)
+}
+
+model ReferralProfile {
+  id         String    @id @default(cuid())
+  userId     String    @unique
+  inviteCode String    @unique
+  isEnabled  Boolean   @default(false)
+  enabledAt  DateTime?
+  createdAt  DateTime  @default(now())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([isEnabled, inviteCode])
+}
+
+model ReferralInvite {
+  id                      String               @id @default(cuid())
+  inviterUserId           String
+  invitedUserId           String               @unique
+  inviteCodeSnapshot      String
+  status                  ReferralInviteStatus @default(REGISTERED)
+  firstConfirmedPaymentId String?              @unique
+  createdAt               DateTime             @default(now())
+  convertedAt             DateTime?
+  inviter                 User                 @relation("Inviter", fields: [inviterUserId], references: [id], onDelete: Restrict)
+  invited                 User                 @relation("InvitedUser", fields: [invitedUserId], references: [id], onDelete: Restrict)
+  trialGrant              TrialGrant?
+  reward                  ReferralReward?
+
+  @@index([inviterUserId, createdAt])
+}
+
+model ReferralReward {
+  id            String               @id @default(cuid())
+  inviteId      String               @unique
+  inviterUserId String
+  invitedUserId String
+  paymentId     String               @unique
+  amountMinor   Int
+  status        ReferralRewardStatus @default(AVAILABLE)
+  createdAt     DateTime             @default(now())
+  reversedAt    DateTime?
+  invite        ReferralInvite       @relation(fields: [inviteId], references: [id], onDelete: Restrict)
+  inviter       User                 @relation("RewardInviter", fields: [inviterUserId], references: [id], onDelete: Restrict)
+  invited       User                 @relation("RewardInvited", fields: [invitedUserId], references: [id], onDelete: Restrict)
+  payment       Payment              @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  @@index([inviterUserId, status])
+}
+
+model WalletAccount {
+  id             String              @id @default(cuid())
+  userId         String              @unique
+  availableMinor Int                 @default(0)
+  reservedMinor  Int                 @default(0)
+  version        Int                 @default(0)
+  updatedAt      DateTime            @updatedAt
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ledgerEntries  WalletLedgerEntry[]
+}
+
+model WalletLedgerEntry {
+  id                  String           @id @default(cuid())
+  walletAccountId     String
+  userId              String
+  type                WalletLedgerType
+  deltaAvailableMinor Int
+  deltaReservedMinor  Int
+  referenceType       String
+  referenceId         String
+  idempotencyKey      String           @unique
+  description         String?
+  createdAt           DateTime         @default(now())
+  walletAccount       WalletAccount    @relation(fields: [walletAccountId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([referenceType, referenceId])
+}
+
+model PayoutRequest {
+  id                     String       @id @default(cuid())
+  userId                 String
+  idempotencyKey         String       @unique
+  amountMinor            Int
+  payoutDetailsEncrypted String
+  payoutDetailsMasked    String
+  status                 PayoutStatus @default(PENDING)
+  reviewedByAdminId      String?
+  reviewedAt             DateTime?
+  rejectionReason        String?
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+  user                   User         @relation("PayoutOwner", fields: [userId], references: [id], onDelete: Restrict)
+  reviewedBy             User?        @relation("PayoutReviewer", fields: [reviewedByAdminId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
+}
+
+model SupportConversation {
+  id            String           @id @default(cuid())
+  userId        String           @unique
+  status        SupportStatus    @default(OPEN)
+  lastMessageAt DateTime         @default(now())
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages      SupportMessage[]
+
+  @@index([status, lastMessageAt])
+}
+
+model SupportMessage {
+  id             String              @id @default(cuid())
+  conversationId String
+  authorRole     SupportAuthorRole
+  senderUserId   String?
+  source         SupportSource
+  body           String
+  createdAt      DateTime            @default(now())
+  conversation   SupportConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User?               @relation(fields: [senderUserId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId, createdAt])
+}
+
+model TelegramProfile {
+  id                                String    @id @default(cuid())
+  userId                            String    @unique
+  telegramId                        String    @unique
+  chatId                            String?
+  username                          String?
+  firstName                         String?
+  lastName                          String?
+  canReceiveMessages                Boolean   @default(true)
+  transactionalNotificationsEnabled Boolean   @default(true)
+  newsNotificationsEnabled          Boolean   @default(false)
+  botStartedAt                      DateTime?
+  botBlockedAt                      DateTime?
+  updatedAt                         DateTime  @updatedAt
+  user                              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model TelegramUpdateLog {
+  id              String    @id @default(cuid())
+  updateId        String    @unique
+  updateType      String
+  payloadJson     String
+  receivedAt      DateTime  @default(now())
+  processedAt     DateTime?
+  processingError String?
+
+  @@index([processedAt, receivedAt])
+}
+
+model TelegramBroadcast {
+  id               String                      @id @default(cuid())
+  createdByAdminId String
+  title            String
+  body             String
+  status           BroadcastStatus             @default(DRAFT)
+  target           BroadcastTarget
+  queuedAt         DateTime?
+  completedAt      DateTime?
+  createdAt        DateTime                    @default(now())
+  createdBy        User                        @relation(fields: [createdByAdminId], references: [id], onDelete: Restrict)
+  deliveries       TelegramBroadcastDelivery[]
+
+  @@index([status, createdAt])
+}
+
+model TelegramBroadcastDelivery {
+  id                String            @id @default(cuid())
+  broadcastId       String
+  userId            String
+  status            DeliveryStatus    @default(PENDING)
+  telegramMessageId String?
+  error             String?
+  sentAt            DateTime?
+  broadcast         TelegramBroadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([broadcastId, userId])
+  @@index([broadcastId, status])
+}
+
+model OutboxJob {
+  id            String    @id @default(cuid())
+  type          String
+  aggregateType String
+  aggregateId   String
+  payloadJson   String
+  dedupeKey     String    @unique
+  status        JobStatus @default(PENDING)
+  attempts      Int       @default(0)
+  maxAttempts   Int       @default(8)
+  runAfter      DateTime  @default(now())
+  lockedAt      DateTime?
+  lockedBy      String?
+  lastError     String?
+  createdAt     DateTime  @default(now())
+  completedAt   DateTime?
+
+  @@index([status, runAfter])
+  @@index([lockedAt])
+}
+
+model AuditLog {
+  id            String         @id @default(cuid())
+  actorType     AuditActorType
+  actorId       String?
+  action        String
+  entityType    String
+  entityId      String?
+  metadataJson  String?
+  correlationId String
+  createdAt     DateTime       @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([actorId, createdAt])
+}
+
+model IntegrationLog {
+  id              String   @id @default(cuid())
+  integration     String
+  operation       String
+  entityType      String?
+  entityId        String?
+  success         Boolean
+  attempt         Int      @default(1)
+  requestSummary  String?
+  responseSummary String?
+  technicalError  String?
+  correlationId   String
+  createdAt       DateTime @default(now())
+
+  @@index([integration, createdAt])
+  @@index([entityType, entityId, createdAt])
+}
+
+model RateLimitBucket {
+  id          String   @id @default(cuid())
+  key         String
+  windowStart DateTime
+  count       Int      @default(1)
+  expiresAt   DateTime
+  updatedAt   DateTime @updatedAt
+
+  @@unique([key, windowStart])
+  @@index([expiresAt])
+}
+
+model SystemState {
+  key       String   @id
+  valueJson String
+  updatedAt DateTime @updatedAt
+}

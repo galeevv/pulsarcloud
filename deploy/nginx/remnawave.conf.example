@@ -1,0 +1,15 @@
+# RETIRED: do not enable this file in /etc/nginx/sites-enabled.
+#
+# The active panel and subscription virtual hosts are maintained in pulsar.conf.
+# They use the single SAN certificate at:
+#   /etc/letsencrypt/live/pulsar-cloud.space/fullchain.pem
+#   /etc/letsencrypt/live/pulsar-cloud.space/privkey.pem
+#
+# Authorized loopback upstreams:
+#   Panel:             127.0.0.1:3020 -> panel.pulsar-cloud.space
+#   Metrics:           127.0.0.1:3021 -> no public Nginx route
+#   PostgreSQL:        127.0.0.1:6767 -> no public Nginx route
+#   Subscription page: 127.0.0.1:3010 -> sub.pulsar-cloud.space
+#
+# Host Nginx alone owns public ports 80/443. Enabling a second copy of the
+# virtual hosts would create duplicate server_name/listener configuration.

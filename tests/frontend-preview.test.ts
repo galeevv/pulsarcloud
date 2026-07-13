@@ -71,6 +71,49 @@ test("navigation and primary preview interfaces remain wired", async () => {
   assert.match(support, /SupportComposer/)
 })
 
+test("authentication uses toast feedback and OTP auto-submit", async () => {
+  const auth = await readFile(
+    path.join(root, "components/auth/auth-card.tsx"),
+    "utf8"
+  )
+  assert.match(auth, /toast\.error/)
+  assert.match(auth, /onComplete=/)
+  assert.match(auth, /setOtp\(""\)/)
+  assert.match(auth, /Подключиться к Pulsar с помощью/)
+  assert.doesNotMatch(auth, />Продолжить<\/Button>/)
+  assert.doesNotMatch(auth, /<Alert/)
+})
+
+test("user routes keep accessible titles, headings, and navigation state", async () => {
+  const navigation = await readFile(
+    path.join(root, "components/app/bottom-nav.tsx"),
+    "utf8"
+  )
+  assert.match(navigation, /aria-current=/)
+
+  for (const route of routeFiles.filter((route) =>
+    route.startsWith("app/(dashboard)/")
+  )) {
+    const source = await readFile(path.join(root, route), "utf8")
+    assert.match(source, /export const metadata/)
+    assert.match(source, /<h1/)
+  }
+
+  const assetCard = await readFile(
+    path.join(root, "components/app/pulsar-primitives.tsx"),
+    "utf8"
+  )
+  assert.match(assetCard, /preload=/)
+  assert.doesNotMatch(assetCard, /priority=/)
+
+  const supportThread = await readFile(
+    path.join(root, "components/app/support-thread.tsx"),
+    "utf8"
+  )
+  assert.match(supportThread, /MessageScrollerContent/)
+  assert.match(supportThread, /aria-live="polite"/)
+})
+
 test("legal documents remain readable", async () => {
   for (const document of ["agreement.md", "offer.md", "confidentiality.md"]) {
     const contents = await readFile(path.join(root, "docs", document), "utf8")
@@ -78,7 +121,7 @@ test("legal documents remain readable", async () => {
   }
 })
 
-test("active frontend has no legacy server imports or secret names", async () => {
+test("active frontend does not import obsolete mock fixtures", async () => {
   const activeFiles = (
     await Promise.all(
       ["app", "components", "hooks", "lib", "src/frontend-preview"].map(
@@ -86,14 +129,7 @@ test("active frontend has no legacy server imports or secret names", async () =>
       )
     )
   ).flat()
-  const forbiddenImports = [
-    "@pri" + "s" + "ma",
-    "better-" + "sqlite3",
-    "@/lib/" + "db",
-    "@/lib/" + "auth",
-    "@/src/server",
-    "@/generated/" + "pri" + "s" + "ma",
-  ]
+  const forbiddenImports = ["fixtures/mock-", "backendUnavailableMessage"]
   const secretNames = [
     "DATA" + "BASE_URL",
     "SES" + "SION_" + "SECRET",
@@ -114,15 +150,19 @@ test("active frontend has no legacy server imports or secret names", async () =>
   }
 })
 
-test("no active route handler or server action remains", async () => {
+test("required backend route handlers are present", async () => {
   const appFiles = await collectFiles("app")
-  assert.deepEqual(
-    appFiles.filter((file) => path.basename(file) === "route.ts"),
-    []
-  )
-
-  for (const file of appFiles) {
-    const source = await readFile(file, "utf8")
-    assert.ok(!source.includes("use " + "server"))
+  const routes = appFiles.filter((file) => path.basename(file) === "route.ts")
+  for (const required of [
+    "auth/email/request",
+    "auth/email/verify",
+    "integrations/telegram/webhook",
+    "integrations/payments/webhook",
+    "health/ready",
+  ]) {
+    assert.ok(
+      routes.some((file) => file.replaceAll("\\", "/").includes(required)),
+      `missing route ${required}`
+    )
   }
 })

@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs"
 import path from "node:path"
+import type { Metadata } from "next"
 import { FileTextIcon } from "lucide-react"
 
 import { PulsarIconContainer } from "@/components/app/pulsar-primitives"
@@ -7,6 +8,10 @@ import { Card, CardContent } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+
+export const metadata: Metadata = {
+  title: "Юридическая информация",
+}
 
 const legalDocuments = [
   {
@@ -48,9 +53,9 @@ export default async function LegalPage() {
           <div className="flex min-h-[56px] items-center gap-3 border-b border-border/70 px-3 py-2">
             <div className="flex min-w-0 items-center gap-2">
               <PulsarIconContainer icon={FileTextIcon} />
-              <p className="truncate text-sm leading-5 font-medium">
+              <h1 className="truncate text-sm leading-5 font-medium">
                 Юридическая информация
-              </p>
+              </h1>
             </div>
           </div>
 

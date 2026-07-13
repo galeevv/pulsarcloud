@@ -1,21 +1,20 @@
 import type { Metadata } from "next"
-import { Geist_Mono, Inter } from "next/font/google"
 
 import "./globals.css"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Toaster } from "@/components/ui/sonner"
-import { cn } from "@/lib/utils"
-
-const inter = Inter({ subsets: ["latin"], variable: "--font-sans" })
-
-const fontMono = Geist_Mono({
-  subsets: ["latin"],
-  variable: "--font-mono",
-})
 
 export const metadata: Metadata = {
-  title: "PulsarVPN",
+  title: {
+    default: "PulsarVPN",
+    template: "%s | PulsarVPN",
+  },
   description: "Личный кабинет PulsarVPN",
+  icons: {
+    icon: "/logo/logo.png",
+    shortcut: "/logo/logo.png",
+    apple: "/logo/logo.png",
+  },
 }
 
 export default function RootLayout({
@@ -27,12 +26,7 @@ export default function RootLayout({
     <html
       lang="ru"
       suppressHydrationWarning
-      className={cn(
-        "dark antialiased",
-        fontMono.variable,
-        "font-sans",
-        inter.variable
-      )}
+      className="dark font-sans antialiased"
     >
       <body>
         <TooltipProvider>{children}</TooltipProvider>
