@@ -1,6 +1,10 @@
 export const EXPECTED_MIGRATIONS = [
   "20260713003000_init",
   "20260713015000_billing_reconciliation_guards",
+  "20260714190000_pricing_wallet_payment",
+  "20260714220000_immediate_subscription_options",
+  "20260714223000_trial_lte_and_notifications",
+  "20260714234000_subscription_devices_and_upgrades",
 ] as const
 
 export type MigrationRecord = {
