@@ -10,6 +10,146 @@ function maskDetails(value: string) {
     : `${compact.slice(0, 2)}***${compact.slice(-4)}`
 }
 
+export async function adjustWalletBalanceByAdmin(input: {
+  adminUserId: string
+  userId: string
+  deltaMinor: number
+  comment: string
+  idempotencyKey: string
+  correlationId: string
+}) {
+  const comment = input.comment.trim()
+  if (
+    input.adminUserId.length < 8 ||
+    input.adminUserId.length > 100 ||
+    input.userId.length < 8 ||
+    input.userId.length > 100 ||
+    !Number.isSafeInteger(input.deltaMinor) ||
+    input.deltaMinor === 0 ||
+    input.deltaMinor % 100 !== 0 ||
+    Math.abs(input.deltaMinor) > 100_000_000 ||
+    comment.length < 5 ||
+    comment.length > 500 ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      input.idempotencyKey
+    ) ||
+    input.correlationId.length < 8 ||
+    input.correlationId.length > 200
+  )
+    throw new BusinessError("INVALID_INPUT")
+
+  return withBusyRetry(() =>
+    db.$transaction(async (tx) => {
+      const admin = await tx.user.findUnique({
+        where: { id: input.adminUserId },
+      })
+      if (
+        !admin ||
+        admin.role !== "ADMIN" ||
+        admin.status !== "ACTIVE" ||
+        admin.isTest !== getConfig().testMode
+      )
+        throw new BusinessError("ADMIN_FORBIDDEN", 403)
+      const user = await tx.user.findUnique({
+        where: { id: input.userId },
+        include: { wallet: true },
+      })
+      if (
+        !user ||
+        user.role !== "USER" ||
+        user.isTest !== getConfig().testMode ||
+        !user.wallet
+      )
+        throw new BusinessError("NOT_FOUND", 404)
+
+      const idempotencyKey = `admin-wallet:${input.adminUserId}:${input.idempotencyKey}`
+      const existing = await tx.walletLedgerEntry.findUnique({
+        where: { idempotencyKey },
+      })
+      if (existing) {
+        if (
+          existing.userId !== input.userId ||
+          existing.type !== "ADMIN_ADJUSTMENT" ||
+          existing.deltaAvailableMinor !== input.deltaMinor ||
+          existing.deltaReservedMinor !== 0 ||
+          existing.referenceType !== "AdminAdjustment" ||
+          existing.referenceId !== input.idempotencyKey ||
+          existing.description !== comment
+        )
+          throw new BusinessError(
+            "CONFLICT",
+            409,
+            "Wallet adjustment idempotency key belongs to a different request"
+          )
+        const wallet = await tx.walletAccount.findUniqueOrThrow({
+          where: { id: existing.walletAccountId },
+        })
+        return {
+          applied: false,
+          availableMinor: wallet.availableMinor,
+          ledgerEntryId: existing.id,
+        }
+      }
+
+      const changed = await tx.walletAccount.updateMany({
+        where: {
+          id: user.wallet.id,
+          ...(input.deltaMinor < 0
+            ? { availableMinor: { gte: Math.abs(input.deltaMinor) } }
+            : {}),
+        },
+        data: {
+          availableMinor: { increment: input.deltaMinor },
+          version: { increment: 1 },
+        },
+      })
+      if (!changed.count)
+        throw new BusinessError("WALLET_INSUFFICIENT_BALANCE", 409)
+
+      const wallet = await tx.walletAccount.findUniqueOrThrow({
+        where: { id: user.wallet.id },
+      })
+      if (wallet.availableMinor < 0)
+        throw new BusinessError("WALLET_INSUFFICIENT_BALANCE", 409)
+
+      const ledgerEntry = await tx.walletLedgerEntry.create({
+        data: {
+          walletAccountId: wallet.id,
+          userId: input.userId,
+          type: "ADMIN_ADJUSTMENT",
+          deltaAvailableMinor: input.deltaMinor,
+          deltaReservedMinor: 0,
+          referenceType: "AdminAdjustment",
+          referenceId: input.idempotencyKey,
+          idempotencyKey,
+          description: comment,
+        },
+      })
+      await tx.auditLog.create({
+        data: {
+          actorType: "ADMIN",
+          actorId: input.adminUserId,
+          action: "WALLET_ADMIN_ADJUSTED",
+          entityType: "WalletAccount",
+          entityId: wallet.id,
+          metadataJson: JSON.stringify({
+            userId: input.userId,
+            deltaMinor: input.deltaMinor,
+            comment,
+            ledgerEntryId: ledgerEntry.id,
+          }),
+          correlationId: input.correlationId,
+        },
+      })
+      return {
+        applied: true,
+        availableMinor: wallet.availableMinor,
+        ledgerEntryId: ledgerEntry.id,
+      }
+    })
+  )
+}
+
 export async function createPayout(input: {
   userId: string
   amountMinor: number

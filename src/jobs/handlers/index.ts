@@ -456,7 +456,8 @@ export async function handleJob(job: Job) {
           where: { id: subscription.id, syncVersion },
           data: {
             remnawaveUserId: result.remoteUserId,
-            subscriptionUrl: result.subscriptionUrl,
+            subscriptionUrl:
+              subscription.subscriptionUrl ?? result.subscriptionUrl,
             syncStatus: "SYNCED",
             lastSyncedAt: new Date(),
             lastTechnicalError: null,

@@ -93,7 +93,11 @@ export function SupportThread({
           <MessageScrollerContent
             aria-live="polite"
             aria-relevant="additions text"
-            className="gap-4 px-3 py-4"
+            className={
+              messages.length
+                ? "gap-4 px-3 py-4"
+                : "justify-center gap-4 px-3 py-4"
+            }
           >
             {messages.length ? (
               messages.map((message, index) => {
@@ -135,8 +139,8 @@ export function SupportThread({
                 )
               })
             ) : (
-              <MessageScrollerItem>
-                <Empty className="min-h-64 border border-border/70 bg-background/25 p-6">
+              <MessageScrollerItem className="flex min-h-0 flex-1 items-center justify-center">
+                <Empty className="size-full min-h-64 border border-border/70 bg-background/25 p-6">
                   <EmptyHeader>
                     <EmptyMedia variant="icon">
                       <HeadphonesIcon />

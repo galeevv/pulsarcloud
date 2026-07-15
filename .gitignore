@@ -13,7 +13,13 @@
 
 # next.js
 /.next/
+/.next-http-e2e/
 /out/
+
+# Local source variants; the app ships the selected transparent PNG only.
+/public/logo/logo-no-bg-preview (carve.photos).jpg
+/public/logo/logo-no-bg-preview (carve.photos).psd
+/public/logo/logo-no-bg-preview (carve.photos).webp
 
 # production
 /build

@@ -25,22 +25,25 @@ import {
   pulsarCtaClass,
 } from "@/components/app/pulsar-primitives"
 import { LoginMethodsManager } from "@/components/app/login-methods-manager"
-import { getUserView } from "@/src/server/queries/user-dashboard"
+import { getProfileView } from "@/src/server/queries/user-dashboard"
 import { requireWebSession } from "@/src/server/transport/web/session"
 
 export const metadata: Metadata = {
-  title: "Профиль",
+  title: { absolute: "PULSAR" },
 }
 
 export default async function ProfilePage() {
   const session = await requireWebSession("USER")
-  const { user } = await getUserView(session.userId)
+  const user = await getProfileView(session.userId)
   const email =
     user.identities.find((identity) => identity.provider === "EMAIL")
       ?.emailNormalized ?? null
   const telegramId =
     user.identities.find((identity) => identity.provider === "TELEGRAM")
       ?.telegramId ?? null
+  const telegramUsername =
+    user.identities.find((identity) => identity.provider === "TELEGRAM")
+      ?.telegramUsername ?? null
 
   return (
     <main className="pulsar-container">
@@ -58,15 +61,7 @@ export default async function ProfilePage() {
         <LoginMethodsManager
           email={email}
           telegramId={telegramId}
-          telegramSettings={
-            user.telegramProfile
-              ? {
-                  transactional:
-                    user.telegramProfile.transactionalNotificationsEnabled,
-                  news: user.telegramProfile.newsNotificationsEnabled,
-                }
-              : undefined
-          }
+          telegramUsername={telegramUsername}
         />
 
         <Link href="/support" className="group block">

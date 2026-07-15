@@ -9,6 +9,7 @@
   },
   "scripts": {
     "setup:local": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/setup-local.ps1",
+    "setup:local:remnawave": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/setup-local.ps1 -LiveRemnawave",
     "dev": "next dev",
     "dev:local": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/dev.ps1",
     "dev:all": "npm run dev:local",

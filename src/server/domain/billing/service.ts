@@ -1,10 +1,15 @@
 import { randomUUID } from "node:crypto"
+import type { Payment } from "@/src/generated/prisma/client"
 import { db, withBusyRetry } from "@/src/server/infrastructure/db/client"
 import { getConfig } from "@/src/server/config"
-import { calculatePrice } from "@/src/server/domain/billing/pricing"
+import {
+  calculatePrice,
+  durationDays,
+} from "@/src/server/domain/billing/pricing"
 import {
   getPaymentProvider,
   PaymentCheckoutRejectedError,
+  type PaymentProvider,
   type VerifiedPaymentEvent,
 } from "@/src/server/infrastructure/payments/provider"
 import { BusinessError } from "@/src/server/application/errors"
@@ -15,6 +20,81 @@ import {
 } from "@/src/server/infrastructure/security/crypto"
 
 const PAYMENT_RECONCILIATION_DELAY_MS = 60_000
+export type CheckoutPaymentMethod = "SBP" | "WALLET"
+export type CheckoutSelection = {
+  userId: string
+  durationMonths: number
+  deviceLimit: number
+  lteEnabled: boolean
+}
+
+export type DeviceLimitUpgradeSelection = {
+  userId: string
+  targetDeviceLimit: number
+}
+
+async function loadCheckoutQuote(input: CheckoutSelection) {
+  const pricing = await db.pricingSettings.findUniqueOrThrow({
+    where: { key: "default" },
+  })
+  return {
+    pricing,
+    quote: calculatePrice(pricing, input),
+  }
+}
+
+async function loadDeviceLimitUpgradeQuote(
+  input: DeviceLimitUpgradeSelection,
+  now = new Date()
+) {
+  const [pricing, subscription] = await Promise.all([
+    db.pricingSettings.findUniqueOrThrow({ where: { key: "default" } }),
+    db.subscription.findUnique({ where: { userId: input.userId } }),
+  ])
+  const maximumDeviceLimit = Math.min(pricing.maxDeviceLimit, 5)
+
+  if (
+    !subscription ||
+    !["ACTIVE", "TRIAL"].includes(subscription.status) ||
+    subscription.expiresAt <= now ||
+    subscription.syncStatus !== "SYNCED" ||
+    !subscription.remnawaveUserId
+  )
+    throw new BusinessError("SUBSCRIPTION_NOT_FOUND", 404)
+  if (
+    !Number.isInteger(input.targetDeviceLimit) ||
+    input.targetDeviceLimit <= subscription.deviceLimit ||
+    input.targetDeviceLimit > maximumDeviceLimit
+  )
+    throw new BusinessError("INVALID_INPUT", 400)
+
+  const addedDevices = input.targetDeviceLimit - subscription.deviceLimit
+  return {
+    pricing,
+    subscription,
+    maximumDeviceLimit,
+    addedDevices,
+    amountMinor: addedDevices * pricing.deviceLimitUpgradePriceMinor,
+  }
+}
+
+export async function getCheckoutExpectation(input: CheckoutSelection) {
+  const { pricing, quote } = await loadCheckoutQuote(input)
+  return {
+    expectedAmountMinor: quote.amountMinor,
+    pricingVersion: pricing.version,
+  }
+}
+
+export async function getDeviceLimitUpgradeExpectation(
+  input: DeviceLimitUpgradeSelection
+) {
+  const quote = await loadDeviceLimitUpgradeQuote(input)
+  return {
+    expectedAmountMinor: quote.amountMinor,
+    pricingVersion: quote.pricing.version,
+  }
+}
 
 export async function expireOverduePendingPayments(input?: {
   now?: Date
@@ -33,142 +113,53 @@ export async function expireOverduePendingPayments(input?: {
   )
 }
 
-export async function createCheckout(input: {
-  userId: string
-  durationMonths: number
-  deviceLimit: number
-  lteEnabled: boolean
-  idempotencyKey?: string
-}) {
-  const config = getConfig()
-  if (!config.testMode && !config.payments.enabled)
-    throw new BusinessError("INTEGRATION_TEMPORARILY_UNAVAILABLE", 503)
-  const user = await db.user.findUnique({ where: { id: input.userId } })
-  if (!user || user.status !== "ACTIVE" || user.isTest !== config.testMode)
-    throw new BusinessError("AUTH_FORBIDDEN", 403)
-  const provider = getPaymentProvider()
-  const pricing = await db.pricingSettings.findUniqueOrThrow({
-    where: { key: "default" },
-  })
-  const quote = calculatePrice(pricing, input)
-  const currentSubscription = await db.subscription.findUnique({
-    where: { userId: input.userId },
-  })
-  const now = new Date()
-  await expireOverduePendingPayments({ now, userId: input.userId })
-  if (
-    currentSubscription?.status === "SUSPENDED" &&
-    currentSubscription.expiresAt > now
-  )
-    throw new BusinessError("CONFLICT", 409)
-  if (
-    currentSubscription?.nextParametersAt &&
-    currentSubscription.nextParametersAt > now &&
-    ((currentSubscription.nextDeviceLimit ??
-      currentSubscription.deviceLimit) !== input.deviceLimit ||
-      (currentSubscription.nextLteEnabled ?? currentSubscription.lteEnabled) !==
-        input.lteEnabled)
-  )
-    throw new BusinessError(
-      "SUBSCRIPTION_UPGRADE_REQUIRES_PAYMENT",
-      409,
-      "A different plan is already scheduled for the next subscription period"
-    )
-  const key = input.idempotencyKey ?? randomUUID()
-  const existing = await db.payment.findUnique({
-    where: { idempotencyKey: key },
-  })
-  if (
-    existing &&
-    (existing.userId !== input.userId ||
-      existing.amountMinor !== quote.amountMinor ||
-      existing.durationDays !== quote.durationDays ||
-      existing.deviceLimit !== quote.deviceLimit ||
-      existing.lteEnabled !== quote.lteEnabled ||
-      existing.pricingVersion !== quote.pricingVersion)
-  ) {
-    throw new BusinessError(
-      "CONFLICT",
-      409,
-      "Payment idempotency key belongs to a different order"
-    )
-  }
-  if (existing?.checkoutUrl) return existing
-  if (existing)
-    throw new BusinessError(
-      "CONFLICT",
-      409,
-      "This checkout attempt cannot be safely repeated"
-    )
-  const openPayment = await db.payment.findFirst({
-    where: {
-      userId: input.userId,
-      status: { in: ["CREATED", "PENDING"] },
-    },
-  })
-  if (openPayment?.checkoutUrl) {
-    if (
-      openPayment.amountMinor === quote.amountMinor &&
-      openPayment.durationDays === quote.durationDays &&
-      openPayment.deviceLimit === quote.deviceLimit &&
-      openPayment.lteEnabled === quote.lteEnabled
-    )
-      return openPayment
-    throw new BusinessError(
-      "CONFLICT",
-      409,
-      "A different checkout is already pending for this user"
-    )
-  }
-  if (openPayment)
-    throw new BusinessError(
-      "CONFLICT",
-      409,
-      "A previous checkout is awaiting operator reconciliation"
-    )
-  let payment
+async function confirmWalletPayment(payment: Payment) {
+  if (payment.provider !== "wallet" || !payment.externalPaymentId)
+    throw new Error("Wallet payment is incomplete")
   try {
-    payment = await withBusyRetry(() =>
-      db.payment.create({
-        data: {
-          userId: input.userId,
-          provider: provider.name,
-          idempotencyKey: key,
-          status: "CREATED",
-          amountMinor: quote.amountMinor,
-          currency: "RUB",
-          durationDays: quote.durationDays,
-          deviceLimit: quote.deviceLimit,
-          lteEnabled: quote.lteEnabled,
-          basePriceMinor: quote.basePriceMinor,
-          extraDevicesPriceMinor: quote.extraDevicesPriceMinor,
-          ltePriceMinor: quote.ltePriceMinor,
-          discountMinor: quote.discountMinor,
-          priceSnapshotJson: quote.snapshotJson,
-          pricingVersion: quote.pricingVersion,
-          isTest: config.testMode,
-        },
-      })
+    await applyPaymentEvent(
+      {
+        eventId: `wallet:${payment.id}:confirmed`,
+        eventType: "CONFIRMED",
+        externalPaymentId: payment.externalPaymentId,
+        status: "CONFIRMED",
+        amountMinor: payment.amountMinor,
+        currency: payment.currency,
+        payload: { payload: payment.id, paymentMethod: "WALLET" },
+      },
+      { providerName: "wallet", debitWallet: true }
     )
   } catch (error) {
-    if ((error as { code?: string }).code === "P2002")
-      throw new BusinessError(
-        "CONFLICT",
-        409,
-        "Another checkout is already in progress"
+    if (
+      error instanceof BusinessError &&
+      error.code === "WALLET_INSUFFICIENT_BALANCE"
+    )
+      await withBusyRetry(() =>
+        db.payment.updateMany({
+          where: { id: payment.id, status: "PENDING" },
+          data: { status: "FAILED" },
+        })
       )
     throw error
   }
+  return db.payment.findUniqueOrThrow({ where: { id: payment.id } })
+}
+
+async function createProviderCheckout(
+  payment: Payment,
+  provider: PaymentProvider,
+  description: string
+) {
   let checkout: Awaited<ReturnType<typeof provider.createCheckout>>
   try {
     checkout = await provider.createCheckout({
       amountMinor: payment.amountMinor,
       currency: payment.currency,
-      description: `Подписка Pulsar на ${payment.durationDays} дней`,
+      description,
       returnUrl: `${getConfig().appUrl}/subscription?payment=success`,
       failedUrl: `${getConfig().appUrl}/subscription?payment=failed`,
       payload: payment.id,
-      userId: input.userId,
+      userId: payment.userId,
     })
   } catch (error) {
     const definitelyRejected = error instanceof PaymentCheckoutRejectedError
@@ -199,6 +190,7 @@ export async function createCheckout(input: {
       .catch(() => undefined)
     throw new BusinessError("INTEGRATION_TEMPORARILY_UNAVAILABLE", 503)
   }
+
   try {
     return await withBusyRetry(() =>
       db.$transaction(async (tx) => {
@@ -250,13 +242,309 @@ export async function createCheckout(input: {
   }
 }
 
-export async function applyPaymentEvent(event: VerifiedPaymentEvent) {
+export async function createCheckout(
+  input: CheckoutSelection & {
+    paymentMethod?: CheckoutPaymentMethod
+    expectedAmountMinor: number
+    pricingVersion: number
+    idempotencyKey?: string
+  }
+) {
+  const config = getConfig()
+  if (!config.testMode && !config.payments.enabled)
+    throw new BusinessError("BILLING_DISABLED", 503)
+  const user = await db.user.findUnique({ where: { id: input.userId } })
+  if (!user || user.status !== "ACTIVE" || user.isTest !== config.testMode)
+    throw new BusinessError("AUTH_FORBIDDEN", 403)
+  const paymentMethod = input.paymentMethod ?? "SBP"
+  const providerName =
+    paymentMethod === "WALLET" ? "wallet" : config.payments.provider
+  const now = new Date()
+  await expireOverduePendingPayments({ now, userId: input.userId })
+  const key = input.idempotencyKey ?? randomUUID()
+  const existing = await db.payment.findUnique({
+    where: { idempotencyKey: key },
+  })
+  if (
+    existing &&
+    (existing.userId !== input.userId ||
+      existing.purpose !== "SUBSCRIPTION" ||
+      existing.amountMinor !== input.expectedAmountMinor ||
+      existing.provider !== providerName ||
+      existing.durationDays !==
+        durationDays[input.durationMonths as keyof typeof durationDays] ||
+      existing.deviceLimit !== input.deviceLimit ||
+      existing.lteEnabled !== input.lteEnabled ||
+      existing.pricingVersion !== input.pricingVersion)
+  ) {
+    throw new BusinessError(
+      "CONFLICT",
+      409,
+      "Payment idempotency key belongs to a different order"
+    )
+  }
+  if (
+    existing?.provider === "wallet" &&
+    existing.status === "PENDING" &&
+    existing.checkoutUrl
+  )
+    return confirmWalletPayment(existing)
+  if (existing?.checkoutUrl) return existing
+  if (existing)
+    throw new BusinessError(
+      "CONFLICT",
+      409,
+      "This checkout attempt cannot be safely repeated"
+    )
+  const openPayment = await db.payment.findFirst({
+    where: {
+      userId: input.userId,
+      status: { in: ["CREATED", "PENDING"] },
+    },
+  })
+  if (openPayment?.checkoutUrl) {
+    if (
+      openPayment.purpose === "SUBSCRIPTION" &&
+      openPayment.amountMinor === input.expectedAmountMinor &&
+      openPayment.durationDays ===
+        durationDays[input.durationMonths as keyof typeof durationDays] &&
+      openPayment.deviceLimit === input.deviceLimit &&
+      openPayment.lteEnabled === input.lteEnabled &&
+      openPayment.pricingVersion === input.pricingVersion &&
+      openPayment.provider === providerName
+    )
+      return openPayment.provider === "wallet"
+        ? confirmWalletPayment(openPayment)
+        : openPayment
+    throw new BusinessError(
+      "CONFLICT",
+      409,
+      "A different checkout is already pending for this user"
+    )
+  }
+  if (openPayment)
+    throw new BusinessError(
+      "CONFLICT",
+      409,
+      "A previous checkout is awaiting operator reconciliation"
+    )
+  const { pricing, quote } = await loadCheckoutQuote(input)
+  if (
+    input.pricingVersion !== pricing.version ||
+    input.expectedAmountMinor !== quote.amountMinor
+  )
+    throw new BusinessError("PAYMENT_PRICE_CHANGED", 409)
+  const provider = paymentMethod === "SBP" ? getPaymentProvider() : null
+  const currentSubscription = await db.subscription.findUnique({
+    where: { userId: input.userId },
+  })
+  if (
+    currentSubscription?.status === "SUSPENDED" &&
+    currentSubscription.expiresAt > now
+  )
+    throw new BusinessError("CONFLICT", 409)
+  let payment
+  try {
+    payment = await withBusyRetry(() =>
+      db.payment.create({
+        data: {
+          userId: input.userId,
+          provider: providerName,
+          idempotencyKey: key,
+          status: "CREATED",
+          purpose: "SUBSCRIPTION",
+          amountMinor: quote.amountMinor,
+          currency: "RUB",
+          durationDays: quote.durationDays,
+          deviceLimit: quote.deviceLimit,
+          lteEnabled: quote.lteEnabled,
+          basePriceMinor: quote.basePriceMinor,
+          extraDevicesPriceMinor: quote.extraDevicesPriceMinor,
+          ltePriceMinor: quote.ltePriceMinor,
+          discountMinor: quote.discountMinor,
+          priceSnapshotJson: quote.snapshotJson,
+          pricingVersion: quote.pricingVersion,
+          isTest: config.testMode,
+        },
+      })
+    )
+  } catch (error) {
+    if ((error as { code?: string }).code === "P2002")
+      throw new BusinessError(
+        "CONFLICT",
+        409,
+        "Another checkout is already in progress"
+      )
+    throw error
+  }
+  if (paymentMethod === "WALLET") {
+    const externalPaymentId = `wallet_${payment.id}`
+    const checkoutUrl = `${config.appUrl}/subscription?payment=success`
+    await withBusyRetry(() =>
+      db.payment.update({
+        where: { id: payment.id },
+        data: {
+          status: "PENDING",
+          externalPaymentId,
+          checkoutUrl,
+          providerCreatedAt: new Date(),
+          expiresAt: new Date(Date.now() + 5 * 60_000),
+        },
+      })
+    )
+    return confirmWalletPayment(
+      await db.payment.findUniqueOrThrow({ where: { id: payment.id } })
+    )
+  }
+  if (!provider) throw new Error("SBP payment provider is unavailable")
+  return createProviderCheckout(
+    payment,
+    provider,
+    `Подписка Pulsar на ${payment.durationDays} дней`
+  )
+}
+
+export async function createDeviceLimitUpgradeCheckout(
+  input: DeviceLimitUpgradeSelection & {
+    expectedAmountMinor: number
+    pricingVersion: number
+    idempotencyKey?: string
+  }
+) {
+  const config = getConfig()
+  if (!config.testMode && !config.payments.enabled)
+    throw new BusinessError("BILLING_DISABLED", 503)
+
+  const user = await db.user.findUnique({ where: { id: input.userId } })
+  if (!user || user.status !== "ACTIVE" || user.isTest !== config.testMode)
+    throw new BusinessError("AUTH_FORBIDDEN", 403)
+
+  const now = new Date()
+  await expireOverduePendingPayments({ now, userId: input.userId })
+  const provider = getPaymentProvider()
+  const key = input.idempotencyKey ?? randomUUID()
+  const existing = await db.payment.findUnique({
+    where: { idempotencyKey: key },
+  })
+
+  if (
+    existing &&
+    (existing.userId !== input.userId ||
+      existing.purpose !== "DEVICE_LIMIT_UPGRADE" ||
+      existing.amountMinor !== input.expectedAmountMinor ||
+      existing.provider !== provider.name ||
+      existing.deviceLimit !== input.targetDeviceLimit ||
+      existing.pricingVersion !== input.pricingVersion)
+  )
+    throw new BusinessError(
+      "CONFLICT",
+      409,
+      "Payment idempotency key belongs to a different order"
+    )
+  if (existing?.checkoutUrl) return existing
+  if (existing)
+    throw new BusinessError(
+      "CONFLICT",
+      409,
+      "This checkout attempt cannot be safely repeated"
+    )
+
+  const openPayment = await db.payment.findFirst({
+    where: {
+      userId: input.userId,
+      status: { in: ["CREATED", "PENDING"] },
+    },
+  })
+  if (openPayment?.checkoutUrl) {
+    if (
+      openPayment.purpose === "DEVICE_LIMIT_UPGRADE" &&
+      openPayment.amountMinor === input.expectedAmountMinor &&
+      openPayment.deviceLimit === input.targetDeviceLimit &&
+      openPayment.pricingVersion === input.pricingVersion &&
+      openPayment.provider === provider.name
+    )
+      return openPayment
+    throw new BusinessError(
+      "CONFLICT",
+      409,
+      "A different checkout is already pending for this user"
+    )
+  }
+  if (openPayment)
+    throw new BusinessError(
+      "CONFLICT",
+      409,
+      "A previous checkout is awaiting operator reconciliation"
+    )
+
+  const quote = await loadDeviceLimitUpgradeQuote(input, now)
+  if (
+    input.pricingVersion !== quote.pricing.version ||
+    input.expectedAmountMinor !== quote.amountMinor
+  )
+    throw new BusinessError("PAYMENT_PRICE_CHANGED", 409)
+
+  let payment
+  try {
+    payment = await withBusyRetry(() =>
+      db.payment.create({
+        data: {
+          userId: input.userId,
+          provider: provider.name,
+          idempotencyKey: key,
+          status: "CREATED",
+          purpose: "DEVICE_LIMIT_UPGRADE",
+          amountMinor: quote.amountMinor,
+          currency: "RUB",
+          durationDays: 0,
+          deviceLimit: input.targetDeviceLimit,
+          lteEnabled: quote.subscription.lteEnabled,
+          basePriceMinor: 0,
+          extraDevicesPriceMinor: quote.amountMinor,
+          ltePriceMinor: 0,
+          discountMinor: 0,
+          priceSnapshotJson: JSON.stringify({
+            purpose: "DEVICE_LIMIT_UPGRADE",
+            previousDeviceLimit: quote.subscription.deviceLimit,
+            targetDeviceLimit: input.targetDeviceLimit,
+            addedDevices: quote.addedDevices,
+            unitPriceMinor: quote.pricing.deviceLimitUpgradePriceMinor,
+            amountMinor: quote.amountMinor,
+            pricingVersion: quote.pricing.version,
+          }),
+          pricingVersion: quote.pricing.version,
+          isTest: config.testMode,
+        },
+      })
+    )
+  } catch (error) {
+    if ((error as { code?: string }).code === "P2002")
+      throw new BusinessError(
+        "CONFLICT",
+        409,
+        "Another checkout is already in progress"
+      )
+    throw error
+  }
+
+  return createProviderCheckout(
+    payment,
+    provider,
+    `Дополнительные устройства Pulsar: +${quote.addedDevices}`
+  )
+}
+
+export async function applyPaymentEvent(
+  event: VerifiedPaymentEvent,
+  options?: { providerName?: string; debitWallet?: boolean }
+) {
+  const providerName = options?.providerName ?? getPaymentProvider().name
   const outcome = await withBusyRetry(() =>
     db.$transaction(async (tx) => {
       const duplicate = await tx.paymentWebhookLog.findUnique({
         where: {
           provider_eventId: {
-            provider: getPaymentProvider().name,
+            provider: providerName,
             eventId: event.eventId,
           },
         },
@@ -276,7 +564,7 @@ export async function applyPaymentEvent(event: VerifiedPaymentEvent) {
         if (
           candidate &&
           !candidate.externalPaymentId &&
-          candidate.provider === getPaymentProvider().name &&
+          candidate.provider === providerName &&
           candidate.amountMinor === event.amountMinor &&
           candidate.currency === event.currency &&
           ["CREATED", "PENDING"].includes(candidate.status)
@@ -292,7 +580,7 @@ export async function applyPaymentEvent(event: VerifiedPaymentEvent) {
       }
       const log = await tx.paymentWebhookLog.create({
         data: {
-          provider: getPaymentProvider().name,
+          provider: providerName,
           eventId: event.eventId,
           eventType: event.eventType,
           externalPaymentId: event.externalPaymentId,
@@ -303,7 +591,7 @@ export async function applyPaymentEvent(event: VerifiedPaymentEvent) {
       })
       if (
         !payment ||
-        payment.provider !== getPaymentProvider().name ||
+        payment.provider !== providerName ||
         payment.amountMinor !== event.amountMinor ||
         payment.currency !== event.currency
       ) {
@@ -466,6 +754,36 @@ export async function applyPaymentEvent(event: VerifiedPaymentEvent) {
           status: payment.status,
         }
       }
+      if (options?.debitWallet) {
+        const debited = await tx.walletAccount.updateMany({
+          where: {
+            userId: payment.userId,
+            availableMinor: { gte: payment.amountMinor },
+          },
+          data: {
+            availableMinor: { decrement: payment.amountMinor },
+            version: { increment: 1 },
+          },
+        })
+        if (debited.count !== 1)
+          throw new BusinessError("WALLET_INSUFFICIENT_BALANCE", 409)
+        const wallet = await tx.walletAccount.findUniqueOrThrow({
+          where: { userId: payment.userId },
+        })
+        await tx.walletLedgerEntry.create({
+          data: {
+            walletAccountId: wallet.id,
+            userId: payment.userId,
+            type: "SUBSCRIPTION_PAYMENT",
+            deltaAvailableMinor: -payment.amountMinor,
+            deltaReservedMinor: 0,
+            referenceType: "Payment",
+            referenceId: payment.id,
+            idempotencyKey: `wallet-subscription:${payment.id}`,
+            description: "Оплата подписки Pulsar",
+          },
+        })
+      }
       const now = new Date()
       await tx.payment.update({
         where: { id: payment.id },
@@ -474,111 +792,128 @@ export async function applyPaymentEvent(event: VerifiedPaymentEvent) {
       const current = await tx.subscription.findUnique({
         where: { userId: payment.userId },
       })
-      const startsAt =
-        current?.expiresAt && current.expiresAt > now ? current.expiresAt : now
-      const expiresAt = new Date(
-        startsAt.getTime() + payment.durationDays * 86_400_000
-      )
-      const syncVersion = (current?.syncVersion ?? 0) + 1
-      const stagedBoundaryReached = Boolean(
-        current?.nextParametersAt && current.nextParametersAt <= now
-      )
-      const currentDeviceLimit = stagedBoundaryReached
-        ? (current?.nextDeviceLimit ??
-          current?.deviceLimit ??
-          payment.deviceLimit)
-        : (current?.deviceLimit ?? payment.deviceLimit)
-      const currentLteEnabled = stagedBoundaryReached
-        ? (current?.nextLteEnabled ?? current?.lteEnabled ?? payment.lteEnabled)
-        : (current?.lteEnabled ?? payment.lteEnabled)
-      const hasActiveTerm = Boolean(
-        current &&
-        current.expiresAt > now &&
-        ["ACTIVE", "TRIAL"].includes(current.status)
-      )
-      const hasFutureStagedParameters = Boolean(
-        current?.nextParametersAt && current.nextParametersAt > now
-      )
-      if (
-        hasFutureStagedParameters &&
-        ((current?.nextDeviceLimit ?? currentDeviceLimit) !==
-          payment.deviceLimit ||
-          (current?.nextLteEnabled ?? currentLteEnabled) !== payment.lteEnabled)
-      ) {
-        await tx.subscriptionEvent.upsert({
-          where: {
-            idempotencyKey: `payment:${payment.id}:fulfillment-review`,
-          },
-          create: {
-            subscriptionId: current!.id,
+      if (payment.purpose === "DEVICE_LIMIT_UPGRADE") {
+        if (
+          !current ||
+          !["ACTIVE", "TRIAL"].includes(current.status) ||
+          current.expiresAt <= now
+        ) {
+          await tx.paymentWebhookLog.update({
+            where: { id: log.id },
+            data: {
+              processedAt: now,
+              processingError:
+                "Device limit upgrade requires manual fulfillment review",
+            },
+          })
+          await tx.auditLog.create({
+            data: {
+              actorType: "SYSTEM",
+              action: "DEVICE_LIMIT_UPGRADE_FULFILLMENT_REVIEW_REQUIRED",
+              entityType: "Payment",
+              entityId: payment.id,
+              correlationId: correlationId(),
+            },
+          })
+          return {
+            duplicate: false,
             paymentId: payment.id,
-            type: "PAYMENT_FULFILLMENT_REVIEW_REQUIRED",
-            previousStateJson: JSON.stringify(current),
-            newStateJson: JSON.stringify(current),
-            idempotencyKey: `payment:${payment.id}:fulfillment-review`,
+            status: "CONFIRMED",
+            fulfillmentReview: true,
+          }
+        }
+
+        const targetDeviceLimit = Math.max(
+          current.deviceLimit,
+          payment.deviceLimit
+        )
+        const syncVersion = current.syncVersion + 1
+        const subscription = await tx.subscription.update({
+          where: { id: current.id },
+          data: {
+            deviceLimit: targetDeviceLimit,
+            nextDeviceLimit:
+              current.nextDeviceLimit === null
+                ? null
+                : Math.max(current.nextDeviceLimit, targetDeviceLimit),
+            syncStatus: "PENDING",
+            syncVersion,
+            lastTechnicalError: null,
+            lastUserFriendlyError: null,
           },
-          update: {},
+        })
+        await tx.subscriptionEvent.create({
+          data: {
+            subscriptionId: subscription.id,
+            type: "DEVICE_LIMIT_UPGRADED",
+            paymentId: payment.id,
+            previousStateJson: JSON.stringify(current),
+            newStateJson: JSON.stringify(subscription),
+            idempotencyKey: `payment:${payment.id}:device-limit`,
+          },
+        })
+        await tx.outboxJob.create({
+          data: {
+            type: "PROVISION_SUBSCRIPTION",
+            aggregateType: "Subscription",
+            aggregateId: subscription.id,
+            payloadJson: JSON.stringify({
+              subscriptionId: subscription.id,
+              syncVersion,
+            }),
+            dedupeKey: `subscription:${subscription.id}:sync:${syncVersion}`,
+          },
+        })
+        await tx.outboxJob.create({
+          data: {
+            type: "SEND_TELEGRAM_NOTIFICATION",
+            aggregateType: "Payment",
+            aggregateId: payment.id,
+            payloadJson: JSON.stringify({
+              userId: payment.userId,
+              template: "PAYMENT_CONFIRMED",
+            }),
+            dedupeKey: `telegram:payment-confirmed:${payment.id}`,
+            maxAttempts: 5,
+          },
         })
         await tx.paymentWebhookLog.update({
           where: { id: log.id },
-          data: {
-            processedAt: now,
-            processingError:
-              "Payment confirmed; subscription fulfillment requires manual review",
-          },
+          data: { processedAt: now },
         })
         await tx.auditLog.create({
           data: {
             actorType: "SYSTEM",
-            action: "PAYMENT_FULFILLMENT_REVIEW_REQUIRED",
-            entityType: "Payment",
-            entityId: payment.id,
+            action: "DEVICE_LIMIT_UPGRADED",
+            entityType: "Subscription",
+            entityId: subscription.id,
             correlationId: correlationId(),
           },
         })
         return {
           duplicate: false,
           paymentId: payment.id,
-          subscriptionId: current!.id,
+          subscriptionId: subscription.id,
           status: "CONFIRMED",
-          fulfillmentReview: true,
         }
       }
-      const scheduleParameters =
-        hasActiveTerm &&
-        !hasFutureStagedParameters &&
-        (currentDeviceLimit !== payment.deviceLimit ||
-          currentLteEnabled !== payment.lteEnabled)
-      const nextDeviceLimit = hasFutureStagedParameters
-        ? current!.nextDeviceLimit
-        : scheduleParameters
-          ? payment.deviceLimit
-          : null
-      const nextLteEnabled = hasFutureStagedParameters
-        ? current!.nextLteEnabled
-        : scheduleParameters
-          ? payment.lteEnabled
-          : null
-      const nextParametersAt = hasFutureStagedParameters
-        ? current!.nextParametersAt
-        : scheduleParameters
-          ? current!.expiresAt
-          : null
+      const startsAt =
+        current?.expiresAt && current.expiresAt > now ? current.expiresAt : now
+      const expiresAt = new Date(
+        startsAt.getTime() + payment.durationDays * 86_400_000
+      )
+      const syncVersion = (current?.syncVersion ?? 0) + 1
       const subscription = current
         ? await tx.subscription.update({
             where: { id: current.id },
             data: {
               status: "ACTIVE",
               expiresAt,
-              deviceLimit: hasActiveTerm
-                ? currentDeviceLimit
-                : payment.deviceLimit,
-              lteEnabled: hasActiveTerm
-                ? currentLteEnabled
-                : payment.lteEnabled,
-              nextDeviceLimit,
-              nextLteEnabled,
-              nextParametersAt,
+              deviceLimit: payment.deviceLimit,
+              lteEnabled: payment.lteEnabled,
+              nextDeviceLimit: null,
+              nextLteEnabled: null,
+              nextParametersAt: null,
               syncStatus: "PENDING",
               syncVersion,
               lastTechnicalError: null,

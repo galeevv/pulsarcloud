@@ -30,6 +30,58 @@ export async function databaseHealth() {
   return { sqliteVersion: version[0]?.version ?? "unknown" }
 }
 
+type ErrorRecord = Record<string, unknown>
+
+function asErrorRecord(value: unknown): ErrorRecord | null {
+  return typeof value === "object" && value !== null
+    ? (value as ErrorRecord)
+    : null
+}
+
+function hasSqliteBusyMarker(
+  value: unknown,
+  visited = new Set<object>(),
+  depth = 0
+): boolean {
+  const error = asErrorRecord(value)
+  if (!error || depth > 6 || visited.has(error)) return false
+  visited.add(error)
+
+  const codes = [error.code, error.originalCode]
+  if (
+    codes.some(
+      (code) => typeof code === "string" && /^SQLITE_BUSY(?:_|$)/i.test(code)
+    )
+  ) {
+    return true
+  }
+
+  const messages = [error.message, error.originalMessage]
+  if (
+    messages.some(
+      (message) =>
+        typeof message === "string" &&
+        /\bSQLITE_BUSY(?:_[A-Z_]+)?\b|database (?:table )?is locked/i.test(
+          message
+        )
+    )
+  ) {
+    return true
+  }
+
+  const meta = asErrorRecord(error.meta)
+  return (
+    hasSqliteBusyMarker(error.cause, visited, depth + 1) ||
+    hasSqliteBusyMarker(meta?.driverAdapterError, visited, depth + 1)
+  )
+}
+
+export function isSqliteBusyError(error: unknown): boolean {
+  const record = asErrorRecord(error)
+  if (record?.code === "P2034") return true
+  return hasSqliteBusyMarker(error)
+}
+
 export async function withBusyRetry<T>(
   operation: () => Promise<T>,
   maxAttempts = 4
@@ -40,12 +92,7 @@ export async function withBusyRetry<T>(
       return await operation()
     } catch (error) {
       lastError = error
-      const message = error instanceof Error ? error.message : String(error)
-      const code = (error as { code?: string }).code
-      const busy =
-        code === "P2034" ||
-        /SQLITE_BUSY|database (?:table )?is locked/i.test(message)
-      if (!busy || attempt === maxAttempts - 1) throw error
+      if (!isSqliteBusyError(error) || attempt === maxAttempts - 1) throw error
       await new Promise((resolve) =>
         setTimeout(resolve, 25 * 2 ** attempt + Math.floor(Math.random() * 20))
       )

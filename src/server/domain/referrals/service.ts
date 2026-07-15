@@ -52,7 +52,7 @@ export async function applyReferralOnRegistration(
       startedAt: now,
       expiresAt: new Date(now.getTime() + pricing.referralTrialDays * DAY),
       deviceLimit: pricing.minDeviceLimit,
-      lteEnabled: false,
+      lteEnabled: true,
       syncStatus: "PENDING",
       syncVersion: 1,
     },

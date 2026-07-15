@@ -17,7 +17,9 @@ npm run setup:local
 npm run dev:local
 ```
 
-`npm run setup:local` creates `.env` from `.env.example` when needed, writes a repository-relative SQLite URL that works with Prisma on Windows, enables only the test payment/mock Remnawave adapters, installs locked dependencies, deploys migrations, and runs the idempotent pricing/admin seed. Valid secrets in an existing development env are preserved; missing/example secrets are generated. Before updating an existing development env the script creates a Git-ignored backup. It refuses to touch an existing env that contains `APP_ENV=production`, has no explicit `APP_ENV`, or contains an invalid custom secret. `npm run dev:local` starts both the Next.js application and the outbox worker; press `Ctrl+C` once to stop both processes.
+`npm run setup:local` creates `.env` from `.env.example` when needed, writes a repository-relative SQLite URL that works with Prisma on Windows, enables only the test payment/mock Remnawave adapters, installs locked dependencies, deploys migrations, and runs the idempotent pricing/admin seed. Valid secrets in an existing development env are preserved; missing/example secrets are generated. Before updating an existing development env the script creates a Git-ignored backup. It refuses to touch an existing env that contains `APP_ENV=production`, has no explicit `APP_ENV`, or contains an invalid custom secret. `npm run dev:local` (also available as `npm run dev:all`) starts both the Next.js application and the outbox worker; press `Ctrl+C` once to stop both processes.
+
+To keep test payments while provisioning disposable subscriptions in the live Remnawave Panel, create a separate short-lived API token in the protected Panel operator UI, put it only in the ignored local `.env` as `REMNAWAVE_API_TOKEN`, then run `npm run setup:local:remnawave`. Never copy the production Pulsar token. The current Panel API tokens have full API access rather than granular user-only scopes, so revoke the local token as soon as the integration test is complete. The live-local setup uses the isolated `pulsar_local_test` identity namespace. Run `npm run setup:local` again to return to the mock adapter; this does not revoke the Panel token automatically.
 
 Manual equivalents:
 
@@ -38,19 +40,19 @@ Open `http://localhost:3000`. A public HTTPS tunnel is needed only to receive re
 Tests always recreate `prisma/test.db` themselves and never open the dev database.
 
 ```powershell
-npm test
-npm run typecheck
-npm run lint
+npm run verify
 npm run build
 ```
 
 ## Test mode
 
-Set `PULSAR_TEST_MODE=true`, `PAYMENT_PROVIDER=test`, and `REMNAWAVE_PROVIDER=mock`, then restart web and worker. OTP is returned only by test-mode auth responses, checkout uses `/test/checkout/...`, and `/admin/test` becomes available. Set `PULSAR_TEST_MODE=false` to remove every test route/UI capability. Production refuses test mode unless the dangerous override is present **and** `DATABASE_URL` names an isolated test database; real/test identity and money paths still cannot cross.
+Set `PULSAR_TEST_MODE=true`, `PAYMENT_PROVIDER=test`, and `REMNAWAVE_PROVIDER=mock`, then restart web and worker. Local and production use the same routes, domain services, database schema, session logic, and worker; configuration changes the provider adapters and enables explicitly test-only surfaces. OTP is returned only by test-mode auth responses, checkout uses `/test/checkout/...`, and `/admin/test` becomes available. Live Remnawave is a local-only opt-in that additionally requires `PULSAR_ALLOW_LIVE_REMNAWAVE_IN_TEST_MODE=true` and a non-production `REMNAWAVE_USER_NAMESPACE`. Set `PULSAR_TEST_MODE=false` to remove every test route/UI capability. Production refuses test mode unless the dangerous override is present **and** `DATABASE_URL` names an isolated test database; real/test identity and money paths still cannot cross.
 
 ## Production
 
 Create the protected production environment before building, then build on Ubuntu (or a Linux CI runner) with `npm ci --include=dev`; do not copy a Windows `.next` or native `node_modules` directory to the VPS. Install the templates under `deploy/systemd` and `deploy/nginx`. The complete Ubuntu 24.04 procedure, atomic releases, rollback, TLS bootstrap, firewall, webhooks, and Remnawave port policy are in [docs/DEPLOY_VPS.md](docs/DEPLOY_VPS.md).
+
+After deployment, run the repository's read-only acceptance audit as root: `bash /opt/pulsar/current/deploy/pulsar/audit-production.sh`. It validates protected configuration without printing secrets, SQLite integrity/permissions, systemd services, loopback-only internal ports, UFW, TLS, public health, security headers, and that billing is still disabled.
 
 The original 2 vCPU/4 GB host is suitable for Pulsar alone. For a production co-location with Remnawave Panel, use at least 8 GB RAM (or put Remnawave on a separate VPS); the panel itself officially recommends 4 GB before Pulsar, PostgreSQL/Redis, and build headroom are counted.
 

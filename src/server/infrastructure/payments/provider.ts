@@ -138,11 +138,12 @@ class PlategaPaymentProvider implements PaymentProvider {
     userId: string
   }) {
     const response = await fetch(
-      `${getConfig().payments.plategaBaseUrl}/v2/transaction/process`,
+      `${getConfig().payments.plategaBaseUrl}/transaction/process`,
       {
         method: "POST",
         headers: this.headers(),
         body: JSON.stringify({
+          paymentMethod: 2,
           paymentDetails: {
             amount: input.amountMinor / 100,
             currency: input.currency,
@@ -165,13 +166,13 @@ class PlategaPaymentProvider implements PaymentProvider {
     }
     const body = (await response.json()) as {
       transactionId?: string
-      url?: string
+      redirect?: string
     }
-    if (!body.transactionId || !body.url)
+    if (!body.transactionId || !body.redirect)
       throw new Error("Platega create checkout response is incomplete")
     return {
       externalPaymentId: body.transactionId,
-      checkoutUrl: body.url,
+      checkoutUrl: body.redirect,
       providerCreatedAt: new Date(),
     }
   }

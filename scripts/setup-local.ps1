@@ -1,8 +1,16 @@
+param(
+  [switch]$LiveRemnawave
+)
+
 $ErrorActionPreference = "Stop"
 
 $Root = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $EnvPath = Join-Path $Root ".env"
 $ExampleEnvPath = Join-Path $Root ".env.example"
+$DefaultLiveRemnawaveBaseUrl = "https://panel.pulsar-cloud.space"
+$DefaultLiveRemnawaveStandardSquad = "1d64e64b-b56e-4fa5-a947-f0d071114ddf"
+$DefaultLiveRemnawaveLteSquad = "1d0c6f11-8049-48c0-8d2b-ed79f00ad128"
+$DefaultLocalRemnawaveNamespace = "pulsar_local_test"
 
 function Get-DotEnvValues {
   param(
@@ -111,6 +119,36 @@ function Invoke-Npm {
   }
 }
 
+function Assert-AbsoluteHttpsUrl {
+  param(
+    [Parameter(Mandatory = $true)][string]$Value,
+    [Parameter(Mandatory = $true)][string]$Name
+  )
+
+  $uri = $null
+  if (
+    -not [Uri]::TryCreate($Value, [UriKind]::Absolute, [ref]$uri) -or
+    $uri.Scheme -ne "https" -or
+    -not [string]::IsNullOrEmpty($uri.UserInfo) -or
+    -not [string]::IsNullOrEmpty($uri.Query) -or
+    -not [string]::IsNullOrEmpty($uri.Fragment)
+  ) {
+    throw "$Name must be an absolute HTTPS URL without credentials, query, or fragment. No files were changed."
+  }
+}
+
+function Assert-Uuid {
+  param(
+    [Parameter(Mandatory = $true)][string]$Value,
+    [Parameter(Mandatory = $true)][string]$Name
+  )
+
+  $parsed = [Guid]::Empty
+  if (-not [Guid]::TryParse($Value, [ref]$parsed)) {
+    throw "$Name must be a valid UUID. No files were changed."
+  }
+}
+
 if (Test-Path -LiteralPath $EnvPath) {
   $content = [IO.File]::ReadAllText($EnvPath)
   $appEnvironments = @(Get-DotEnvValues -Content $content -Name "APP_ENV")
@@ -130,6 +168,63 @@ else {
   $content = [IO.File]::ReadAllText($ExampleEnvPath)
 }
 
+$liveRemnawaveValues = $null
+if ($LiveRemnawave) {
+  $baseUrl = Get-DotEnvValue -Content $content -Name "REMNAWAVE_BASE_URL"
+  if ([string]::IsNullOrWhiteSpace($baseUrl)) {
+    $baseUrl = $DefaultLiveRemnawaveBaseUrl
+  }
+
+  $standardSquad = Get-DotEnvValue -Content $content -Name "REMNAWAVE_STANDARD_SQUAD_UUID"
+  if ([string]::IsNullOrWhiteSpace($standardSquad)) {
+    $standardSquad = $DefaultLiveRemnawaveStandardSquad
+  }
+
+  $lteSquad = Get-DotEnvValue -Content $content -Name "REMNAWAVE_LTE_SQUAD_UUID"
+  if ([string]::IsNullOrWhiteSpace($lteSquad)) {
+    $lteSquad = $DefaultLiveRemnawaveLteSquad
+  }
+
+  $apiToken = Get-DotEnvValue -Content $content -Name "REMNAWAVE_API_TOKEN"
+  if (
+    [string]::IsNullOrWhiteSpace($apiToken) -or
+    $apiToken -match '^replace-with-' -or
+    $apiToken.Length -lt 16
+  ) {
+    throw "-LiveRemnawave requires a dedicated local-test REMNAWAVE_API_TOKEN (16+ characters) in .env. Never copy the production Pulsar token. No files were changed."
+  }
+
+  $userNamespace = Get-DotEnvValue -Content $content -Name "REMNAWAVE_USER_NAMESPACE"
+  if ([string]::IsNullOrWhiteSpace($userNamespace) -or $userNamespace -eq "pulsar") {
+    $userNamespace = $DefaultLocalRemnawaveNamespace
+  }
+  if ($userNamespace -notmatch '^[a-z][a-z0-9_-]{0,31}$') {
+    throw "REMNAWAVE_USER_NAMESPACE must start with a lowercase letter and contain at most 32 lowercase letters, digits, underscores, or hyphens. No files were changed."
+  }
+
+  Assert-AbsoluteHttpsUrl -Value $baseUrl -Name "REMNAWAVE_BASE_URL"
+  Assert-Uuid -Value $standardSquad -Name "REMNAWAVE_STANDARD_SQUAD_UUID"
+  Assert-Uuid -Value $lteSquad -Name "REMNAWAVE_LTE_SQUAD_UUID"
+  if ($standardSquad -eq $lteSquad) {
+    throw "REMNAWAVE_STANDARD_SQUAD_UUID and REMNAWAVE_LTE_SQUAD_UUID must differ. No files were changed."
+  }
+
+  $liveRemnawaveValues = [ordered]@{
+    REMNAWAVE_PROVIDER               = "http"
+    REMNAWAVE_USER_NAMESPACE         = $userNamespace
+    REMNAWAVE_BASE_URL               = $baseUrl
+    REMNAWAVE_STANDARD_SQUAD_UUID     = $standardSquad
+    REMNAWAVE_LTE_SQUAD_UUID          = $lteSquad
+    PULSAR_ALLOW_LIVE_REMNAWAVE_IN_TEST_MODE = "true"
+  }
+}
+else {
+  $existingRemnawaveToken = Get-DotEnvValue -Content $content -Name "REMNAWAVE_API_TOKEN"
+  if (-not [string]::IsNullOrWhiteSpace($existingRemnawaveToken)) {
+    Write-Warning "Mock mode does not revoke or clear the existing Remnawave API token. Revoke this full-access local-test token in the Panel UI and clear REMNAWAVE_API_TOKEN when live testing is complete."
+  }
+}
+
 # Validate every existing secret before creating the backup or changing content.
 # Valid values are preserved; only missing/example placeholders are generated.
 $sessionSecret = Get-OrCreateSecret -Content $content -Name "SESSION_SECRET" -Kind "text"
@@ -145,8 +240,16 @@ $updates = [ordered]@{
   PAYMENT_PROVIDER                    = "test"
   BILLING_ENABLED                     = "false"
   REMNAWAVE_PROVIDER                  = "mock"
+  REMNAWAVE_USER_NAMESPACE            = $DefaultLocalRemnawaveNamespace
   PULSAR_TEST_MODE                    = "true"
   PULSAR_ALLOW_TEST_MODE_IN_PRODUCTION = "false"
+  PULSAR_ALLOW_LIVE_REMNAWAVE_IN_TEST_MODE = "false"
+}
+
+if ($LiveRemnawave) {
+  foreach ($entry in $liveRemnawaveValues.GetEnumerator()) {
+    $updates[$entry.Key] = $entry.Value
+  }
 }
 
 foreach ($entry in $updates.GetEnumerator()) {
@@ -176,7 +279,12 @@ if (Test-Path -LiteralPath $EnvPath) {
 
 $utf8WithoutBom = New-Object Text.UTF8Encoding($false)
 [IO.File]::WriteAllText($EnvPath, $content, $utf8WithoutBom)
-Write-Host "Prepared development-only env at $EnvPath (test payment + mock Remnawave)."
+if ($LiveRemnawave) {
+  Write-Host "Prepared development-only env at $EnvPath (test payment + live Remnawave with an isolated user namespace)."
+}
+else {
+  Write-Host "Prepared development-only env at $EnvPath (test payment + mock Remnawave)."
+}
 
 $databaseFile = Join-Path $Root "prisma\dev.db"
 if (-not (Test-Path -LiteralPath $databaseFile)) {

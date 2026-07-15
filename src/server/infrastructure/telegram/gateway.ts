@@ -49,5 +49,8 @@ class TestTelegramGateway implements TelegramGateway {
   }
 }
 export function getTelegramGateway(): TelegramGateway {
-  return getConfig().testMode ? new TestTelegramGateway() : new BotApiGateway()
+  const config = getConfig()
+  return config.localAuthAdaptersEnabled
+    ? new TestTelegramGateway()
+    : new BotApiGateway()
 }

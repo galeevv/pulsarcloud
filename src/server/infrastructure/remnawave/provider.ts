@@ -23,6 +23,39 @@ const remoteUserEnvelopeSchema = z.object({
   }),
 })
 
+const remoteDeviceSchema = z.object({
+  hwid: z.string().min(1).max(256),
+  userId: z.number().int().positive(),
+  platform: z.string().nullable(),
+  osVersion: z.string().nullable(),
+  deviceModel: z.string().nullable(),
+  userAgent: z.string().nullable(),
+  requestIp: z.string().nullable(),
+  createdAt: z.string().transform((value, context) => {
+    const date = new Date(value)
+    if (!Number.isFinite(date.getTime())) {
+      context.addIssue({ code: "custom", message: "Invalid device date" })
+      return z.NEVER
+    }
+    return date
+  }),
+  updatedAt: z.string().transform((value, context) => {
+    const date = new Date(value)
+    if (!Number.isFinite(date.getTime())) {
+      context.addIssue({ code: "custom", message: "Invalid device date" })
+      return z.NEVER
+    }
+    return date
+  }),
+})
+
+const remoteDevicesEnvelopeSchema = z.object({
+  response: z.object({
+    total: z.number().int().min(0),
+    devices: z.array(remoteDeviceSchema),
+  }),
+})
+
 type RemoteUser = z.infer<typeof remoteUserEnvelopeSchema>["response"]
 type FetchImplementation = typeof fetch
 
@@ -32,6 +65,15 @@ export type RemoteSubscriberState = {
   deviceLimit: number
   lteEnabled: boolean
   subscriptionUrl: string
+}
+
+export type SubscriberDevice = z.infer<typeof remoteDeviceSchema>
+
+export class SubscriberDeviceNotFoundError extends Error {
+  constructor() {
+    super("Subscriber device was not found")
+    this.name = "SubscriberDeviceNotFoundError"
+  }
 }
 
 export interface ProvisioningProvider {
@@ -46,6 +88,11 @@ export interface ProvisioningProvider {
     remoteUserId: string
   }): Promise<{ subscriptionUrl: string }>
   getSubscriberState(remoteUserId: string): Promise<RemoteSubscriberState>
+  getSubscriberDevices(remoteUserId: string): Promise<SubscriberDevice[]>
+  deleteSubscriberDevice(input: {
+    remoteUserId: string
+    hwid: string
+  }): Promise<SubscriberDevice[]>
 }
 
 class MockProvisioningProvider implements ProvisioningProvider {
@@ -70,11 +117,18 @@ class MockProvisioningProvider implements ProvisioningProvider {
       subscriptionUrl: "",
     }
   }
+  async getSubscriberDevices() {
+    return []
+  }
+  async deleteSubscriberDevice(): Promise<SubscriberDevice[]> {
+    throw new SubscriberDeviceNotFoundError()
+  }
 }
 
 export type RemnawaveHttpProviderOptions = {
   baseUrl: string
   apiToken: string
+  userNamespace?: string
   standardSquadUuid: string
   lteSquadUuid: string
   timeoutMs?: number
@@ -84,6 +138,7 @@ export type RemnawaveHttpProviderOptions = {
 export class RemnawaveHttpProvider implements ProvisioningProvider {
   private readonly baseUrl: string
   private readonly apiToken: string
+  private readonly userNamespace: string
   private readonly standardSquadUuid: string
   private readonly lteSquadUuid: string
   private readonly timeoutMs: number
@@ -93,8 +148,12 @@ export class RemnawaveHttpProvider implements ProvisioningProvider {
     const baseUrl = new URL(options.baseUrl)
     if (!["http:", "https:"].includes(baseUrl.protocol))
       throw new Error("Remnawave base URL must use HTTP or HTTPS")
+    const userNamespace = options.userNamespace ?? "pulsar"
+    if (!/^[a-z][a-z0-9_-]{0,31}$/.test(userNamespace))
+      throw new Error("Remnawave user namespace is invalid")
     this.baseUrl = baseUrl.toString().replace(/\/$/, "")
     this.apiToken = options.apiToken
+    this.userNamespace = userNamespace
     this.standardSquadUuid = options.standardSquadUuid
     this.lteSquadUuid = options.lteSquadUuid
     this.timeoutMs = options.timeoutMs ?? 8_000
@@ -172,6 +231,33 @@ export class RemnawaveHttpProvider implements ProvisioningProvider {
     return this.toState(user)
   }
 
+  async getSubscriberDevices(remoteUserId: string) {
+    return this.requestDevices(
+      `/api/hwid/devices/${encodeURIComponent(remoteUserId)}`,
+      "GET",
+      undefined,
+      "get subscriber devices"
+    )
+  }
+
+  async deleteSubscriberDevice(input: { remoteUserId: string; hwid: string }) {
+    const devices = await this.requestDevices(
+      `/api/hwid/devices/${encodeURIComponent(input.remoteUserId)}`,
+      "GET",
+      undefined,
+      "get subscriber devices"
+    )
+    if (!devices.some((device) => device.hwid === input.hwid))
+      throw new SubscriberDeviceNotFoundError()
+
+    return this.requestDevices(
+      "/api/hwid/devices/delete",
+      "POST",
+      { userUuid: input.remoteUserId, hwid: input.hwid },
+      "delete subscriber device"
+    )
+  }
+
   private async findByUsername(username: string) {
     const payload = await this.request(
       `/api/users/by-username/${encodeURIComponent(username)}`,
@@ -216,6 +302,19 @@ export class RemnawaveHttpProvider implements ProvisioningProvider {
       await this.request(path, method, body, operation),
       operation
     )
+  }
+
+  private async requestDevices(
+    path: string,
+    method: "GET" | "POST",
+    body: Record<string, unknown> | undefined,
+    operation: string
+  ) {
+    const payload = await this.request(path, method, body, operation)
+    const parsed = remoteDevicesEnvelopeSchema.safeParse(payload)
+    if (!parsed.success)
+      throw new Error(`Remnawave API ${operation} returned invalid devices`)
+    return parsed.data.response.devices
   }
 
   private async request(
@@ -337,7 +436,7 @@ export class RemnawaveHttpProvider implements ProvisioningProvider {
 
   private usernameFor(localUserId: string) {
     const digest = createHash("sha256")
-      .update(`pulsar:${localUserId}`)
+      .update(`${this.userNamespace}:${localUserId}`)
       .digest("hex")
       .slice(0, 24)
     return `pulsar_${digest}`
@@ -351,6 +450,7 @@ export function getProvisioningProvider(): ProvisioningProvider {
   return new RemnawaveHttpProvider({
     baseUrl: config.remnawave.baseUrl!,
     apiToken: config.remnawave.apiToken!,
+    userNamespace: config.remnawave.userNamespace,
     standardSquadUuid: config.remnawave.standardSquadUuid!,
     lteSquadUuid: config.remnawave.lteSquadUuid!,
     timeoutMs: config.remnawave.timeoutMs,

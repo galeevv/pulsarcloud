@@ -15,6 +15,9 @@ const checkoutSchema = z.object({
   ]),
   deviceLimit: z.number().int().min(1).max(5),
   lteEnabled: z.boolean(),
+  paymentMethod: z.enum(["SBP", "WALLET"]).default("SBP"),
+  expectedAmountMinor: z.number().int().positive(),
+  pricingVersion: z.number().int().positive(),
   idempotencyKey: z.string().min(8).max(200),
 })
 

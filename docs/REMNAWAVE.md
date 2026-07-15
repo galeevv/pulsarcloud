@@ -59,10 +59,10 @@ Monitor memory availability, swap-in/swap-out, OOM events, container restarts, P
 
 The live Panel contains two clearly marked, deliberately unusable entitlement fixtures. They exist only to verify Standard/LTE assignment before real traffic Nodes are available.
 
-| Kind | Profile UUID | Inbound UUID | Internal squad UUID |
-| --- | --- | --- | --- |
+| Kind     | Profile UUID                           | Inbound UUID                           | Internal squad UUID                    |
+| -------- | -------------------------------------- | -------------------------------------- | -------------------------------------- |
 | Standard | `6c3a8d36-0483-48b2-875f-ce778f0e6bbb` | `e279b4b8-2ec4-4a19-aeaf-fd5bf51ab2b1` | `1d64e64b-b56e-4fa5-a947-f0d071114ddf` |
-| LTE | `46bea9a0-6682-436f-beb1-8e5b315a99c8` | `8fafb99a-638b-4aef-a4dd-b8ccff90cdf8` | `1d0c6f11-8049-48c0-8d2b-ed79f00ad128` |
+| LTE      | `46bea9a0-6682-436f-beb1-8e5b315a99c8` | `8fafb99a-638b-4aef-a4dd-b8ccff90cdf8` | `1d0c6f11-8049-48c0-8d2b-ed79f00ad128` |
 
 Profiles are named `PULSAR_TEST_STANDARD_PROFILE` and `PULSAR_TEST_LTE_PROFILE`; their inbounds/squads are named `PULSAR_TEST_STANDARD` and `PULSAR_TEST_LTE`. Each dummy inbound listens on `127.0.0.1` in a hypothetical Node config and routes all traffic to Xray `blackhole`. No Node or Host is attached, and no client port is published on this VPS. Do not turn these fixtures into production profiles; replace their squad UUIDs with squads backed by separately hosted Nodes during the real traffic rollout.
 
@@ -82,12 +82,15 @@ Required environment values are:
 
 ```text
 REMNAWAVE_PROVIDER=http
+REMNAWAVE_USER_NAMESPACE=pulsar
 REMNAWAVE_BASE_URL=https://panel.pulsar-cloud.space
 REMNAWAVE_API_TOKEN=<root-readable secret>
 REMNAWAVE_STANDARD_SQUAD_UUID=<uuid>
 REMNAWAVE_LTE_SQUAD_UUID=<uuid>
 REMNAWAVE_TIMEOUT_MS=8000
 ```
+
+`REMNAWAVE_USER_NAMESPACE=pulsar` preserves the production deterministic usernames created by earlier releases. For a local test database connected to this Panel, use `npm run setup:local:remnawave`; it requires a dedicated local-test token and uses a separate namespace so local identities cannot collide with production identities. Never copy the production token out of `/etc/pulsar/pulsar.env`.
 
 The token is stored only in `/etc/pulsar/pulsar.env` (`root:pulsar`, mode `0640`). Rotate it with `deploy/remnawave/rotate-pulsar-api-token.sh`; the script replaces the environment value atomically, verifies the new credential, and then revokes superseded `pulsar-backend*` tokens. Never print, log, or copy the token into Markdown.
 

@@ -10,7 +10,7 @@ import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 export const metadata: Metadata = {
-  title: "Юридическая информация",
+  title: { absolute: "PULSAR" },
 }
 
 const legalDocuments = [

@@ -5,7 +5,6 @@ import {
   routeErrorResponse,
 } from "@/src/server/transport/http/security"
 import {
-  clearEmailChallengeCookie,
   getSession,
   requestFingerprint,
   setSessionCookie,
@@ -30,7 +29,6 @@ export async function POST(request: Request) {
     })
     if (result.rawSession)
       await setSessionCookie(result.rawSession, result.kind)
-    await clearEmailChallengeCookie(body.challengeId)
     return Response.json({
       ok: true,
       redirectTo: result.kind === "ADMIN" ? "/admin" : "/home",

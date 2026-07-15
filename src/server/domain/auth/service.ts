@@ -14,10 +14,6 @@ import {
 import { applyReferralOnRegistration } from "@/src/server/domain/referrals/service"
 import { createSession } from "@/src/server/domain/auth/session"
 import {
-  verifyEmailBrowserState,
-  verifyTelegramBrowserState,
-} from "@/src/server/domain/auth/browser-state"
-import {
   correlationId,
   encryptSensitive,
   hashOtp,
@@ -74,38 +70,84 @@ export async function requestEmailChallenge(input: {
   const otp = randomInt(0, 1_000_000).toString().padStart(6, "0")
   const magicLinkToken = randomToken(32)
   const now = new Date()
-  const limits = await authTransaction(async (tx) => {
-    const cooldownAllowed = await consumeRateLimit(
-      tx,
-      `otp:cooldown:${email}`,
-      MINUTE,
-      1,
-      now
+  const config = getConfig()
+  try {
+    await authTransaction(async (tx) => {
+      const recentChallenge = await tx.loginChallenge.findFirst({
+        where: {
+          emailNormalized: email,
+          status: "PENDING",
+          createdAt: { gt: new Date(now.getTime() - MINUTE) },
+        },
+        select: { id: true },
+      })
+      if (recentChallenge) throw new BusinessError("AUTH_RATE_LIMITED", 429)
+
+      const emailAllowed = await consumeRateLimit(
+        tx,
+        `otp:email:5m:${email}`,
+        5 * MINUTE,
+        5,
+        now
+      )
+      const ipAllowed = input.ipHash
+        ? await consumeRateLimit(
+            tx,
+            `otp:ip:5m:${input.ipHash}`,
+            5 * MINUTE,
+            10,
+            now
+          )
+        : true
+      if (!emailAllowed || !ipAllowed)
+        throw new BusinessError("AUTH_RATE_LIMITED", 429)
+
+      await tx.loginChallenge.updateMany({
+        where: {
+          emailNormalized: email,
+          status: "PENDING",
+        },
+        data: { status: "CANCELED" },
+      })
+
+      await tx.loginChallenge.create({
+        data: {
+          id,
+          channel: "EMAIL",
+          purpose,
+          emailNormalized: email,
+          requestedByUserId: input.requestedByUserId,
+          inviteCodeSnapshot: input.inviteCode?.slice(0, 100),
+          otpHash: hashOtp(id, otp),
+          magicLinkTokenHash: hashToken(magicLinkToken),
+          expiresAt: new Date(now.getTime() + 5 * MINUTE),
+          requestedIpHash: input.ipHash,
+          userAgentHash: input.userAgentHash,
+          devOtpEncrypted: config.testMode ? encryptSensitive(otp) : null,
+        },
+      })
+      await tx.outboxJob.create({
+        data: {
+          type: "SEND_EMAIL_OTP",
+          aggregateType: "LoginChallenge",
+          aggregateId: id,
+          payloadJson: JSON.stringify({
+            challengeId: id,
+            email,
+            otpEncrypted: encryptSensitive(otp),
+            magicLinkTokenEncrypted: encryptSensitive(magicLinkToken),
+          }),
+          dedupeKey: `email-otp:${id}`,
+          maxAttempts: 5,
+        },
+      })
+    })
+  } catch (error) {
+    if (
+      purpose === "ADMIN_LOGIN" &&
+      error instanceof BusinessError &&
+      error.code === "AUTH_RATE_LIMITED"
     )
-    const emailAllowed = await consumeRateLimit(
-      tx,
-      `otp:email:5m:${email}`,
-      5 * MINUTE,
-      5,
-      now
-    )
-    const ipAllowed = input.ipHash
-      ? await consumeRateLimit(
-          tx,
-          `otp:ip:5m:${input.ipHash}`,
-          5 * MINUTE,
-          10,
-          now
-        )
-      : true
-    return {
-      cooldownAllowed,
-      emailAllowed,
-      ipAllowed,
-    }
-  })
-  if (!limits.cooldownAllowed || !limits.emailAllowed || !limits.ipAllowed) {
-    if (purpose === "ADMIN_LOGIN")
       await db.auditLog.create({
         data: {
           actorType: "SYSTEM",
@@ -115,53 +157,12 @@ export async function requestEmailChallenge(input: {
           correlationId: correlationId(),
         },
       })
-    throw new BusinessError("AUTH_RATE_LIMITED", 429)
+    throw error
   }
-  const recentChallenge = await db.loginChallenge.findFirst({
-    where: {
-      emailNormalized: email,
-      createdAt: { gt: new Date(now.getTime() - MINUTE) },
-    },
-    select: { id: true },
-  })
-  if (recentChallenge) throw new BusinessError("AUTH_RATE_LIMITED", 429)
-  await authTransaction(async (tx) => {
-    await tx.loginChallenge.create({
-      data: {
-        id,
-        channel: "EMAIL",
-        purpose,
-        emailNormalized: email,
-        requestedByUserId: input.requestedByUserId,
-        inviteCodeSnapshot: input.inviteCode?.slice(0, 100),
-        otpHash: hashOtp(id, otp),
-        magicLinkTokenHash: hashToken(magicLinkToken),
-        expiresAt: new Date(now.getTime() + 5 * MINUTE),
-        requestedIpHash: input.ipHash,
-        userAgentHash: input.userAgentHash,
-        devOtpEncrypted: getConfig().testMode ? encryptSensitive(otp) : null,
-      },
-    })
-    await tx.outboxJob.create({
-      data: {
-        type: "SEND_EMAIL_OTP",
-        aggregateType: "LoginChallenge",
-        aggregateId: id,
-        payloadJson: JSON.stringify({
-          challengeId: id,
-          email,
-          otpEncrypted: encryptSensitive(otp),
-          magicLinkTokenEncrypted: encryptSensitive(magicLinkToken),
-        }),
-        dedupeKey: `email-otp:${id}`,
-        maxAttempts: 5,
-      },
-    })
-  })
   return {
     challengeId: id,
     expiresAt: new Date(now.getTime() + 5 * MINUTE),
-    ...(getConfig().testMode ? { devOtp: otp } : {}),
+    ...(config.localAuthAdaptersEnabled ? { devOtp: otp } : {}),
   }
 }
 
@@ -343,7 +344,6 @@ export async function verifyEmailChallenge(input: {
 export async function consumeEmailMagicLink(input: {
   challengeId: string
   rawMagicLinkToken: string
-  browserState: string
   currentUserId?: string
   userAgentHash?: string
   ipPrefixHash?: string
@@ -354,11 +354,8 @@ export async function consumeEmailMagicLink(input: {
     })
     if (!challenge || challenge.channel !== "EMAIL")
       throw new BusinessError("AUTH_CHALLENGE_EXPIRED")
-    if (
-      challenge.id !== input.challengeId ||
-      !verifyEmailBrowserState(challenge.id, input.browserState)
-    )
-      throw new BusinessError("AUTH_BROWSER_MISMATCH", 403)
+    if (challenge.id !== input.challengeId)
+      throw new BusinessError("AUTH_CHALLENGE_EXPIRED")
     if (challenge.status === "COMPLETED")
       return { error: "AUTH_CHALLENGE_USED" as const, status: 409 }
     if (challenge.status !== "PENDING" || challenge.expiresAt <= new Date())
@@ -382,8 +379,9 @@ export async function requestTelegramChallenge(input: {
   ipHash?: string
 }) {
   const purpose = input.purpose ?? "USER_LOGIN"
-  const username = getConfig().telegram.botUsername
-  if (!username)
+  const config = getConfig()
+  const username = config.telegram.botUsername
+  if (!config.localAuthAdaptersEnabled && !username)
     throw new BusinessError("INTEGRATION_TEMPORARILY_UNAVAILABLE", 503)
   if (input.ipHash) {
     const allowed = await authTransaction((tx) =>
@@ -426,7 +424,45 @@ export async function requestTelegramChallenge(input: {
   )
   return {
     challengeId: challenge.id,
-    url: `https://t.me/${username}?start=${rawToken}`,
+    url: config.localAuthAdaptersEnabled
+      ? `${config.appUrl}/test/telegram/${encodeURIComponent(challenge.id)}?token=${encodeURIComponent(rawToken)}`
+      : `https://t.me/${username}?start=${encodeURIComponent(rawToken)}`,
+  }
+}
+
+export async function getPendingTelegramTestChallenge(input: {
+  challengeId: string
+  rawStartToken: string
+}) {
+  const config = getConfig()
+  if (!config.localAuthAdaptersEnabled)
+    throw new BusinessError("NOT_FOUND", 404)
+  if (
+    !/^[A-Za-z0-9_-]{8,128}$/.test(input.challengeId) ||
+    input.rawStartToken.length < 16 ||
+    input.rawStartToken.length > 256
+  )
+    throw new BusinessError("AUTH_CHALLENGE_EXPIRED")
+  const challenge = await db.loginChallenge.findFirst({
+    where: {
+      id: input.challengeId,
+      channel: "TELEGRAM",
+      status: "PENDING",
+      telegramStartTokenHash: hashToken(input.rawStartToken),
+      expiresAt: { gt: new Date() },
+    },
+    select: {
+      id: true,
+      purpose: true,
+      expiresAt: true,
+    },
+  })
+  if (!challenge || challenge.purpose === "LINK_EMAIL")
+    throw new BusinessError("AUTH_CHALLENGE_EXPIRED")
+  return {
+    id: challenge.id,
+    purpose: challenge.purpose,
+    expiresAt: challenge.expiresAt,
   }
 }
 
@@ -436,6 +472,7 @@ type TelegramStartCredential =
 
 export async function completeTelegramStart(
   input: TelegramStartCredential & {
+    challengeId?: string
     telegramId: string
     username?: string
     chatId?: string
@@ -465,6 +502,7 @@ export async function completeTelegramStart(
     })
     if (
       !challenge ||
+      (input.challengeId && challenge.id !== input.challengeId) ||
       challenge.channel !== "TELEGRAM" ||
       challenge.status !== "PENDING"
     )
@@ -578,7 +616,6 @@ export async function completeTelegramStart(
 export async function consumeTelegramCompletion(input: {
   rawCompletionToken: string
   challengeId: string
-  browserState: string
   userAgentHash?: string
   ipPrefixHash?: string
 }) {
@@ -587,11 +624,8 @@ export async function consumeTelegramCompletion(input: {
       where: { completionTokenHash: hashToken(input.rawCompletionToken) },
     })
     if (!challenge) throw new BusinessError("AUTH_CHALLENGE_EXPIRED")
-    if (
-      challenge.id !== input.challengeId ||
-      !verifyTelegramBrowserState(challenge.id, input.browserState)
-    )
-      throw new BusinessError("AUTH_BROWSER_MISMATCH", 403)
+    if (challenge.id !== input.challengeId)
+      throw new BusinessError("AUTH_CHALLENGE_EXPIRED")
     if (
       !challenge.telegramId ||
       !challenge.consumedAt ||

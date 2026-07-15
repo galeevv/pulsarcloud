@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto"
 import Link from "next/link"
 import { notFound, redirect } from "next/navigation"
+import { WalletAdjustmentDialog } from "@/components/admin/wallet-adjustment-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -19,6 +21,7 @@ import {
 } from "@/components/ui/table"
 import { db } from "@/src/server/infrastructure/db/client"
 import { getSession } from "@/src/server/transport/web/session"
+import { formatPreviewRub } from "@/src/frontend-preview/format"
 
 export default async function AdminUserDetailsPage({
   params,
@@ -28,56 +31,60 @@ export default async function AdminUserDetailsPage({
   const session = await getSession("ADMIN")
   if (!session || session.user.role !== "ADMIN") redirect("/admin")
   const { id } = await params
-  const [user, auditLogs] = await Promise.all([
-    db.user.findUnique({
-      where: { id },
-      include: {
-        identities: true,
-        sessions: { orderBy: { createdAt: "desc" }, take: 20 },
-        subscription: {
-          include: { events: { orderBy: { createdAt: "desc" }, take: 50 } },
-        },
-        payments: {
-          orderBy: { createdAt: "desc" },
-          take: 50,
-          include: { webhookLogs: { orderBy: { receivedAt: "desc" } } },
-        },
-        referralProfile: true,
-        invitedReferral: {
-          include: {
-            inviter: { include: { identities: true } },
-            reward: true,
-          },
-        },
-        sentInvites: {
-          orderBy: { createdAt: "desc" },
-          take: 50,
-          include: {
-            invited: { include: { identities: true } },
-            reward: true,
-          },
-        },
-        wallet: {
-          include: {
-            ledgerEntries: { orderBy: { createdAt: "desc" }, take: 100 },
-          },
-        },
-        payouts: { orderBy: { createdAt: "desc" }, take: 50 },
-        supportConversation: {
-          include: { messages: { orderBy: { createdAt: "asc" }, take: 100 } },
-        },
-        telegramProfile: true,
+  const user = await db.user.findUnique({
+    where: { id },
+    include: {
+      identities: true,
+      sessions: { orderBy: { createdAt: "desc" }, take: 20 },
+      subscription: {
+        include: { events: { orderBy: { createdAt: "desc" }, take: 50 } },
       },
-    }),
-    db.auditLog.findMany({
-      where: {
-        OR: [{ actorId: id }, { entityType: "User", entityId: id }],
+      payments: {
+        orderBy: { createdAt: "desc" },
+        take: 50,
+        include: { webhookLogs: { orderBy: { receivedAt: "desc" } } },
       },
-      orderBy: { createdAt: "desc" },
-      take: 100,
-    }),
-  ])
+      referralProfile: true,
+      invitedReferral: {
+        include: {
+          inviter: { include: { identities: true } },
+          reward: true,
+        },
+      },
+      sentInvites: {
+        orderBy: { createdAt: "desc" },
+        take: 50,
+        include: {
+          invited: { include: { identities: true } },
+          reward: true,
+        },
+      },
+      wallet: {
+        include: {
+          ledgerEntries: { orderBy: { createdAt: "desc" }, take: 100 },
+        },
+      },
+      payouts: { orderBy: { createdAt: "desc" }, take: 50 },
+      supportConversation: {
+        include: { messages: { orderBy: { createdAt: "asc" }, take: 100 } },
+      },
+      telegramProfile: true,
+    },
+  })
   if (!user || user.role !== "USER") notFound()
+  const auditLogs = await db.auditLog.findMany({
+    where: {
+      OR: [
+        { actorId: id },
+        { entityType: "User", entityId: id },
+        ...(user.wallet
+          ? [{ entityType: "WalletAccount", entityId: user.wallet.id }]
+          : []),
+      ],
+    },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+  })
 
   return (
     <main className="pulsar-admin-container">
@@ -145,8 +152,19 @@ export default async function AdminUserDetailsPage({
           ) : null}
         </DetailsCard>
         <DetailsCard title="Wallet" description="Проекция immutable ledger">
-          <p>Доступно: {(user.wallet?.availableMinor ?? 0) / 100} ₽</p>
-          <p>Зарезервировано: {(user.wallet?.reservedMinor ?? 0) / 100} ₽</p>
+          <p>
+            Доступно:{" "}
+            {formatPreviewRub((user.wallet?.availableMinor ?? 0) / 100)}
+          </p>
+          <p>
+            Зарезервировано:{" "}
+            {formatPreviewRub((user.wallet?.reservedMinor ?? 0) / 100)}
+          </p>
+          <WalletAdjustmentDialog
+            availableMinor={user.wallet?.availableMinor ?? 0}
+            initialIdempotencyKey={randomUUID()}
+            userId={user.id}
+          />
         </DetailsCard>
         <DetailsCard
           title="Referral"
@@ -185,7 +203,7 @@ export default async function AdminUserDetailsPage({
           rows={user.payments.map((item) => [
             item.id,
             `${item.status}${item.isTest ? " · TEST" : ""}`,
-            `${item.amountMinor / 100} ${item.currency}`,
+            formatPreviewRub(item.amountMinor / 100),
             `${item.durationDays}d · ${item.deviceLimit} devices · LTE ${item.lteEnabled ? "on" : "off"}`,
             String(item.webhookLogs.length),
           ])}
@@ -212,8 +230,8 @@ export default async function AdminUserDetailsPage({
           rows={(user.wallet?.ledgerEntries ?? []).map((item) => [
             dateTime(item.createdAt),
             item.type,
-            `${item.deltaAvailableMinor / 100} ₽`,
-            `${item.deltaReservedMinor / 100} ₽`,
+            formatPreviewRub(item.deltaAvailableMinor / 100),
+            formatPreviewRub(item.deltaReservedMinor / 100),
             `${item.referenceType}:${item.referenceId}`,
           ])}
         />

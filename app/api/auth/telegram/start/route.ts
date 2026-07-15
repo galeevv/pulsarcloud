@@ -7,7 +7,6 @@ import {
 import {
   requestFingerprint,
   requireWebSession,
-  setTelegramChallengeCookie,
 } from "@/src/server/transport/web/session"
 
 const startSchema = z.object({
@@ -30,8 +29,6 @@ export async function POST(request: Request) {
       inviteCode: body.invite,
       ipHash: fingerprint.ipHash,
     })
-    if (body.purpose !== "LINK_TELEGRAM")
-      await setTelegramChallengeCookie(challenge.challengeId)
     return Response.json(challenge)
   } catch (error) {
     return routeErrorResponse(error)

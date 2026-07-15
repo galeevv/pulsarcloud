@@ -26,7 +26,8 @@ import {
 import { decryptSensitive } from "@/src/server/infrastructure/security/crypto"
 
 export default async function AdminTestPage() {
-  if (!getConfig().testMode) notFound()
+  const config = getConfig()
+  if (!config.testMode) notFound()
   const session = await getSession("ADMIN")
   if (!session || session.user.role !== "ADMIN") redirect("/admin")
   const state = await db.systemState.findUnique({
@@ -123,19 +124,21 @@ export default async function AdminTestPage() {
             </form>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Telegram</CardTitle>
-            <CardDescription>
-              Создать challenge и обработать приватный mock update
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form action={simulateTelegramLogin}>
-              <Button variant="outline">Симулировать Telegram login</Button>
-            </form>
-          </CardContent>
-        </Card>
+        {config.localAuthAdaptersEnabled ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Telegram</CardTitle>
+              <CardDescription>
+                Создать challenge и обработать приватный mock update
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form action={simulateTelegramLogin}>
+                <Button variant="outline">Симулировать Telegram login</Button>
+              </form>
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
       <Card>
         <CardHeader>

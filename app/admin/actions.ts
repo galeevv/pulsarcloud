@@ -1,10 +1,37 @@
 "use server"
 import { randomUUID } from "node:crypto"
 import { revalidatePath } from "next/cache"
+import { z } from "zod"
 import { db } from "@/src/server/infrastructure/db/client"
 import { requireWebSession } from "@/src/server/transport/web/session"
 import { correlationId } from "@/src/server/infrastructure/security/crypto"
-import { transitionPayout } from "@/src/server/domain/wallet/service"
+import {
+  adjustWalletBalanceByAdmin,
+  transitionPayout,
+} from "@/src/server/domain/wallet/service"
+import { toFriendlyError } from "@/src/server/application/errors"
+
+const walletAdjustmentSchema = z.object({
+  userId: z.string().min(8).max(100),
+  deltaRub: z.coerce
+    .number()
+    .int()
+    .min(-1_000_000)
+    .max(1_000_000)
+    .refine((value) => value !== 0),
+  comment: z.string().trim().min(5).max(500),
+  idempotencyKey: z.uuid(),
+})
+
+export type WalletAdjustmentActionState = {
+  status: "idle" | "success" | "error"
+  message: string
+  availableMinor?: number
+  fieldErrors?: {
+    deltaRub?: string
+    comment?: string
+  }
+}
 
 async function admin() {
   return requireWebSession("ADMIN")
@@ -217,77 +244,57 @@ export async function regenerateSubscriptionUrl(formData: FormData) {
   })
   revalidatePath("/admin")
 }
-export async function adjustWallet(formData: FormData) {
+export async function adjustWallet(
+  _previousState: WalletAdjustmentActionState,
+  formData: FormData
+): Promise<WalletAdjustmentActionState> {
   const session = await admin()
-  const userId = String(formData.get("userId"))
-  const deltaMinor = Math.round(Number(formData.get("deltaRub")) * 100)
-  const reason = String(formData.get("reason") ?? "").trim()
-  const adjustmentKey = String(formData.get("adjustmentKey") ?? "")
-  if (
-    !Number.isSafeInteger(deltaMinor) ||
-    deltaMinor === 0 ||
-    Math.abs(deltaMinor) > 100_000_000 ||
-    reason.length < 5 ||
-    reason.length > 500 ||
-    adjustmentKey.length < 8 ||
-    adjustmentKey.length > 200
-  )
-    throw new Error("Invalid wallet adjustment")
-  await db.$transaction(async (tx) => {
-    const idempotencyKey = `admin-wallet:${adjustmentKey}`
-    const existing = await tx.walletLedgerEntry.findUnique({
-      where: { idempotencyKey },
-    })
-    if (existing) {
-      if (
-        existing.userId !== userId ||
-        existing.deltaAvailableMinor !== deltaMinor
-      )
-        throw new Error("Wallet adjustment idempotency conflict")
-      return
-    }
-    const wallet = await tx.walletAccount.findUniqueOrThrow({
-      where: { userId },
-    })
-    const changed = await tx.walletAccount.updateMany({
-      where: {
-        id: wallet.id,
-        ...(deltaMinor < 0
-          ? { availableMinor: { gte: Math.abs(deltaMinor) } }
-          : {}),
-      },
-      data: {
-        availableMinor: { increment: deltaMinor },
-        version: { increment: 1 },
-      },
-    })
-    if (!changed.count) throw new Error("Wallet balance would become negative")
-    await tx.walletLedgerEntry.create({
-      data: {
-        walletAccountId: wallet.id,
-        userId,
-        type: "ADMIN_ADJUSTMENT",
-        deltaAvailableMinor: deltaMinor,
-        deltaReservedMinor: 0,
-        referenceType: "AdminAdjustment",
-        referenceId: adjustmentKey,
-        idempotencyKey,
-        description: reason,
-      },
-    })
-    await tx.auditLog.create({
-      data: {
-        actorType: "ADMIN",
-        actorId: session.userId,
-        action: "WALLET_ADJUSTED",
-        entityType: "WalletAccount",
-        entityId: wallet.id,
-        metadataJson: JSON.stringify({ userId, deltaMinor, reason }),
-        correlationId: correlationId(),
-      },
-    })
+  const parsed = walletAdjustmentSchema.safeParse({
+    userId: formData.get("userId"),
+    deltaRub: formData.get("deltaRub"),
+    comment: formData.get("comment"),
+    idempotencyKey: formData.get("idempotencyKey"),
   })
-  revalidatePath("/admin")
+  if (!parsed.success) {
+    const errors = parsed.error.flatten().fieldErrors
+    return {
+      status: "error",
+      message: "Проверьте сумму и обязательный комментарий.",
+      fieldErrors: {
+        deltaRub: errors.deltaRub?.length
+          ? "Укажите целую ненулевую сумму от −1 000 000 до 1 000 000 ₽."
+          : undefined,
+        comment: errors.comment?.length
+          ? "Комментарий должен содержать от 5 до 500 символов."
+          : undefined,
+      },
+    }
+  }
+
+  try {
+    const result = await adjustWalletBalanceByAdmin({
+      adminUserId: session.userId,
+      userId: parsed.data.userId,
+      deltaMinor: parsed.data.deltaRub * 100,
+      comment: parsed.data.comment,
+      idempotencyKey: parsed.data.idempotencyKey,
+      correlationId: correlationId(),
+    })
+    revalidatePath("/admin")
+    revalidatePath(`/admin/users/${parsed.data.userId}`)
+    return {
+      status: "success",
+      message: result.applied
+        ? "Баланс пользователя обновлён."
+        : "Эта корректировка уже была применена.",
+      availableMinor: result.availableMinor,
+    }
+  } catch (error) {
+    return {
+      status: "error",
+      message: toFriendlyError(error).message,
+    }
+  }
 }
 export async function reconcilePayment(formData: FormData) {
   const session = await admin()
@@ -469,6 +476,9 @@ export async function updatePricing(formData: FormData) {
     baseMonthlyPriceMinor: Math.round(Number(formData.get("base")) * 100),
     extraDeviceMonthlyPriceMinor: Math.round(
       Number(formData.get("extra")) * 100
+    ),
+    deviceLimitUpgradePriceMinor: Math.round(
+      Number(formData.get("upgrade")) * 100
     ),
     lteMonthlyPriceMinor: Math.round(Number(formData.get("lte")) * 100),
     referralRewardMinor: Math.round(Number(formData.get("reward")) * 100),

@@ -16,7 +16,6 @@ export function PulsarAssetCard({
   cardClassName,
   children,
   contentClassName,
-  preload,
   sizes = "(max-width: 768px) 100vw, 448px",
   src,
   unoptimized = true,
@@ -25,7 +24,6 @@ export function PulsarAssetCard({
   cardClassName?: string
   children: ReactNode
   contentClassName?: string
-  preload?: boolean
   sizes?: string
   src: string
   unoptimized?: boolean
@@ -45,7 +43,7 @@ export function PulsarAssetCard({
           className="object-contain"
           sizes={sizes}
           unoptimized={unoptimized}
-          preload={preload}
+          loading="eager"
         />
       </div>
       <Separator className="my-0" />

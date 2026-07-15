@@ -22,6 +22,7 @@ const testEnv = {
   ADMIN_TELEGRAM_ID: "885112484",
   PULSAR_TEST_MODE: "true",
   PULSAR_ALLOW_TEST_MODE_IN_PRODUCTION: "false",
+  PULSAR_HTTP_E2E: "true",
   PAYMENT_PROVIDER: "test",
   PAYMENT_WEBHOOK_SECRET: "http-e2e-webhook-secret",
   REMNAWAVE_PROVIDER: "mock",
@@ -38,7 +39,7 @@ function removeDatabase() {
 
 async function removeDatabaseWithRetry() {
   let lastError: unknown
-  for (let attempt = 0; attempt < 50; attempt += 1) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
     try {
       removeDatabase()
       return
@@ -103,20 +104,14 @@ async function assertStatus(response: Response, expected = 200) {
 
 type TelegramStart = {
   challengeId: string
-  stateCookie: string
+  startToken: string
+  url: string
 }
 
 type EmailMagicStart = {
   challengeId: string
   email: string
   magicLinkToken: string
-  stateCookie: string
-}
-
-function cookiePair(response: Response) {
-  const setCookie = response.headers.get("set-cookie")
-  assert.ok(setCookie)
-  return setCookie.split(";", 1)[0]
 }
 
 function decryptSensitive(value: string) {
@@ -148,12 +143,7 @@ function assertRedirectPath(response: Response, expected: string) {
 async function requestEmailMagic(email: string): Promise<EmailMagicStart> {
   const response = await postJson("/api/auth/email/request", { email })
   await assertStatus(response)
-  const setCookie = response.headers.get("set-cookie")
-  assert.ok(setCookie)
-  assert.match(setCookie, /pulsar_email_state_/)
-  assert.match(setCookie, /HttpOnly/i)
-  assert.match(setCookie, /SameSite=Lax/i)
-  assert.match(setCookie, /Max-Age=300/i)
+  assert.equal(response.headers.get("set-cookie"), null)
   const body = (await response.json()) as { challengeId: string }
   const sqlite = new BetterSqlite3(databaseFile, { readonly: true })
   try {
@@ -171,23 +161,16 @@ async function requestEmailMagic(email: string): Promise<EmailMagicStart> {
       challengeId: body.challengeId,
       email,
       magicLinkToken: decryptSensitive(payload.magicLinkTokenEncrypted),
-      stateCookie: cookiePair(response),
     }
   } finally {
     sqlite.close()
   }
 }
 
-async function requestEmailMagicCompletion(
-  challenge: EmailMagicStart,
-  cookie?: string
-) {
+async function requestEmailMagicCompletion(challenge: EmailMagicStart) {
   return fetch(
     `${origin}/auth/verify/link?challenge=${encodeURIComponent(challenge.challengeId)}&token=${encodeURIComponent(challenge.magicLinkToken)}`,
-    {
-      headers: cookie ? { Cookie: cookie } : undefined,
-      redirect: "manual",
-    }
+    { redirect: "manual" }
   )
 }
 
@@ -224,14 +207,19 @@ async function requestTelegramStart(): Promise<TelegramStart> {
     purpose: "USER_LOGIN",
   })
   await assertStatus(response)
-  const setCookie = response.headers.get("set-cookie")
-  assert.ok(setCookie)
-  assert.match(setCookie, /HttpOnly/i)
-  assert.match(setCookie, /SameSite=Lax/i)
-  assert.match(setCookie, /Max-Age=600/i)
-  const body = (await response.json()) as { challengeId: string }
+  assert.equal(response.headers.get("set-cookie"), null)
+  const body = (await response.json()) as { challengeId: string; url: string }
   assert.match(body.challengeId, /^[A-Za-z0-9_-]{8,128}$/)
-  return { challengeId: body.challengeId, stateCookie: cookiePair(response) }
+  const url = new URL(body.url)
+  const startToken = url.searchParams.get("token") ?? ""
+  assert.equal(url.origin, origin)
+  assert.equal(url.pathname, `/test/telegram/${body.challengeId}`)
+  assert.ok(startToken)
+  return {
+    challengeId: body.challengeId,
+    startToken,
+    url: body.url,
+  }
 }
 
 function seedTelegramCompletion(challengeId: string) {
@@ -280,15 +268,11 @@ function seedTelegramCompletion(challengeId: string) {
 
 async function requestTelegramCompletion(
   challengeId: string,
-  completionToken: string,
-  cookie?: string
+  completionToken: string
 ) {
   return fetch(
     `${origin}/api/auth/telegram/complete?token=${encodeURIComponent(completionToken)}&challenge=${encodeURIComponent(challengeId)}`,
-    {
-      headers: cookie ? { Cookie: cookie } : undefined,
-      redirect: "manual",
-    }
+    { redirect: "manual" }
   )
 }
 
@@ -316,14 +300,6 @@ function assertTelegramCompletionUnconsumed(
   }
 }
 
-function assertWrongDeviceRedirect(response: Response) {
-  assert.equal(response.status, 307)
-  assert.equal(
-    response.headers.get("location"),
-    `${origin}/auth/verify?error=device`
-  )
-}
-
 async function login(
   email: string,
   invite?: string,
@@ -335,7 +311,7 @@ async function login(
     purpose,
   })
   await assertStatus(requested)
-  assert.match(requested.headers.get("set-cookie") ?? "", /Max-Age=300/i)
+  assert.equal(requested.headers.get("set-cookie"), null)
   const challenge = (await requested.json()) as {
     challengeId: string
     devOtp: string
@@ -351,13 +327,19 @@ async function login(
   return setCookie.split(";", 1)[0]
 }
 
-async function createAndConfirmPayment(cookie: string, key: string) {
+async function createAndConfirmPayment(
+  cookie: string,
+  key: string,
+  expectedAmountMinor = 11_900
+) {
   const checkout = await postJson(
     "/api/payments/checkout",
     {
       durationMonths: 1,
       deviceLimit: 1,
       lteEnabled: false,
+      expectedAmountMinor,
+      pricingVersion: 4,
       idempotencyKey: key,
     },
     cookie
@@ -431,65 +413,42 @@ test(
       })
     }
 
+    let primaryError: Error | undefined
     try {
       await waitForServer(web, () => output)
 
       await context.test(
-        "Telegram completion rejects a missing browser-state cookie",
-        async () => {
-          const challenge = await requestTelegramStart()
-          const seeded = seedTelegramCompletion(challenge.challengeId)
-          const response = await requestTelegramCompletion(
-            challenge.challengeId,
-            seeded.completionToken
-          )
-          assertWrongDeviceRedirect(response)
-          assertTelegramCompletionUnconsumed(
-            challenge.challengeId,
-            seeded.userId
-          )
-        }
-      )
-
-      await context.test(
-        "Telegram completion rejects a browser-state cookie from another challenge",
+        "Telegram completion works across browsers and remains one-time",
         async () => {
           const challenge = await requestTelegramStart()
           const otherChallenge = await requestTelegramStart()
           const seeded = seedTelegramCompletion(challenge.challengeId)
-          const separator = challenge.stateCookie.indexOf("=")
-          const otherSeparator = otherChallenge.stateCookie.indexOf("=")
-          assert.notEqual(separator, -1)
-          assert.notEqual(otherSeparator, -1)
-          const mismatchedCookie = `${challenge.stateCookie.slice(0, separator)}=${otherChallenge.stateCookie.slice(otherSeparator + 1)}`
-          const response = await requestTelegramCompletion(
-            challenge.challengeId,
-            seeded.completionToken,
-            mismatchedCookie
+
+          const mismatched = await requestTelegramCompletion(
+            otherChallenge.challengeId,
+            seeded.completionToken
           )
-          assertWrongDeviceRedirect(response)
+          assertRedirectPath(mismatched, "/auth/verify?error=expired")
           assertTelegramCompletionUnconsumed(
             challenge.challengeId,
             seeded.userId
           )
-        }
-      )
 
-      await context.test(
-        "Telegram completion accepts its initiating browser and clears state",
-        async () => {
-          const challenge = await requestTelegramStart()
-          const seeded = seedTelegramCompletion(challenge.challengeId)
           const response = await requestTelegramCompletion(
             challenge.challengeId,
-            seeded.completionToken,
-            challenge.stateCookie
+            seeded.completionToken
           )
-          assert.equal(response.status, 307)
-          assert.equal(response.headers.get("location"), `${origin}/home`)
+          assertRedirectPath(response, "/home")
           const setCookie = response.headers.get("set-cookie") ?? ""
           assert.match(setCookie, /pulsar_user_session=/)
-          assert.match(setCookie, /pulsar_telegram_state_.*Max-Age=0/i)
+          assert.doesNotMatch(setCookie, /pulsar_telegram_state_/)
+
+          const replay = await requestTelegramCompletion(
+            challenge.challengeId,
+            seeded.completionToken
+          )
+          assertRedirectPath(replay, "/auth/verify?error=expired")
+
           const sqlite = new BetterSqlite3(databaseFile, { readonly: true })
           try {
             const projection = sqlite
@@ -512,58 +471,89 @@ test(
       )
 
       await context.test(
-        "email magic links enforce browser state, one-time use, and expiry",
+        "local Telegram simulator registers and signs in",
+        async () => {
+          const challenge = await requestTelegramStart()
+          const simulatorPage = await fetch(challenge.url)
+          await assertStatus(simulatorPage)
+          assert.match(await simulatorPage.text(), /TEST MODE/)
+
+          const crossOrigin = await fetch(
+            `${origin}/api/test/telegram/${encodeURIComponent(challenge.challengeId)}`,
+            {
+              method: "POST",
+              headers: {
+                Origin: "https://attacker.example",
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                token: challenge.startToken,
+                telegramId: "900000099",
+              }),
+            }
+          )
+          await assertStatus(crossOrigin, 403)
+
+          const simulated = await postJson(
+            `/api/test/telegram/${encodeURIComponent(challenge.challengeId)}`,
+            {
+              token: challenge.startToken,
+              telegramId: "900000099",
+              username: "http_simulator",
+            }
+          )
+          await assertStatus(simulated)
+          const body = (await simulated.json()) as { redirectTo: string }
+          assert.match(
+            body.redirectTo,
+            new RegExp(
+              `^/api/auth/telegram/complete\\?challenge=${challenge.challengeId}&token=`
+            )
+          )
+
+          const completed = await fetch(`${origin}${body.redirectTo}`, {
+            redirect: "manual",
+          })
+          assert.equal(completed.status, 307)
+          assert.equal(completed.headers.get("location"), `${origin}/home`)
+          assert.match(
+            completed.headers.get("set-cookie") ?? "",
+            /pulsar_user_session=/
+          )
+        }
+      )
+
+      await context.test(
+        "email magic links work across browsers, stay one-time, and expire",
         async () => {
           const initial = await requestEmailMagic(
             "http-magic-initial@pulsar.local"
           )
-          const missingCookie = await requestEmailMagicCompletion(initial)
-          assertRedirectPath(missingCookie, "/auth/verify?error=device")
+          const other = await requestEmailMagic("http-magic-other@pulsar.local")
+          const mismatched = await requestEmailMagicCompletion({
+            ...initial,
+            challengeId: other.challengeId,
+          })
+          assertRedirectPath(mismatched, "/auth/verify?error=expired")
           assertEmailMagicProjection(initial, {
             status: "PENDING",
             sessions: 0,
             tokenPresent: true,
           })
 
-          const target = await requestEmailMagic(
-            "http-magic-mismatch@pulsar.local"
-          )
-          const other = await requestEmailMagic("http-magic-other@pulsar.local")
-          const separator = target.stateCookie.indexOf("=")
-          const otherSeparator = other.stateCookie.indexOf("=")
-          assert.notEqual(separator, -1)
-          assert.notEqual(otherSeparator, -1)
-          const mismatchedCookie = `${target.stateCookie.slice(0, separator)}=${other.stateCookie.slice(otherSeparator + 1)}`
-          const mismatched = await requestEmailMagicCompletion(
-            target,
-            mismatchedCookie
-          )
-          assertRedirectPath(mismatched, "/auth/verify?error=device")
-          assertEmailMagicProjection(target, {
-            status: "PENDING",
-            sessions: 0,
-            tokenPresent: true,
-          })
-
-          const completed = await requestEmailMagicCompletion(
-            initial,
-            initial.stateCookie
-          )
+          const completed = await requestEmailMagicCompletion(initial)
           assertRedirectPath(completed, "/home")
           const completedCookies = completed.headers.get("set-cookie") ?? ""
           assert.match(completedCookies, /pulsar_user_session=/)
           assert.match(completedCookies, /Max-Age=15552000/i)
-          assert.match(completedCookies, /pulsar_email_state_.*Max-Age=0/i)
+          assert.doesNotMatch(completedCookies, /pulsar_email_state_/)
           assertEmailMagicProjection(initial, {
             status: "COMPLETED",
             sessions: 1,
             tokenPresent: true,
           })
 
-          const replay = await requestEmailMagicCompletion(
-            initial,
-            initial.stateCookie
-          )
+          const replay = await requestEmailMagicCompletion(initial)
           assertRedirectPath(replay, "/auth/verify?error=used")
           assertEmailMagicProjection(initial, {
             status: "COMPLETED",
@@ -584,10 +574,7 @@ test(
               expired.challengeId
             )
           expirationDb.close()
-          const expiredResponse = await requestEmailMagicCompletion(
-            expired,
-            expired.stateCookie
-          )
+          const expiredResponse = await requestEmailMagicCompletion(expired)
           assertRedirectPath(expiredResponse, "/auth/verify?error=expired")
           assertEmailMagicProjection(expired, {
             status: "EXPIRED",
@@ -631,6 +618,43 @@ test(
         }
       )
 
+      await context.test(
+        "logout allows an immediate email login request",
+        async () => {
+          const email = "http-immediate-relogin@pulsar.local"
+          const sessionCookie = await login(email)
+          const logout = await postJson("/api/auth/logout", {}, sessionCookie)
+          await assertStatus(logout)
+
+          const nextRequest = await postJson("/api/auth/email/request", {
+            email,
+          })
+          await assertStatus(nextRequest)
+          assert.equal(nextRequest.headers.get("set-cookie"), null)
+          const nextChallenge = (await nextRequest.json()) as {
+            challengeId: string
+            devOtp: string
+          }
+          assert.match(nextChallenge.devOtp, /^\d{6}$/)
+
+          const sqlite = new BetterSqlite3(databaseFile, { readonly: true })
+          try {
+            const statuses = sqlite
+              .prepare(
+                `SELECT lc."status" FROM "LoginChallenge" lc
+                 WHERE lc."emailNormalized" = ? ORDER BY lc."createdAt"`
+              )
+              .all(email) as Array<{ status: string }>
+            assert.deepEqual(
+              statuses.map((row) => row.status),
+              ["COMPLETED", "PENDING"]
+            )
+          } finally {
+            sqlite.close()
+          }
+        }
+      )
+
       await context.test("direct app responses deny framing", async () => {
         const response = await fetch(`${origin}/api/health/live`)
         await assertStatus(response)
@@ -644,24 +668,29 @@ test(
       const inviterCookie = await login("http-inviter@pulsar.local")
       await createAndConfirmPayment(inviterCookie, "http-inviter-payment")
 
-      const sqlite = new BetterSqlite3(databaseFile)
-      const invite = sqlite
-        .prepare(
-          `SELECT rp."inviteCode" AS code
-           FROM "ReferralProfile" rp
-           JOIN "AuthIdentity" ai ON ai."userId" = rp."userId"
-           WHERE ai."emailNormalized" = ? AND rp."isEnabled" = 1`
-        )
-        .get("http-inviter@pulsar.local") as { code: string }
+      const inviteDb = new BetterSqlite3(databaseFile, { readonly: true })
+      let invite: { code: string }
+      try {
+        invite = inviteDb
+          .prepare(
+            `SELECT rp."inviteCode" AS code
+             FROM "ReferralProfile" rp
+             JOIN "AuthIdentity" ai ON ai."userId" = rp."userId"
+             WHERE ai."emailNormalized" = ? AND rp."isEnabled" = 1`
+          )
+          .get("http-inviter@pulsar.local") as { code: string }
+      } finally {
+        inviteDb.close()
+      }
       assert.ok(invite.code)
 
       const friendCookie = await login("http-friend@pulsar.local", invite.code)
       const friendPaymentId = await createAndConfirmPayment(
         friendCookie,
-        "http-friend-payment"
+        "http-friend-payment",
+        11_900
       )
 
-      const deadline = Date.now() + 15_000
       let projection:
         | {
             syncStatus: string
@@ -671,28 +700,33 @@ test(
             subscriptionEvents: number
           }
         | undefined
-      while (Date.now() < deadline) {
-        projection = sqlite
-          .prepare(
-            `SELECT s."syncStatus", s."subscriptionUrl",
-                    iw."availableMinor" AS rewardMinor,
-                    tg."days" AS trialDays,
-                    (SELECT count(*) FROM "SubscriptionEvent" se
-                     WHERE se."paymentId" = ?) AS subscriptionEvents
-             FROM "AuthIdentity" friend
-             JOIN "Subscription" s ON s."userId" = friend."userId"
-             JOIN "TrialGrant" tg ON tg."userId" = friend."userId"
-             JOIN "ReferralInvite" ri ON ri."invitedUserId" = friend."userId"
-             JOIN "WalletAccount" iw ON iw."userId" = ri."inviterUserId"
-             WHERE friend."emailNormalized" = ?`
-          )
-          .get(friendPaymentId, "http-friend@pulsar.local") as
-          typeof projection | undefined
-        if (projection?.syncStatus === "SYNCED" && projection.subscriptionUrl)
-          break
-        await new Promise((resolveDelay) => setTimeout(resolveDelay, 250))
+      const projectionDb = new BetterSqlite3(databaseFile, { readonly: true })
+      try {
+        const deadline = Date.now() + 15_000
+        while (Date.now() < deadline) {
+          projection = projectionDb
+            .prepare(
+              `SELECT s."syncStatus", s."subscriptionUrl",
+                      iw."availableMinor" AS rewardMinor,
+                      tg."days" AS trialDays,
+                      (SELECT count(*) FROM "SubscriptionEvent" se
+                       WHERE se."paymentId" = ?) AS subscriptionEvents
+               FROM "AuthIdentity" friend
+               JOIN "Subscription" s ON s."userId" = friend."userId"
+               JOIN "TrialGrant" tg ON tg."userId" = friend."userId"
+               JOIN "ReferralInvite" ri ON ri."invitedUserId" = friend."userId"
+               JOIN "WalletAccount" iw ON iw."userId" = ri."inviterUserId"
+               WHERE friend."emailNormalized" = ?`
+            )
+            .get(friendPaymentId, "http-friend@pulsar.local") as
+            typeof projection | undefined
+          if (projection?.syncStatus === "SYNCED" && projection.subscriptionUrl)
+            break
+          await new Promise((resolveDelay) => setTimeout(resolveDelay, 250))
+        }
+      } finally {
+        projectionDb.close()
       }
-      sqlite.close()
 
       assert.equal(projection?.syncStatus, "SYNCED")
       assert.match(projection?.subscriptionUrl ?? "", /\/test\/sub\//)
@@ -707,9 +741,10 @@ test(
       assert.equal(recovered.status, "DEAD")
       assert.equal(recovered.attempts, 1)
     } catch (error) {
-      throw new Error(
+      primaryError = new Error(
         `${error instanceof Error ? error.stack : String(error)}\nChild process output:\n${output}`
       )
+      throw primaryError
     } finally {
       worker.kill("SIGTERM")
       web.kill("SIGTERM")
@@ -722,7 +757,16 @@ test(
             })
         )
       )
-      await removeDatabaseWithRetry()
+      try {
+        await removeDatabaseWithRetry()
+      } catch (cleanupError) {
+        if (!primaryError) throw cleanupError
+        primaryError.message += `\nCleanup error: ${
+          cleanupError instanceof Error
+            ? cleanupError.stack
+            : String(cleanupError)
+        }`
+      }
     }
   }
 )

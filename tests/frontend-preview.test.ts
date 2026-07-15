@@ -103,7 +103,7 @@ test("user routes keep accessible titles, headings, and navigation state", async
     path.join(root, "components/app/pulsar-primitives.tsx"),
     "utf8"
   )
-  assert.match(assetCard, /preload=/)
+  assert.match(assetCard, /loading=["']eager["']/)
   assert.doesNotMatch(assetCard, /priority=/)
 
   const supportThread = await readFile(

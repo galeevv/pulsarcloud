@@ -82,7 +82,6 @@ chmod 0640 "$target"
 required=(
   RESEND_API_KEY RESEND_FROM_EMAIL TELEGRAM_BOT_TOKEN TELEGRAM_BOT_USERNAME
   TELEGRAM_WEBHOOK_SECRET PLATEGA_MERCHANT_ID
-  REMNAWAVE_API_TOKEN
 )
 for name in "${required[@]}"; do
   [[ -n "$(get_env "$name")" ]] || {
@@ -94,6 +93,10 @@ done
 if [[ -z "$(get_env PLATEGA_SECRET)" && -z "$(get_env PLATEGA_API_KEY)" ]]; then
   echo "Missing required production variable: PLATEGA_SECRET or PLATEGA_API_KEY" >&2
   exit 1
+fi
+
+if [[ -z "$(get_env REMNAWAVE_API_TOKEN)" ]]; then
+  echo "Remnawave API token and squad UUIDs will be added by bootstrap-panel.sh"
 fi
 
 echo "Production environment prepared at $target"

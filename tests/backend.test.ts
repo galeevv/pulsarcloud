@@ -16,18 +16,29 @@ process.env.ADMIN_TELEGRAM_ID = "885112484"
 process.env.ADMIN_TELEGRAM_USERNAME = "admin"
 process.env.PULSAR_TEST_MODE = "true"
 process.env.PULSAR_ALLOW_TEST_MODE_IN_PRODUCTION = "false"
+process.env.PULSAR_ALLOW_LIVE_REMNAWAVE_IN_TEST_MODE = "false"
 process.env.PAYMENT_PROVIDER = "test"
 process.env.PAYMENT_WEBHOOK_SECRET = "test-webhook-secret"
 process.env.REMNAWAVE_PROVIDER = "mock"
+process.env.RESEND_API_KEY = "re_test_pulsar_auth"
+process.env.RESEND_FROM_EMAIL = "Pulsar <auth@example.test>"
+process.env.TELEGRAM_BOT_TOKEN = "123456789:test-pulsar-bot-token"
 process.env.TELEGRAM_BOT_USERNAME = "pulsar_test_bot"
 process.env.TELEGRAM_WEBHOOK_SECRET = "telegram-test-webhook-secret"
 
 type Modules = Awaited<ReturnType<typeof loadModules>>
 let modules: Modules
 
+function telegramStartToken(url: string) {
+  const parsed = new URL(url)
+  return (
+    parsed.searchParams.get("token") ?? parsed.searchParams.get("start") ?? ""
+  )
+}
+
 async function loadModules() {
   const [
-    { db, initializeDatabase },
+    { db, initializeDatabase, withBusyRetry },
     seeds,
     auth,
     billing,
@@ -38,7 +49,6 @@ async function loadModules() {
     subscriptions,
     telegramWebhook,
     security,
-    browserState,
   ] = await Promise.all([
     import("@/src/server/infrastructure/db/client"),
     import("@/prisma/seed"),
@@ -51,14 +61,28 @@ async function loadModules() {
     import("@/src/server/domain/subscriptions/service"),
     import("@/app/api/integrations/telegram/webhook/route"),
     import("@/src/server/infrastructure/security/crypto"),
-    import("@/src/server/domain/auth/browser-state"),
   ])
+  const createCheckout = async (
+    input: Omit<
+      Parameters<typeof billing.createCheckout>[0],
+      "expectedAmountMinor" | "pricingVersion"
+    >
+  ) =>
+    billing.createCheckout({
+      ...input,
+      ...(await billing.getCheckoutExpectation(input)),
+    })
   return {
     db,
     initializeDatabase,
+    withBusyRetry,
     seeds,
     auth,
-    billing,
+    billing: {
+      ...billing,
+      createCheckout,
+      rawCreateCheckout: billing.createCheckout,
+    },
     users,
     wallet,
     jobs,
@@ -66,7 +90,6 @@ async function loadModules() {
     subscriptions,
     telegramWebhook,
     security,
-    browserState,
   }
 }
 
@@ -96,6 +119,57 @@ before(async () => {
 
 after(async () => {
   await modules.db.$disconnect()
+})
+
+test("SQLite adapter busy timeouts are retried without retrying generic timeouts", async () => {
+  const sqliteBusyTimeout = Object.assign(
+    new Error("Operation has timed out"),
+    {
+      code: "P1008",
+      meta: {
+        driverAdapterError: Object.assign(new Error("Driver adapter error"), {
+          name: "DriverAdapterError",
+          cause: {
+            kind: "SocketTimeout",
+            originalCode: "SQLITE_BUSY",
+            originalMessage: "database is locked",
+          },
+        }),
+      },
+    }
+  )
+  let busyAttempts = 0
+  const result = await modules.withBusyRetry(async () => {
+    busyAttempts += 1
+    if (busyAttempts === 1) throw sqliteBusyTimeout
+    return "ok"
+  })
+  assert.equal(result, "ok")
+  assert.equal(busyAttempts, 2)
+
+  const genericTimeout = Object.assign(new Error("Operation has timed out"), {
+    code: "P1008",
+    meta: {
+      driverAdapterError: Object.assign(new Error("Driver adapter error"), {
+        name: "DriverAdapterError",
+        cause: {
+          kind: "SocketTimeout",
+          originalCode: "ETIMEDOUT",
+          originalMessage: "socket timed out",
+        },
+      }),
+    },
+  })
+  let genericAttempts = 0
+  await assert.rejects(
+    () =>
+      modules.withBusyRetry(async () => {
+        genericAttempts += 1
+        throw genericTimeout
+      }),
+    (error) => error === genericTimeout
+  )
+  assert.equal(genericAttempts, 1)
 })
 
 test("admin bootstrap aligns the administrator with the current environment", async () => {
@@ -156,7 +230,38 @@ test("email OTP creates one user and challenge is one-time", async () => {
   )
 })
 
-test("OTP attempts and rate-limit counters persist after rejection", async () => {
+test("logout permits an immediate new email challenge after completed login", async () => {
+  const email = "immediate-relogin@example.com"
+  const first = await modules.auth.requestEmailChallenge({ email })
+  const login = await modules.auth.verifyEmailChallenge({
+    challengeId: first.challengeId,
+    otp: first.devOtp!,
+  })
+  await modules.db.session.updateMany({
+    where: { userId: login.userId, revokedAt: null },
+    data: { revokedAt: new Date() },
+  })
+
+  const second = await modules.auth.requestEmailChallenge({ email })
+
+  assert.notEqual(second.challengeId, first.challengeId)
+  assert.equal(
+    await modules.db.loginChallenge.count({
+      where: { emailNormalized: email },
+    }),
+    2
+  )
+  assert.equal(
+    (
+      await modules.db.rateLimitBucket.findFirstOrThrow({
+        where: { key: `otp:email:5m:${email}` },
+      })
+    ).count,
+    2
+  )
+})
+
+test("OTP attempts persist while rejected email requests do not burn rate-limit quota", async () => {
   const requested = await modules.auth.requestEmailChallenge({
     email: "locked@example.com",
   })
@@ -182,13 +287,30 @@ test("OTP attempts and rate-limit counters persist after rejection", async () =>
     () => modules.auth.requestEmailChallenge({ email: "limited@example.com" }),
     /too many|много/i
   )
-  const bucket = await modules.db.rateLimitBucket.findFirstOrThrow({
-    where: { key: "otp:cooldown:limited@example.com" },
-  })
-  assert.equal(bucket.count, 2)
+  assert.equal(
+    await modules.db.rateLimitBucket.count({
+      where: { key: "otp:cooldown:limited@example.com" },
+    }),
+    0
+  )
+  assert.equal(
+    await modules.db.loginChallenge.count({
+      where: { emailNormalized: "limited@example.com" },
+    }),
+    1
+  )
+  assert.equal(
+    await modules.db.outboxJob.count({
+      where: {
+        aggregateType: "LoginChallenge",
+        aggregateId: limited.challengeId,
+      },
+    }),
+    1
+  )
 })
 
-test("email magic links are browser-bound, one-time, and expire after five minutes", async () => {
+test("email magic links work across browsers, stay one-time, and expire after five minutes", async () => {
   const requested = await modules.auth.requestEmailChallenge({
     email: "magic-link@example.com",
   })
@@ -218,18 +340,14 @@ test("email magic links are browser-bound, one-time, and expire after five minut
     ) < 2_000
   )
 
-  const wrongState = modules.browserState.createEmailBrowserState(
-    "different-challenge"
-  )
   await assert.rejects(
     () =>
       modules.auth.consumeEmailMagicLink({
-        challengeId: challenge.id,
+        challengeId: "different-challenge",
         rawMagicLinkToken: rawToken,
-        browserState: wrongState,
       }),
     (error: unknown) =>
-      (error as { code?: string }).code === "AUTH_BROWSER_MISMATCH"
+      (error as { code?: string }).code === "AUTH_CHALLENGE_EXPIRED"
   )
   assert.equal(
     (
@@ -250,13 +368,9 @@ test("email magic links are browser-bound, one-time, and expire after five minut
     0
   )
 
-  const browserState = modules.browserState.createEmailBrowserState(
-    challenge.id
-  )
   const completed = await modules.auth.consumeEmailMagicLink({
     challengeId: challenge.id,
     rawMagicLinkToken: rawToken,
-    browserState,
   })
   assert.equal(completed.kind, "USER")
   assert.equal(
@@ -268,7 +382,6 @@ test("email magic links are browser-bound, one-time, and expire after five minut
       modules.auth.consumeEmailMagicLink({
         challengeId: challenge.id,
         rawMagicLinkToken: rawToken,
-        browserState,
       }),
     (error: unknown) =>
       (error as { code?: string }).code === "AUTH_CHALLENGE_USED"
@@ -298,9 +411,6 @@ test("email magic links are browser-bound, one-time, and expire after five minut
       modules.auth.consumeEmailMagicLink({
         challengeId: expiredRequest.challengeId,
         rawMagicLinkToken: expiredRawToken,
-        browserState: modules.browserState.createEmailBrowserState(
-          expiredRequest.challengeId
-        ),
       }),
     (error: unknown) =>
       (error as { code?: string }).code === "AUTH_CHALLENGE_EXPIRED"
@@ -321,10 +431,7 @@ test("email challenge limits persist at five per email and ten per IP in five mi
     const requested = await modules.auth.requestEmailChallenge({ email })
     await modules.db.loginChallenge.update({
       where: { id: requested.challengeId },
-      data: { createdAt: new Date(Date.now() - 61_000) },
-    })
-    await modules.db.rateLimitBucket.deleteMany({
-      where: { key: `otp:cooldown:${email}` },
+      data: { status: "COMPLETED" },
     })
   }
   await assert.rejects(
@@ -335,7 +442,7 @@ test("email challenge limits persist at five per email and ten per IP in five mi
   const emailBucket = await modules.db.rateLimitBucket.findFirstOrThrow({
     where: { key: `otp:email:5m:${email}` },
   })
-  assert.equal(emailBucket.count, 6)
+  assert.equal(emailBucket.count, 5)
 
   const ipHash = "shared-five-minute-ip-hash"
   for (let index = 0; index < 10; index += 1)
@@ -355,7 +462,7 @@ test("email challenge limits persist at five per email and ten per IP in five mi
   const ipBucket = await modules.db.rateLimitBucket.findFirstOrThrow({
     where: { key: `otp:ip:5m:${ipHash}` },
   })
-  assert.equal(ipBucket.count, 11)
+  assert.equal(ipBucket.count, 10)
 })
 
 test("admin email challenges use the same five-per-five-minute cap", async () => {
@@ -369,10 +476,7 @@ test("admin email challenges use the same five-per-five-minute cap", async () =>
     challengeIds.push(requested.challengeId)
     await modules.db.loginChallenge.update({
       where: { id: requested.challengeId },
-      data: { createdAt: new Date(Date.now() - 61_000) },
-    })
-    await modules.db.rateLimitBucket.deleteMany({
-      where: { key: `otp:cooldown:${email}` },
+      data: { status: "COMPLETED" },
     })
   }
   await assert.rejects(
@@ -390,7 +494,7 @@ test("admin email challenges use the same five-per-five-minute cap", async () =>
         where: { key: `otp:email:5m:${email}` },
       })
     ).count,
-    6
+    5
   )
   assert.equal(
     await modules.db.rateLimitBucket.count({
@@ -406,9 +510,7 @@ test("admin email challenges use the same five-per-five-minute cap", async () =>
     where: { id: { in: challengeIds } },
   })
   await modules.db.rateLimitBucket.deleteMany({
-    where: {
-      key: { in: [`otp:cooldown:${email}`, `otp:email:5m:${email}`] },
-    },
+    where: { key: `otp:email:5m:${email}` },
   })
 })
 
@@ -439,13 +541,6 @@ test("admin sessions use a seven-day idle and 180-day absolute lifetime", async 
       session.idleExpiresAt.getTime() - session.createdAt.getTime() - 7 * day
     ) < 2_000
   )
-  await modules.db.loginChallenge.update({
-    where: { id: requested.challengeId },
-    data: { createdAt: new Date(Date.now() - 61_000) },
-  })
-  await modules.db.rateLimitBucket.deleteMany({
-    where: { key: `otp:cooldown:${process.env.ADMIN_EMAIL!}` },
-  })
 })
 
 test("referral happy path is idempotent through provisioning", async () => {
@@ -468,6 +563,14 @@ test("referral happy path is idempotent through provisioning", async () => {
     where: { userId: login.userId },
   })
   assert.equal(trial?.days, 3)
+  assert.equal(
+    (
+      await modules.db.subscription.findUniqueOrThrow({
+        where: { userId: login.userId },
+      })
+    ).lteEnabled,
+    true
+  )
   const payment = await modules.billing.createCheckout({
     userId: login.userId,
     durationMonths: 1,
@@ -539,6 +642,16 @@ test("referral happy path is idempotent through provisioning", async () => {
     }),
     1
   )
+  const replayed = await modules.billing.rawCreateCheckout({
+    userId: login.userId,
+    durationMonths: 1,
+    deviceLimit: 1,
+    lteEnabled: false,
+    expectedAmountMinor: 11_900,
+    pricingVersion: 4,
+    idempotencyKey: "happy-payment",
+  })
+  assert.equal(replayed.id, payment.id)
   const secondUser = await modules.db.$transaction((tx) =>
     modules.users.createUserGraph(tx, { isTest: true })
   )
@@ -553,6 +666,295 @@ test("referral happy path is idempotent through provisioning", async () => {
       }),
     /different order|conflict/i
   )
+})
+
+test("internal balance atomically pays for and activates a subscription", async () => {
+  const user = await modules.db.$transaction((tx) =>
+    modules.users.createUserGraph(tx, { isTest: true })
+  )
+  await modules.db.$transaction(async (tx) => {
+    const wallet = await tx.walletAccount.update({
+      where: { userId: user.id },
+      data: {
+        availableMinor: { increment: 30_000 },
+        version: { increment: 1 },
+      },
+    })
+    await tx.walletLedgerEntry.create({
+      data: {
+        walletAccountId: wallet.id,
+        userId: user.id,
+        type: "ADMIN_ADJUSTMENT",
+        deltaAvailableMinor: 30_000,
+        deltaReservedMinor: 0,
+        referenceType: "Test",
+        referenceId: "wallet-subscription-funding",
+        idempotencyKey: "wallet-subscription-funding",
+      },
+    })
+  })
+
+  const payment = await modules.billing.createCheckout({
+    userId: user.id,
+    durationMonths: 1,
+    deviceLimit: 3,
+    lteEnabled: true,
+    paymentMethod: "WALLET",
+    idempotencyKey: "wallet-subscription-payment",
+  })
+  assert.equal(payment.amountMinor, 19_900)
+  assert.equal(payment.provider, "wallet")
+  assert.equal(payment.status, "CONFIRMED")
+  assert.equal(
+    (
+      await modules.db.walletAccount.findUniqueOrThrow({
+        where: { userId: user.id },
+      })
+    ).availableMinor,
+    10_100
+  )
+  const ledger = await modules.db.walletLedgerEntry.findUniqueOrThrow({
+    where: { idempotencyKey: `wallet-subscription:${payment.id}` },
+  })
+  assert.equal(ledger.deltaAvailableMinor, -19_900)
+  const subscription = await modules.db.subscription.findUniqueOrThrow({
+    where: { userId: user.id },
+  })
+  assert.equal(subscription.deviceLimit, 3)
+  assert.equal(subscription.lteEnabled, true)
+
+  const recoveryUser = await modules.db.$transaction((tx) =>
+    modules.users.createUserGraph(tx, { isTest: true })
+  )
+  await modules.db.walletAccount.update({
+    where: { userId: recoveryUser.id },
+    data: { availableMinor: 30_000 },
+  })
+  const interrupted = await modules.db.payment.create({
+    data: {
+      userId: recoveryUser.id,
+      provider: "wallet",
+      externalPaymentId: "wallet_interrupted_checkout",
+      idempotencyKey: "wallet-interrupted-original",
+      status: "PENDING",
+      amountMinor: 19_900,
+      currency: "RUB",
+      durationDays: 30,
+      deviceLimit: 3,
+      lteEnabled: true,
+      basePriceMinor: 11_900,
+      extraDevicesPriceMinor: 3_000,
+      ltePriceMinor: 5_000,
+      discountMinor: 0,
+      priceSnapshotJson: "{}",
+      pricingVersion: 4,
+      checkoutUrl: "http://localhost:3000/subscription?payment=success",
+      providerCreatedAt: new Date(),
+      expiresAt: new Date(Date.now() + 60_000),
+      isTest: true,
+    },
+  })
+  await modules.db.pricingSettings.update({
+    where: { key: "default" },
+    data: { version: 4 },
+  })
+  const recovered = await modules.billing.rawCreateCheckout({
+    userId: recoveryUser.id,
+    durationMonths: 1,
+    deviceLimit: 3,
+    lteEnabled: true,
+    paymentMethod: "WALLET",
+    expectedAmountMinor: 19_900,
+    pricingVersion: 4,
+    idempotencyKey: "wallet-interrupted-retry",
+  })
+  await modules.db.pricingSettings.update({
+    where: { key: "default" },
+    data: { version: 4 },
+  })
+  assert.equal(recovered.id, interrupted.id)
+  assert.equal(recovered.status, "CONFIRMED")
+  assert.equal(
+    await modules.db.walletLedgerEntry.count({
+      where: { idempotencyKey: `wallet-subscription:${interrupted.id}` },
+    }),
+    1
+  )
+
+  const withoutFunds = await modules.db.$transaction((tx) =>
+    modules.users.createUserGraph(tx, { isTest: true })
+  )
+  await assert.rejects(
+    () =>
+      modules.billing.createCheckout({
+        userId: withoutFunds.id,
+        durationMonths: 1,
+        deviceLimit: 3,
+        lteEnabled: true,
+        paymentMethod: "WALLET",
+        idempotencyKey: "wallet-subscription-insufficient",
+      }),
+    (error: unknown) =>
+      (error as { code?: string }).code === "WALLET_INSUFFICIENT_BALANCE"
+  )
+  assert.equal(
+    await modules.db.walletLedgerEntry.count({
+      where: { userId: withoutFunds.id, type: "SUBSCRIPTION_PAYMENT" },
+    }),
+    0
+  )
+})
+
+test("stale checkout amount or pricing version cannot create a payment", async () => {
+  const user = await modules.db.$transaction((tx) =>
+    modules.users.createUserGraph(tx, { isTest: true })
+  )
+  const selection = {
+    userId: user.id,
+    durationMonths: 1,
+    deviceLimit: 3,
+    lteEnabled: true,
+  }
+  const expected = await modules.billing.getCheckoutExpectation(selection)
+
+  for (const stale of [
+    { ...expected, expectedAmountMinor: expected.expectedAmountMinor - 1 },
+    { ...expected, pricingVersion: expected.pricingVersion - 1 },
+  ])
+    await assert.rejects(
+      () =>
+        modules.billing.rawCreateCheckout({
+          ...selection,
+          ...stale,
+          idempotencyKey: `stale-price-${stale.expectedAmountMinor}-${stale.pricingVersion}`,
+        }),
+      (error: unknown) =>
+        (error as { code?: string }).code === "PAYMENT_PRICE_CHANGED"
+    )
+
+  assert.equal(
+    await modules.db.payment.count({ where: { userId: user.id } }),
+    0
+  )
+})
+
+test("admin wallet adjustments are atomic, idempotent, audited and never overdraw", async () => {
+  const admin = await modules.db.user.findFirstOrThrow({
+    where: { role: "ADMIN" },
+  })
+  const user = await modules.db.$transaction((tx) =>
+    modules.users.createUserGraph(tx, { isTest: true })
+  )
+  const firstInput = {
+    adminUserId: admin.id,
+    userId: user.id,
+    deltaMinor: 50_000,
+    comment: "Компенсация пользователю по обращению",
+    idempotencyKey: "11111111-1111-4111-8111-111111111111",
+    correlationId: "wallet-adjustment-test-one",
+  }
+
+  const credited = await modules.wallet.adjustWalletBalanceByAdmin(firstInput)
+  assert.equal(credited.applied, true)
+  assert.equal(credited.availableMinor, 50_000)
+
+  const replayed = await modules.wallet.adjustWalletBalanceByAdmin(firstInput)
+  assert.equal(replayed.applied, false)
+  assert.equal(replayed.ledgerEntryId, credited.ledgerEntryId)
+  assert.equal(replayed.availableMinor, 50_000)
+  assert.equal(
+    await modules.db.walletLedgerEntry.count({
+      where: { userId: user.id, type: "ADMIN_ADJUSTMENT" },
+    }),
+    1
+  )
+  assert.equal(
+    await modules.db.auditLog.count({
+      where: {
+        action: "WALLET_ADMIN_ADJUSTED",
+        entityId: (
+          await modules.db.walletAccount.findUniqueOrThrow({
+            where: { userId: user.id },
+          })
+        ).id,
+      },
+    }),
+    1
+  )
+
+  await assert.rejects(
+    () =>
+      modules.wallet.adjustWalletBalanceByAdmin({
+        ...firstInput,
+        deltaMinor: 40_000,
+      }),
+    (error: unknown) => (error as { code?: string }).code === "CONFLICT"
+  )
+
+  const debited = await modules.wallet.adjustWalletBalanceByAdmin({
+    ...firstInput,
+    deltaMinor: -20_000,
+    comment: "Корректировка ошибочного начисления",
+    idempotencyKey: "22222222-2222-4222-8222-222222222222",
+    correlationId: "wallet-adjustment-test-two",
+  })
+  assert.equal(debited.applied, true)
+  assert.equal(debited.availableMinor, 30_000)
+
+  await assert.rejects(
+    () =>
+      modules.wallet.adjustWalletBalanceByAdmin({
+        ...firstInput,
+        deltaMinor: -40_000,
+        comment: "Попытка списать больше доступного",
+        idempotencyKey: "33333333-3333-4333-8333-333333333333",
+        correlationId: "wallet-adjustment-test-three",
+      }),
+    (error: unknown) =>
+      (error as { code?: string }).code === "WALLET_INSUFFICIENT_BALANCE"
+  )
+  assert.equal(
+    (
+      await modules.db.walletAccount.findUniqueOrThrow({
+        where: { userId: user.id },
+      })
+    ).availableMinor,
+    30_000
+  )
+  assert.equal(
+    await modules.db.walletLedgerEntry.count({
+      where: { userId: user.id, type: "ADMIN_ADJUSTMENT" },
+    }),
+    2
+  )
+
+  await assert.rejects(
+    () =>
+      modules.wallet.adjustWalletBalanceByAdmin({
+        ...firstInput,
+        deltaMinor: 150,
+        idempotencyKey: "44444444-4444-4444-8444-444444444444",
+      }),
+    (error: unknown) => (error as { code?: string }).code === "INVALID_INPUT"
+  )
+  const nonAdmin = await modules.db.$transaction((tx) =>
+    modules.users.createUserGraph(tx, { isTest: true })
+  )
+  await assert.rejects(
+    () =>
+      modules.wallet.adjustWalletBalanceByAdmin({
+        ...firstInput,
+        adminUserId: nonAdmin.id,
+        idempotencyKey: "55555555-5555-4555-8555-555555555555",
+      }),
+    (error: unknown) => (error as { code?: string }).code === "ADMIN_FORBIDDEN"
+  )
+
+  const projection = await modules.db.walletLedgerEntry.aggregate({
+    where: { userId: user.id },
+    _sum: { deltaAvailableMinor: true },
+  })
+  assert.equal(projection._sum.deltaAvailableMinor, 30_000)
 })
 
 test("wallet payout reserve, reject and paid preserve ledger projection", async () => {
@@ -626,9 +1028,96 @@ test("wallet payout reserve, reject and paid preserve ledger projection", async 
   assert.equal(account.reservedMinor, 0)
 })
 
+test("test-mode Telegram challenge uses the local simulator without a bot username", async () => {
+  const config = await import("@/src/server/config")
+  const previousUsername = process.env.TELEGRAM_BOT_USERNAME
+  delete process.env.TELEGRAM_BOT_USERNAME
+  config.resetConfigForTests()
+
+  try {
+    const challenge = await modules.auth.requestTelegramChallenge({})
+    const url = new URL(challenge.url)
+    const token = telegramStartToken(challenge.url)
+    assert.equal(url.origin, process.env.APP_URL)
+    assert.equal(url.pathname, `/test/telegram/${challenge.challengeId}`)
+    assert.ok(token)
+    assert.equal(url.searchParams.get("start"), null)
+    const preview = await modules.auth.getPendingTelegramTestChallenge({
+      challengeId: challenge.challengeId,
+      rawStartToken: token,
+    })
+    assert.equal(preview.purpose, "USER_LOGIN")
+  } finally {
+    if (previousUsername === undefined) delete process.env.TELEGRAM_BOT_USERNAME
+    else process.env.TELEGRAM_BOT_USERNAME = previousUsername
+    config.resetConfigForTests()
+  }
+})
+
+test("test-mode Telegram simulator binds the token to its challenge", async () => {
+  const first = await modules.auth.requestTelegramChallenge({})
+  const second = await modules.auth.requestTelegramChallenge({})
+  const token = telegramStartToken(first.url)
+
+  await assert.rejects(
+    () =>
+      modules.auth.completeTelegramStart({
+        challengeId: second.challengeId,
+        rawStartToken: token,
+        telegramId: "900000010",
+        username: "mismatched_challenge",
+        chatId: "900000010",
+      }),
+    (error: unknown) =>
+      (error as { code?: string }).code === "AUTH_CHALLENGE_EXPIRED"
+  )
+  assert.equal(
+    (
+      await modules.db.loginChallenge.findUniqueOrThrow({
+        where: { id: first.challengeId },
+      })
+    ).status,
+    "PENDING"
+  )
+})
+
+test("test-mode Telegram simulator links Telegram to the requesting user", async () => {
+  const emailChallenge = await modules.auth.requestEmailChallenge({
+    email: "telegram-link@example.com",
+  })
+  const user = await modules.auth.verifyEmailChallenge({
+    challengeId: emailChallenge.challengeId,
+    otp: emailChallenge.devOtp!,
+  })
+  const challenge = await modules.auth.requestTelegramChallenge({
+    purpose: "LINK_TELEGRAM",
+    requestedByUserId: user.userId,
+  })
+  const linked = await modules.auth.completeTelegramStart({
+    challengeId: challenge.challengeId,
+    rawStartToken: telegramStartToken(challenge.url),
+    telegramId: "900000011",
+    username: "linked_tester",
+    chatId: "900000011",
+  })
+
+  assert.equal(linked.linked, true)
+  assert.equal(linked.userId, user.userId)
+  assert.equal(linked.completionToken, null)
+  assert.equal(
+    (
+      await modules.db.authIdentity.findUniqueOrThrow({
+        where: { telegramId: "900000011" },
+      })
+    ).userId,
+    user.userId
+  )
+})
+
 test("Telegram webhook persists only a start-token hash", async () => {
   const challenge = await modules.auth.requestTelegramChallenge({})
-  const token = new URL(challenge.url).searchParams.get("start")!
+  const token = telegramStartToken(challenge.url)
+  assert.ok(token)
   const challengeRecord = await modules.db.loginChallenge.findUniqueOrThrow({
     where: { id: challenge.challengeId },
   })
@@ -679,9 +1168,10 @@ test("Telegram webhook persists only a start-token hash", async () => {
   )
 })
 
-test("Telegram login creates identity and completion session once", async () => {
+test("Telegram completion works across browsers, stays one-time, and expires", async () => {
   const challenge = await modules.auth.requestTelegramChallenge({})
-  const token = new URL(challenge.url).searchParams.get("start")!
+  const token = telegramStartToken(challenge.url)
+  assert.ok(token)
   const completed = await modules.auth.completeTelegramStart({
     rawStartToken: token,
     telegramId: "900000001",
@@ -689,33 +1179,18 @@ test("Telegram login creates identity and completion session once", async () => 
     chatId: "900000001",
   })
   assert.ok(completed.completionToken)
-  const { createTelegramBrowserState } =
-    await import("@/src/server/domain/auth/browser-state")
-  const browserState = createTelegramBrowserState(challenge.challengeId)
   await assert.rejects(
     () =>
       modules.auth.consumeTelegramCompletion({
         rawCompletionToken: completed.completionToken!,
         challengeId: "wrong-challenge",
-        browserState,
       }),
     (error: unknown) =>
-      (error as { code?: string }).code === "AUTH_BROWSER_MISMATCH"
-  )
-  await assert.rejects(
-    () =>
-      modules.auth.consumeTelegramCompletion({
-        rawCompletionToken: completed.completionToken!,
-        challengeId: challenge.challengeId,
-        browserState: "",
-      }),
-    (error: unknown) =>
-      (error as { code?: string }).code === "AUTH_BROWSER_MISMATCH"
+      (error as { code?: string }).code === "AUTH_CHALLENGE_EXPIRED"
   )
   const session = await modules.auth.consumeTelegramCompletion({
     rawCompletionToken: completed.completionToken!,
     challengeId: challenge.challengeId,
-    browserState,
   })
   assert.equal(session.kind, "USER")
   assert.equal(
@@ -739,8 +1214,28 @@ test("Telegram login creates identity and completion session once", async () => 
     modules.auth.consumeTelegramCompletion({
       rawCompletionToken: completed.completionToken!,
       challengeId: challenge.challengeId,
-      browserState,
     })
+  )
+
+  const expiringChallenge = await modules.auth.requestTelegramChallenge({})
+  const expiringStart = await modules.auth.completeTelegramStart({
+    rawStartToken: telegramStartToken(expiringChallenge.url),
+    telegramId: "900000012",
+    username: "expired_completion",
+    chatId: "900000012",
+  })
+  await modules.db.loginChallenge.update({
+    where: { id: expiringChallenge.challengeId },
+    data: { consumedAt: new Date(Date.now() - 5 * 60_000 - 1) },
+  })
+  await assert.rejects(
+    () =>
+      modules.auth.consumeTelegramCompletion({
+        rawCompletionToken: expiringStart.completionToken!,
+        challengeId: expiringChallenge.challengeId,
+      }),
+    (error: unknown) =>
+      (error as { code?: string }).code === "AUTH_CHALLENGE_EXPIRED"
   )
 })
 
@@ -780,6 +1275,86 @@ test("production test-mode guard refuses unsafe startup", async () => {
   process.env.DATABASE_URL = `file:${databaseFile.replaceAll("\\", "/")}`
   config.resetConfigForTests()
   config.getConfig()
+})
+
+test("production test mode uses real auth adapters and hides the development OTP", async () => {
+  const configModule = await import("@/src/server/config")
+  const [{ getEmailSender }, { getTelegramGateway }] = await Promise.all([
+    import("@/src/server/infrastructure/email"),
+    import("@/src/server/infrastructure/telegram/gateway"),
+  ])
+  try {
+    process.env.APP_ENV = "production"
+    process.env.PULSAR_TEST_MODE = "true"
+    process.env.PULSAR_ALLOW_TEST_MODE_IN_PRODUCTION = "true"
+    process.env.DATABASE_URL = `file:${databaseFile.replaceAll("\\", "/")}`
+
+    const resendKey = process.env.RESEND_API_KEY
+    delete process.env.RESEND_API_KEY
+    configModule.resetConfigForTests()
+    assert.throws(() => configModule.getConfig(), /RESEND_API_KEY is required/i)
+    process.env.RESEND_API_KEY = resendKey
+
+    const telegramToken = process.env.TELEGRAM_BOT_TOKEN
+    delete process.env.TELEGRAM_BOT_TOKEN
+    configModule.resetConfigForTests()
+    assert.throws(
+      () => configModule.getConfig(),
+      /TELEGRAM_BOT_TOKEN.*required/i
+    )
+    process.env.TELEGRAM_BOT_TOKEN = telegramToken
+
+    configModule.resetConfigForTests()
+    const config = configModule.getConfig()
+    assert.equal(config.testMode, true)
+    assert.equal(config.localAuthAdaptersEnabled, false)
+    assert.equal(getEmailSender().constructor.name, "ResendEmailSender")
+    assert.equal(getTelegramGateway().constructor.name, "BotApiGateway")
+
+    const email = await modules.auth.requestEmailChallenge({
+      email: "production-test-auth@example.com",
+    })
+    assert.equal(email.devOtp, undefined)
+
+    const telegram = await modules.auth.requestTelegramChallenge({})
+    const telegramUrl = new URL(telegram.url)
+    assert.equal(telegramUrl.origin, "https://t.me")
+    assert.equal(telegramUrl.pathname, `/${process.env.TELEGRAM_BOT_USERNAME}`)
+    assert.ok(telegramUrl.searchParams.get("start"))
+    await assert.rejects(
+      () =>
+        modules.auth.getPendingTelegramTestChallenge({
+          challengeId: telegram.challengeId,
+          rawStartToken: telegramStartToken(telegram.url),
+        }),
+      (error: unknown) => (error as { code?: string }).code === "NOT_FOUND"
+    )
+
+    const completed = await modules.auth.completeTelegramStart({
+      challengeId: telegram.challengeId,
+      rawStartToken: telegramStartToken(telegram.url),
+      telegramId: "900000013",
+      username: "production_test_auth",
+      chatId: "900000013",
+    })
+    assert.equal(
+      (
+        await modules.db.user.findUniqueOrThrow({
+          where: { id: completed.userId },
+        })
+      ).isTest,
+      true
+    )
+  } finally {
+    process.env.APP_ENV = "test"
+    process.env.PULSAR_TEST_MODE = "true"
+    process.env.PULSAR_ALLOW_TEST_MODE_IN_PRODUCTION = "false"
+    process.env.DATABASE_URL = `file:${databaseFile.replaceAll("\\", "/")}`
+    process.env.RESEND_API_KEY = "re_test_pulsar_auth"
+    process.env.TELEGRAM_BOT_TOKEN = "123456789:test-pulsar-bot-token"
+    configModule.resetConfigForTests()
+    configModule.getConfig()
+  }
 })
 
 test("NODE_ENV production requires APP_ENV production at runtime", async () => {
@@ -837,7 +1412,7 @@ test("production test override rejects a database symlink", async (context) => {
   }
 })
 
-test("renewal stages changed plan parameters until the next period", async () => {
+test("renewal applies plan parameters immediately and keeps the subscription URL", async () => {
   const user = await modules.db.$transaction((tx) =>
     modules.users.createUserGraph(tx, { isTest: true })
   )
@@ -860,6 +1435,18 @@ test("renewal stages changed plan parameters until the next period", async () =>
   const firstPeriod = await modules.db.subscription.findUniqueOrThrow({
     where: { userId: user.id },
   })
+  const initialJob = await modules.db.outboxJob.findFirstOrThrow({
+    where: {
+      type: "PROVISION_SUBSCRIPTION",
+      aggregateId: firstPeriod.id,
+    },
+    orderBy: { createdAt: "desc" },
+  })
+  await modules.jobs.handleJob({ ...initialJob, attempts: 1 })
+  const provisioned = await modules.db.subscription.findUniqueOrThrow({
+    where: { id: firstPeriod.id },
+  })
+  assert.ok(provisioned.subscriptionUrl)
   const renewal = await modules.billing.createCheckout({
     userId: user.id,
     durationMonths: 1,
@@ -876,49 +1463,139 @@ test("renewal stages changed plan parameters until the next period", async () =>
     currency: renewal.currency,
     payload: { id: renewal.externalPaymentId, status: "CONFIRMED" },
   })
-  const staged = await modules.db.subscription.findUniqueOrThrow({
+  const renewed = await modules.db.subscription.findUniqueOrThrow({
     where: { userId: user.id },
   })
-  assert.equal(staged.deviceLimit, 1)
-  assert.equal(staged.lteEnabled, false)
-  assert.equal(staged.nextDeviceLimit, 2)
-  assert.equal(staged.nextLteEnabled, true)
+  assert.equal(renewed.deviceLimit, 2)
+  assert.equal(renewed.lteEnabled, true)
+  assert.equal(renewed.nextDeviceLimit, null)
+  assert.equal(renewed.nextLteEnabled, null)
+  assert.equal(renewed.nextParametersAt, null)
   assert.equal(
-    staged.nextParametersAt?.getTime(),
-    firstPeriod.expiresAt.getTime()
-  )
-  assert.equal(
-    staged.expiresAt.getTime(),
+    renewed.expiresAt.getTime(),
     firstPeriod.expiresAt.getTime() + 30 * 86_400_000
   )
+  const renewalJob = await modules.db.outboxJob.findFirstOrThrow({
+    where: {
+      type: "PROVISION_SUBSCRIPTION",
+      aggregateId: renewed.id,
+      status: "PENDING",
+    },
+    orderBy: { createdAt: "desc" },
+  })
+  await modules.jobs.handleJob({ ...renewalJob, attempts: 1 })
+  const synced = await modules.db.subscription.findUniqueOrThrow({
+    where: { id: renewed.id },
+  })
+  assert.equal(synced.subscriptionUrl, provisioned.subscriptionUrl)
+})
 
-  await modules.db.subscription.update({
-    where: { id: staged.id },
-    data: { nextParametersAt: new Date(Date.now() - 1_000) },
+test("device limit upgrade charges per added slot without extending the subscription", async () => {
+  const user = await modules.db.$transaction((tx) =>
+    modules.users.createUserGraph(tx, { isTest: true })
+  )
+  const initial = await modules.billing.createCheckout({
+    userId: user.id,
+    durationMonths: 1,
+    deviceLimit: 1,
+    lteEnabled: false,
+    idempotencyKey: "device-upgrade-initial",
   })
-  await modules.jobs.handleJob({
-    id: "test-reconcile-subscriptions",
-    type: "RECONCILE_SUBSCRIPTIONS",
-    payloadJson: "{}",
-    attempts: 1,
-    aggregateId: "subscriptions",
+  await modules.billing.applyPaymentEvent({
+    eventId: "device-upgrade-initial-confirmed",
+    eventType: "CONFIRMED",
+    externalPaymentId: initial.externalPaymentId!,
+    status: "CONFIRMED",
+    amountMinor: initial.amountMinor,
+    currency: initial.currency,
+    payload: { id: initial.externalPaymentId, status: "CONFIRMED" },
   })
-  const applied = await modules.db.subscription.findUniqueOrThrow({
-    where: { id: staged.id },
+  const initialSubscription = await modules.db.subscription.findUniqueOrThrow({
+    where: { userId: user.id },
   })
-  assert.equal(applied.deviceLimit, 2)
-  assert.equal(applied.lteEnabled, true)
-  assert.equal(applied.nextDeviceLimit, null)
-  assert.equal(applied.nextLteEnabled, null)
-  assert.equal(applied.nextParametersAt, null)
+  const initialProvisionJob = await modules.db.outboxJob.findFirstOrThrow({
+    where: {
+      type: "PROVISION_SUBSCRIPTION",
+      aggregateId: initialSubscription.id,
+    },
+    orderBy: { createdAt: "desc" },
+  })
+  await modules.jobs.handleJob({ ...initialProvisionJob, attempts: 1 })
+  const provisioned = await modules.db.subscription.findUniqueOrThrow({
+    where: { id: initialSubscription.id },
+  })
+
+  const selection = { userId: user.id, targetDeviceLimit: 3 }
+  const expectation =
+    await modules.billing.getDeviceLimitUpgradeExpectation(selection)
+  assert.equal(expectation.expectedAmountMinor, 10_000)
+  const payment = await modules.billing.createDeviceLimitUpgradeCheckout({
+    ...selection,
+    ...expectation,
+    idempotencyKey: "device-upgrade-payment",
+  })
+  assert.equal(payment.purpose, "DEVICE_LIMIT_UPGRADE")
+  assert.equal(payment.durationDays, 0)
+  assert.equal(payment.amountMinor, 10_000)
+
+  await modules.billing.applyPaymentEvent({
+    eventId: "device-upgrade-confirmed",
+    eventType: "CONFIRMED",
+    externalPaymentId: payment.externalPaymentId!,
+    status: "CONFIRMED",
+    amountMinor: payment.amountMinor,
+    currency: payment.currency,
+    payload: { id: payment.externalPaymentId, status: "CONFIRMED" },
+  })
+
+  const upgraded = await modules.db.subscription.findUniqueOrThrow({
+    where: { id: provisioned.id },
+  })
+  assert.equal(upgraded.deviceLimit, 3)
+  assert.equal(upgraded.expiresAt.getTime(), provisioned.expiresAt.getTime())
+  assert.equal(upgraded.syncStatus, "PENDING")
   assert.equal(
     await modules.db.subscriptionEvent.count({
+      where: { paymentId: payment.id, type: "DEVICE_LIMIT_UPGRADED" },
+    }),
+    1
+  )
+  assert.equal(
+    await modules.db.outboxJob.count({
       where: {
-        subscriptionId: staged.id,
-        type: "SCHEDULED_PARAMETERS_APPLIED",
+        type: "PROVISION_SUBSCRIPTION",
+        aggregateId: provisioned.id,
+        status: "PENDING",
+        dedupeKey: `subscription:${provisioned.id}:sync:${upgraded.syncVersion}`,
       },
     }),
     1
+  )
+
+  const upgradeJob = await modules.db.outboxJob.findFirstOrThrow({
+    where: {
+      type: "PROVISION_SUBSCRIPTION",
+      aggregateId: provisioned.id,
+      status: "PENDING",
+      dedupeKey: `subscription:${provisioned.id}:sync:${upgraded.syncVersion}`,
+    },
+  })
+  await modules.jobs.handleJob({ ...upgradeJob, attempts: 1 })
+  await assert.rejects(
+    () =>
+      modules.billing.getDeviceLimitUpgradeExpectation({
+        userId: user.id,
+        targetDeviceLimit: 3,
+      }),
+    (error: unknown) => (error as { code?: string }).code === "INVALID_INPUT"
+  )
+  await assert.rejects(
+    () =>
+      modules.billing.getDeviceLimitUpgradeExpectation({
+        userId: user.id,
+        targetDeviceLimit: 6,
+      }),
+    (error: unknown) => (error as { code?: string }).code === "INVALID_INPUT"
   )
 })
 
@@ -998,7 +1675,7 @@ test("test adapters cannot mutate real-user billing, referrals or payouts", asyn
   )
 })
 
-test("test mode requires only test and mock adapters", async () => {
+test("test mode requires test payments and explicit isolated live Remnawave opt-in", async () => {
   const config = await import("@/src/server/config")
   config.resetConfigForTests()
   process.env.APP_ENV = "test"
@@ -1009,8 +1686,50 @@ test("test mode requires only test and mock adapters", async () => {
   config.resetConfigForTests()
   process.env.PAYMENT_PROVIDER = "test"
   process.env.REMNAWAVE_PROVIDER = "http"
-  assert.throws(() => config.getConfig(), /requires REMNAWAVE_PROVIDER=mock/i)
+  process.env.PULSAR_ALLOW_LIVE_REMNAWAVE_IN_TEST_MODE = "false"
+  assert.throws(
+    () => config.getConfig(),
+    /requires REMNAWAVE_PROVIDER=mock unless PULSAR_ALLOW_LIVE_REMNAWAVE_IN_TEST_MODE=true/i
+  )
+
+  process.env.PULSAR_ALLOW_LIVE_REMNAWAVE_IN_TEST_MODE = "true"
+  process.env.REMNAWAVE_BASE_URL = "https://panel.example.test"
+  process.env.REMNAWAVE_API_TOKEN = "dedicated-local-test-token"
+  process.env.REMNAWAVE_STANDARD_SQUAD_UUID =
+    "11111111-1111-4111-8111-111111111111"
+  process.env.REMNAWAVE_LTE_SQUAD_UUID = "22222222-2222-4222-8222-222222222222"
+  process.env.REMNAWAVE_USER_NAMESPACE = "pulsar"
+  config.resetConfigForTests()
+  assert.throws(
+    () => config.getConfig(),
+    /requires a dedicated REMNAWAVE_USER_NAMESPACE/i
+  )
+
+  process.env.REMNAWAVE_USER_NAMESPACE = "pulsar_local_test"
+  config.resetConfigForTests()
+  const liveTestConfig = config.getConfig()
+  assert.equal(liveTestConfig.remnawave.provider, "http")
+  assert.equal(liveTestConfig.remnawave.userNamespace, "pulsar_local_test")
+  assert.equal(liveTestConfig.remnawave.allowLiveInTestMode, true)
+
+  process.env.APP_ENV = "production"
+  process.env.PULSAR_ALLOW_TEST_MODE_IN_PRODUCTION = "true"
+  process.env.DATABASE_URL = "file:./prisma/pulsar-vps-test.db"
+  config.resetConfigForTests()
+  const productionLiveTestConfig = config.getConfig()
+  assert.equal(productionLiveTestConfig.testMode, true)
+  assert.equal(productionLiveTestConfig.remnawave.provider, "http")
+  assert.equal(
+    productionLiveTestConfig.remnawave.userNamespace,
+    "pulsar_local_test"
+  )
+
+  process.env.APP_ENV = "test"
+  process.env.PULSAR_ALLOW_TEST_MODE_IN_PRODUCTION = "false"
+  process.env.PULSAR_ALLOW_LIVE_REMNAWAVE_IN_TEST_MODE = "false"
   process.env.REMNAWAVE_PROVIDER = "mock"
+  process.env.REMNAWAVE_USER_NAMESPACE = "pulsar"
+  process.env.DATABASE_URL = `file:${databaseFile.replaceAll("\\", "/")}`
   config.resetConfigForTests()
   config.getConfig()
 })
@@ -1147,7 +1866,7 @@ test("readiness requires every exact migration to be complete", async () => {
   )
 })
 
-test("verified conflicting renewal is confirmed and queued for review", async () => {
+test("verified renewal applies the paid parameters immediately", async () => {
   const user = await modules.db.$transaction((tx) =>
     modules.users.createUserGraph(tx, { isTest: true })
   )
@@ -1225,7 +1944,7 @@ test("verified conflicting renewal is confirmed and queued for review", async ()
     await modules.db.subscriptionEvent.count({
       where: {
         paymentId: conflicting.id,
-        type: "PAYMENT_FULFILLMENT_REVIEW_REQUIRED",
+        type: "PAYMENT_EXTENDED",
       },
     }),
     1
@@ -1233,7 +1952,10 @@ test("verified conflicting renewal is confirmed and queued for review", async ()
   const subscription = await modules.db.subscription.findUniqueOrThrow({
     where: { userId: user.id },
   })
-  assert.equal(subscription.nextDeviceLimit, 2)
+  assert.equal(subscription.deviceLimit, 3)
+  assert.equal(subscription.lteEnabled, true)
+  assert.equal(subscription.nextDeviceLimit, null)
+  assert.equal(subscription.nextLteEnabled, null)
 })
 
 test("test login cannot consume a real user's identity", async () => {

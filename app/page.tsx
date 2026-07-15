@@ -5,7 +5,7 @@ import { AuthCard } from "@/components/auth/auth-card"
 import { getSession } from "@/src/server/transport/web/session"
 
 export const metadata: Metadata = {
-  title: "Вход",
+  title: { absolute: "PULSAR" },
 }
 
 export default async function Page({

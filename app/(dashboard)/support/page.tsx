@@ -5,17 +5,16 @@ import { SupportComposer } from "@/components/app/support-composer"
 import { toSupportThreadMessage } from "@/components/app/support-message"
 import { SupportThread } from "@/components/app/support-thread"
 import { Card, CardContent } from "@/components/ui/card"
-import { getUserView } from "@/src/server/queries/user-dashboard"
+import { getSupportMessagesView } from "@/src/server/queries/user-dashboard"
 import { requireWebSession } from "@/src/server/transport/web/session"
 
 export const metadata: Metadata = {
-  title: "Поддержка",
+  title: { absolute: "PULSAR" },
 }
 
 export default async function SupportPage() {
   const session = await requireWebSession("USER")
-  const { user } = await getUserView(session.userId)
-  const messages = [...(user.supportConversation?.messages ?? [])]
+  const messages = [...(await getSupportMessagesView(session.userId))]
     .reverse()
     .map(toSupportThreadMessage)
 

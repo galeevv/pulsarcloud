@@ -31,8 +31,10 @@ export type PreviewDurationOption = {
 
 export type PreviewPricing = {
   baseMonthlyPriceRub: number
+  pricingVersion: number
   durationOptions: PreviewDurationOption[]
   extraDeviceMonthlyPriceRub: number
+  deviceLimitUpgradePriceRub: number
   lteMonthlyPriceRub: number
   maxDeviceLimit: number
   minDeviceLimit: number

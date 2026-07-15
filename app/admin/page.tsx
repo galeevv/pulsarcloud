@@ -1,5 +1,6 @@
 import { AuthCard } from "@/components/auth/auth-card"
 import { PayoutDetailsReveal } from "@/components/admin/payout-details-reveal"
+import { LogoutAction } from "@/components/app/logout-action"
 import Link from "next/link"
 import type { PaymentStatus, Prisma } from "@/src/generated/prisma/client"
 import { Badge } from "@/components/ui/badge"
@@ -24,8 +25,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { db } from "@/src/server/infrastructure/db/client"
 import { getSession } from "@/src/server/transport/web/session"
 import { getConfig } from "@/src/server/config"
+import { formatPreviewRub } from "@/src/frontend-preview/format"
 import {
-  adjustWallet,
   abandonUncertainCheckout,
   cancelBroadcast,
   createBroadcastDraft,
@@ -319,9 +320,12 @@ export default async function AdminPage({
           <h1 className="text-2xl font-semibold">Pulsar Admin</h1>
           <p className="text-sm text-muted-foreground">Операционная панель</p>
         </div>
-        {getConfig().testMode ? (
-          <Badge variant="secondary">TEST MODE</Badge>
-        ) : null}
+        <div className="flex items-center gap-2">
+          {getConfig().testMode ? (
+            <Badge variant="secondary">TEST MODE</Badge>
+          ) : null}
+          <LogoutAction compact />
+        </div>
       </div>
       <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {[
@@ -334,7 +338,7 @@ export default async function AdminPage({
           ],
           [
             "Выручка 24ч / 7д / месяц",
-            `${(dayRevenue._sum.amountMinor ?? 0) / 100} / ${(weekRevenue._sum.amountMinor ?? 0) / 100} / ${(monthRevenue._sum.amountMinor ?? 0) / 100} ₽`,
+            `${formatPreviewRub((dayRevenue._sum.amountMinor ?? 0) / 100)} / ${formatPreviewRub((weekRevenue._sum.amountMinor ?? 0) / 100)} / ${formatPreviewRub((monthRevenue._sum.amountMinor ?? 0) / 100)}`,
           ],
           [
             "Worker heartbeat",
@@ -532,36 +536,6 @@ export default async function AdminPage({
                             </form>
                           </details>
                         ) : null}
-                        <form
-                          action={adjustWallet}
-                          className="flex flex-wrap gap-1"
-                        >
-                          <input type="hidden" name="userId" value={user.id} />
-                          <input
-                            type="hidden"
-                            name="adjustmentKey"
-                            value={`${user.id}:wallet-v${user.wallet?.version ?? 0}`}
-                          />
-                          <Input
-                            name="deltaRub"
-                            type="number"
-                            step="0.01"
-                            placeholder="± ₽"
-                            className="w-20"
-                            required
-                          />
-                          <Input
-                            name="reason"
-                            minLength={5}
-                            maxLength={500}
-                            placeholder="Причина"
-                            className="w-32"
-                            required
-                          />
-                          <Button size="sm" variant="outline">
-                            Wallet
-                          </Button>
-                        </form>
                         <Button
                           size="sm"
                           variant="ghost"
@@ -646,7 +620,9 @@ export default async function AdminPage({
                         {payment.isTest ? " · TEST" : ""}
                       </Badge>
                     </TableCell>
-                    <TableCell>{payment.amountMinor / 100} ₽</TableCell>
+                    <TableCell>
+                      {formatPreviewRub(payment.amountMinor / 100)}
+                    </TableCell>
                     <TableCell>{payment.webhookLogs.length}</TableCell>
                     <TableCell>
                       <details className="max-w-md text-xs">
@@ -731,7 +707,9 @@ export default async function AdminPage({
                 {payouts.map((payout) => (
                   <TableRow key={payout.id}>
                     <TableCell>{identity(payout.user.identities)}</TableCell>
-                    <TableCell>{payout.amountMinor / 100} ₽</TableCell>
+                    <TableCell>
+                      {formatPreviewRub(payout.amountMinor / 100)}
+                    </TableCell>
                     <TableCell>
                       <PayoutDetailsReveal
                         payoutId={payout.id}
@@ -1028,6 +1006,11 @@ export default async function AdminPage({
                   "extra",
                   "Устройство, ₽",
                   pricing.extraDeviceMonthlyPriceMinor / 100,
+                ],
+                [
+                  "upgrade",
+                  "Расширение лимита, ₽",
+                  pricing.deviceLimitUpgradePriceMinor / 100,
                 ],
                 ["lte", "LTE, ₽", pricing.lteMonthlyPriceMinor / 100],
                 ["reward", "Reward, ₽", pricing.referralRewardMinor / 100],

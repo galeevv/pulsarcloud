@@ -1,10 +1,100 @@
-import { notFound, redirect } from "next/navigation"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { db } from "@/src/server/infrastructure/db/client"
-import { getConfig } from "@/src/server/config"
-import { requireWebSession } from "@/src/server/transport/web/session"
-import { applyPaymentEvent } from "@/src/server/domain/billing/service"
-import { randomToken } from "@/src/server/infrastructure/security/crypto"
+import { redirect } from "next/navigation"
+import { notFound } from "next/navigation"
 
-export default async function TestCheckout({ params }: { params: Promise<{ externalId: string }> }) { if (!getConfig().testMode) notFound(); const session = await requireWebSession("USER"); const { externalId } = await params; const payment = await db.payment.findUnique({ where: { externalPaymentId: externalId } }); if (!payment || payment.userId !== session.userId || !payment.isTest) notFound(); async function action(formData: FormData) { "use server"; const current = await requireWebSession("USER"); const item = await db.payment.findUniqueOrThrow({ where: { id: payment!.id } }); if (item.userId !== current.userId || !item.isTest || !item.externalPaymentId) notFound(); const rawStatus = String(formData.get("status")); const status = (["CONFIRMED", "FAILED", "CANCELED"].includes(rawStatus) ? rawStatus : "FAILED") as "CONFIRMED" | "FAILED" | "CANCELED"; await applyPaymentEvent({ eventId: `test:${item.id}:${status}:${randomToken(8)}`, eventType: status, externalPaymentId: item.externalPaymentId, status, amountMinor: item.amountMinor, currency: item.currency, payload: { id: item.externalPaymentId, status, amountMinor: item.amountMinor, currency: item.currency } }); redirect("/subscription") } return <main className="flex min-h-svh items-center justify-center p-4"><Card className="w-full max-w-md"><CardHeader><CardTitle>Test checkout</CardTitle><CardDescription>Платёж {payment.amountMinor / 100} ₽ не обращается к внешнему провайдеру.</CardDescription></CardHeader><CardContent className="flex gap-2"><form action={action}><input type="hidden" name="status" value="CONFIRMED"/><Button>Подтвердить</Button></form><form action={action}><input type="hidden" name="status" value="FAILED"/><Button variant="outline">Ошибка</Button></form><form action={action}><input type="hidden" name="status" value="CANCELED"/><Button variant="outline">Отмена</Button></form></CardContent></Card></main> }
+import { Button } from "@/components/ui/button"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import { getConfig } from "@/src/server/config"
+import { applyPaymentEvent } from "@/src/server/domain/billing/service"
+import { db } from "@/src/server/infrastructure/db/client"
+import { randomToken } from "@/src/server/infrastructure/security/crypto"
+import { requireWebSession } from "@/src/server/transport/web/session"
+import { formatPreviewRub } from "@/src/frontend-preview/format"
+
+export default async function TestCheckout({
+  params,
+}: {
+  params: Promise<{ externalId: string }>
+}) {
+  if (!getConfig().testMode) notFound()
+  const session = await requireWebSession("USER")
+  const { externalId } = await params
+  const payment = await db.payment.findUnique({
+    where: { externalPaymentId: externalId },
+  })
+  if (!payment || payment.userId !== session.userId || !payment.isTest)
+    notFound()
+
+  async function action(formData: FormData) {
+    "use server"
+
+    const current = await requireWebSession("USER")
+    const item = await db.payment.findUniqueOrThrow({
+      where: { id: payment!.id },
+    })
+    if (
+      item.userId !== current.userId ||
+      !item.isTest ||
+      !item.externalPaymentId
+    )
+      notFound()
+    const rawStatus = String(formData.get("status"))
+    const status = (
+      ["CONFIRMED", "FAILED", "CANCELED"].includes(rawStatus)
+        ? rawStatus
+        : "FAILED"
+    ) as "CONFIRMED" | "FAILED" | "CANCELED"
+    await applyPaymentEvent({
+      eventId: `test:${item.id}:${status}:${randomToken(8)}`,
+      eventType: status,
+      externalPaymentId: item.externalPaymentId,
+      status,
+      amountMinor: item.amountMinor,
+      currency: item.currency,
+      payload: {
+        id: item.externalPaymentId,
+        status,
+        amountMinor: item.amountMinor,
+        currency: item.currency,
+      },
+    })
+    redirect("/subscription")
+  }
+
+  return (
+    <main className="flex min-h-svh items-center justify-center p-4">
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <CardTitle>Test checkout</CardTitle>
+          <CardDescription>
+            Платёж {formatPreviewRub(payment.amountMinor / 100)} не обращается к
+            внешнему провайдеру.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-2">
+          <form action={action}>
+            <input type="hidden" name="status" value="CONFIRMED" />
+            <Button type="submit">Подтвердить</Button>
+          </form>
+          <form action={action}>
+            <input type="hidden" name="status" value="FAILED" />
+            <Button type="submit" variant="outline">
+              Ошибка
+            </Button>
+          </form>
+          <form action={action}>
+            <input type="hidden" name="status" value="CANCELED" />
+            <Button type="submit" variant="outline">
+              Отмена
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+    </main>
+  )
+}

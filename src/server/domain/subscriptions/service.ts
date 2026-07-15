@@ -1,8 +1,44 @@
 import { BusinessError } from "@/src/server/application/errors"
 import { db, withBusyRetry } from "@/src/server/infrastructure/db/client"
+import {
+  getProvisioningProvider,
+  SubscriberDeviceNotFoundError,
+} from "@/src/server/infrastructure/remnawave/provider"
 
 const REGENERATION_COOLDOWN_MS = 60_000
 const ACTIVE_JOB_STATUSES = ["PENDING", "PROCESSING", "FAILED"] as const
+
+async function getOwnedRemoteSubscription(userId: string) {
+  const subscription = await db.subscription.findUnique({
+    where: { userId },
+    select: { remnawaveUserId: true },
+  })
+  if (!subscription?.remnawaveUserId)
+    throw new BusinessError("SUBSCRIPTION_NOT_FOUND", 404)
+  return subscription.remnawaveUserId
+}
+
+export async function getSubscriptionDevices(userId: string) {
+  const remoteUserId = await getOwnedRemoteSubscription(userId)
+  return getProvisioningProvider().getSubscriberDevices(remoteUserId)
+}
+
+export async function deleteSubscriptionDevice(input: {
+  userId: string
+  hwid: string
+}) {
+  const remoteUserId = await getOwnedRemoteSubscription(input.userId)
+  try {
+    return await getProvisioningProvider().deleteSubscriberDevice({
+      remoteUserId,
+      hwid: input.hwid,
+    })
+  } catch (error) {
+    if (error instanceof SubscriberDeviceNotFoundError)
+      throw new BusinessError("NOT_FOUND", 404)
+    throw error
+  }
+}
 
 export async function requestSubscriptionUrlRegeneration(
   userId: string,

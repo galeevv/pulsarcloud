@@ -13,7 +13,9 @@ The worker accepts auth commands only from a private chat whose `chat.id` equals
 
 The same values can be reviewed in BotFather under **My Bots → Edit Bot → Edit Commands / Edit Description / Edit About**, but the deployment script is the source of truth so later releases do not drift from the backend.
 
-The start route also sets a signed, per-challenge HttpOnly/SameSite=Lax browser-state cookie for ten minutes (Secure and host-only in production). The completion URL includes `challenge=<id>` and can be redeemed only in the initiating browser with the matching state. A missing or mismatched state redirects to `error=device` and leaves the one-use completion token unconsumed.
+The completion URL includes `challenge=<id>` and a one-use token, and it may be redeemed in any browser within five minutes. The challenge ID must match the token's stored challenge; a mismatch does not consume the valid token. Browser-state cookies are not used for login completion.
+
+The local Telegram simulator is available only in non-production test mode. The explicit production test-mode override uses the configured real bot and `https://t.me/<bot>?start=<token>` while keeping created users isolated with `isTest=true`.
 
 Payment confirmation says setup is in progress. Separate outbox messages report provisioning completion or its terminal failure, subscription expiry, and payout state. Transactional notifications and opt-in broadcasts use the same gateway. Both individual sends and broadcast batches mark `canReceiveMessages=false`/`botBlockedAt` when Telegram reports that the bot was blocked.
 

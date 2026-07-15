@@ -1,4 +1,5 @@
 import { BottomNav } from "@/components/app/bottom-nav"
+import { Badge } from "@/components/ui/badge"
 import { redirect } from "next/navigation"
 import { getSession } from "@/src/server/transport/web/session"
 import { getConfig } from "@/src/server/config"
@@ -12,9 +13,13 @@ export default async function DashboardLayout({
   return (
     <div className="pulsar-page">
       {getConfig().testMode ? (
-        <div className="sticky top-0 z-50 border-b border-amber-400/40 bg-amber-300 px-3 py-1 text-center text-xs font-semibold text-amber-950">
-          TEST MODE · платежи и VPN-подключения ненастоящие
-        </div>
+        <Badge
+          variant="outline"
+          className="pointer-events-none fixed right-3 bottom-20 z-30 bg-background/85 backdrop-blur"
+          title="Тестовые платежи; подписки создаются без списания денег."
+        >
+          TEST MODE
+        </Badge>
       ) : null}
       {children}
       <BottomNav />

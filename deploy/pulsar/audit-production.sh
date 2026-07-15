@@ -115,6 +115,10 @@ release_target="$(readlink -f "$CURRENT_RELEASE")"
 [[ "$release_target" == /opt/pulsar/releases/* ]] || fail "current release target"
 [[ -f "$release_target/.next/standalone/server.js" ]] || fail "standalone web artifact"
 [[ -f "$release_target/src/jobs/worker.ts" ]] || fail "worker artifact"
+if find "$release_target" -xdev \( -type f -o -type d \) -perm -0002 \
+  -print -quit | grep -q .; then
+  fail "release contains world-writable files or directories"
+fi
 pass "immutable release layout"
 
 nginx -t >/dev/null 2>&1 || fail "Nginx configuration"
@@ -168,7 +172,9 @@ while IFS= read -r rule; do
     *80/tcp* | *443/tcp* | *"Nginx Full"*) web_rule=1 ;;
     *) fail "UFW inbound allowlist" ;;
   esac
-done < <(grep -E '[[:space:]]ALLOW[[:space:]]' <<<"$ufw_status" || true)
+done < <(
+  grep -E '[[:space:]](ALLOW|LIMIT)[[:space:]]' <<<"$ufw_status" || true
+)
 ((ssh_rule == 1 && web_rule == 1)) || fail "UFW required service rules"
 unset ufw_status
 pass "UFW inbound policy"
@@ -180,9 +186,17 @@ openssl x509 -checkend 604800 -noout -in "$certificate" >/dev/null 2>&1 ||
 
 curl -fsS --max-time 10 http://127.0.0.1:3000/api/health/live >/dev/null ||
   fail "local Pulsar liveness"
-curl -fsS --max-time 10 http://127.0.0.1:3020/api/auth/status >/dev/null ||
+curl -fsS --max-time 10 \
+  -H 'Host: panel.pulsar-cloud.space' \
+  -H 'X-Real-IP: 127.0.0.1' \
+  -H 'X-Forwarded-For: 127.0.0.1' \
+  -H 'X-Forwarded-Proto: https' \
+  -H 'Connection: close' \
+  http://127.0.0.1:3020/api/auth/status >/dev/null ||
   fail "local Remnawave Panel"
-curl -fsS --max-time 10 http://127.0.0.1:3010/ >/dev/null ||
+curl -fsS --max-time 10 \
+  --resolve sub.pulsar-cloud.space:443:127.0.0.1 \
+  https://sub.pulsar-cloud.space/ >/dev/null ||
   fail "local subscription page"
 
 ready_json="$(curl -fsS --max-time 15 https://pulsar-cloud.space/api/health/ready)" ||

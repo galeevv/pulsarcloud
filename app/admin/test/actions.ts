@@ -12,6 +12,7 @@ import {
 import {
   applyPaymentEvent,
   createCheckout,
+  getCheckoutExpectation,
 } from "@/src/server/domain/billing/service"
 import { createUserGraph } from "@/src/server/domain/users/service"
 import { createPayout } from "@/src/server/domain/wallet/service"
@@ -104,11 +105,15 @@ export async function createAndConfirmTestPayment(formData: FormData) {
   const session = await guard()
   const userId = String(formData.get("userId"))
   await getTestUser(userId)
-  const payment = await createCheckout({
+  const selection = {
     userId,
     durationMonths: 1,
     deviceLimit: 1,
     lteEnabled: false,
+  }
+  const payment = await createCheckout({
+    ...selection,
+    ...(await getCheckoutExpectation(selection)),
     idempotencyKey: `admin-test-payment:${randomUUID()}`,
   })
   await applyPaymentEvent({
@@ -166,8 +171,13 @@ export async function resendDuplicatePaymentEvent(formData: FormData) {
 
 export async function simulateTelegramLogin() {
   const session = await guard()
+  if (!getConfig().localAuthAdaptersEnabled)
+    throw new BusinessError("NOT_FOUND", 404)
   const challenge = await requestTelegramChallenge({})
-  const startToken = new URL(challenge.url).searchParams.get("start")
+  const challengeUrl = new URL(challenge.url)
+  const startToken =
+    challengeUrl.searchParams.get("token") ??
+    challengeUrl.searchParams.get("start")
   if (!startToken) throw new Error("Telegram start token missing")
   const telegramId = String(
     8_000_000_000 + Math.floor(Math.random() * 900_000_000)
@@ -205,11 +215,15 @@ export async function simulateReferralFirstPayment(formData: FormData) {
     challengeId: requested.challengeId,
     otp: requested.devOtp,
   })
-  const payment = await createCheckout({
+  const selection = {
     userId: login.userId,
     durationMonths: 1,
     deviceLimit: 1,
     lteEnabled: false,
+  }
+  const payment = await createCheckout({
+    ...selection,
+    ...(await getCheckoutExpectation(selection)),
     idempotencyKey: `admin-test-referral:${randomUUID()}`,
   })
   await applyPaymentEvent({

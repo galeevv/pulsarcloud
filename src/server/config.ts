@@ -41,6 +41,12 @@ const envSchema = z.object({
   PLATEGA_SECRET: z.string().optional(),
   PLATEGA_API_KEY: z.string().optional(),
   REMNAWAVE_PROVIDER: z.enum(["mock", "http"]).default("mock"),
+  REMNAWAVE_USER_NAMESPACE: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(/^[a-z][a-z0-9_-]{0,31}$/)
+    .default("pulsar"),
   REMNAWAVE_BASE_URL: optionalUrl,
   REMNAWAVE_API_TOKEN: z.string().optional(),
   REMNAWAVE_STANDARD_SQUAD_UUID: z.uuid().optional(),
@@ -53,6 +59,7 @@ const envSchema = z.object({
     .default(8_000),
   PULSAR_TEST_MODE: booleanString,
   PULSAR_ALLOW_TEST_MODE_IN_PRODUCTION: booleanString,
+  PULSAR_ALLOW_LIVE_REMNAWAVE_IN_TEST_MODE: booleanString,
   WORKER_POLL_INTERVAL_MS: z.coerce
     .number()
     .int()
@@ -160,21 +167,45 @@ function buildConfig() {
   if (env.PULSAR_TEST_MODE && env.PAYMENT_PROVIDER !== "test") {
     throw new Error("PULSAR_TEST_MODE=true requires PAYMENT_PROVIDER=test")
   }
-  if (env.PULSAR_TEST_MODE && env.REMNAWAVE_PROVIDER !== "mock") {
-    throw new Error("PULSAR_TEST_MODE=true requires REMNAWAVE_PROVIDER=mock")
-  }
-  if (!env.PULSAR_TEST_MODE && !env.RESEND_API_KEY) {
-    throw new Error("RESEND_API_KEY is required outside test mode")
+  if (env.PULSAR_ALLOW_LIVE_REMNAWAVE_IN_TEST_MODE && !env.PULSAR_TEST_MODE) {
+    throw new Error(
+      "PULSAR_ALLOW_LIVE_REMNAWAVE_IN_TEST_MODE requires PULSAR_TEST_MODE=true"
+    )
   }
   if (
-    !env.PULSAR_TEST_MODE &&
+    env.PULSAR_TEST_MODE &&
+    env.REMNAWAVE_PROVIDER === "http" &&
+    !env.PULSAR_ALLOW_LIVE_REMNAWAVE_IN_TEST_MODE
+  ) {
+    throw new Error(
+      "PULSAR_TEST_MODE=true requires REMNAWAVE_PROVIDER=mock unless PULSAR_ALLOW_LIVE_REMNAWAVE_IN_TEST_MODE=true"
+    )
+  }
+  if (
+    env.PULSAR_TEST_MODE &&
+    env.REMNAWAVE_PROVIDER === "http" &&
+    env.REMNAWAVE_USER_NAMESPACE === "pulsar"
+  ) {
+    throw new Error(
+      "Live Remnawave in test mode requires a dedicated REMNAWAVE_USER_NAMESPACE"
+    )
+  }
+  const usesLocalTestAdapters =
+    env.PULSAR_TEST_MODE && env.APP_ENV !== "production"
+  if (!usesLocalTestAdapters && !env.RESEND_API_KEY) {
+    throw new Error(
+      "RESEND_API_KEY is required outside local non-production test mode"
+    )
+  }
+  if (
+    !usesLocalTestAdapters &&
     (!env.TELEGRAM_BOT_TOKEN ||
       !env.TELEGRAM_BOT_USERNAME ||
       !env.TELEGRAM_WEBHOOK_SECRET ||
       env.TELEGRAM_WEBHOOK_SECRET.length < 16)
   ) {
     throw new Error(
-      "TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME, and a 16+ character TELEGRAM_WEBHOOK_SECRET are required outside test mode"
+      "TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME, and a 16+ character TELEGRAM_WEBHOOK_SECRET are required outside local non-production test mode"
     )
   }
   if (
@@ -233,13 +264,16 @@ function buildConfig() {
     },
     remnawave: {
       provider: env.REMNAWAVE_PROVIDER,
+      userNamespace: env.REMNAWAVE_USER_NAMESPACE,
       baseUrl: env.REMNAWAVE_BASE_URL?.replace(/\/$/, ""),
       apiToken: env.REMNAWAVE_API_TOKEN,
       standardSquadUuid: env.REMNAWAVE_STANDARD_SQUAD_UUID,
       lteSquadUuid: env.REMNAWAVE_LTE_SQUAD_UUID,
       timeoutMs: env.REMNAWAVE_TIMEOUT_MS,
+      allowLiveInTestMode: env.PULSAR_ALLOW_LIVE_REMNAWAVE_IN_TEST_MODE,
     },
     testMode: env.PULSAR_TEST_MODE,
+    localAuthAdaptersEnabled: usesLocalTestAdapters,
     allowTestModeInProduction: env.PULSAR_ALLOW_TEST_MODE_IN_PRODUCTION,
     worker: {
       pollIntervalMs: env.WORKER_POLL_INTERVAL_MS,

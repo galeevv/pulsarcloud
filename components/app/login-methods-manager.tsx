@@ -1,14 +1,34 @@
 "use client"
+
 import * as React from "react"
 import { useRouter } from "next/navigation"
-import { CheckIcon, MailIcon, SendIcon } from "lucide-react"
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  CheckIcon,
+  MailIcon,
+  SendIcon,
+} from "lucide-react"
 import { toast } from "sonner"
+
 import { PulsarIconContainer } from "@/components/app/pulsar-primitives"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
-import { Switch } from "@/components/ui/switch"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import {
   InputOTP,
   InputOTPGroup,
@@ -18,194 +38,301 @@ import {
 export function LoginMethodsManager({
   email,
   telegramId,
-  telegramSettings,
+  telegramUsername,
 }: {
   email: string | null
   telegramId: string | null
-  telegramSettings?: { transactional: boolean; news: boolean }
+  telegramUsername: string | null
 }) {
   const router = useRouter()
+  const [emailDialogOpen, setEmailDialogOpen] = React.useState(false)
   const [challengeId, setChallengeId] = React.useState<string>()
   const [otp, setOtp] = React.useState("")
   const [pending, setPending] = React.useState(false)
-  const [settings, setSettings] = React.useState(telegramSettings)
+  const otpRef = React.useRef<HTMLInputElement>(null)
+
+  function changeEmailDialog(open: boolean) {
+    setEmailDialogOpen(open)
+    if (!open) {
+      setChallengeId(undefined)
+      setOtp("")
+      setPending(false)
+    }
+  }
+
   async function linkEmail(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setPending(true)
     const value = new FormData(event.currentTarget).get("email")
-    const response = await fetch("/api/auth/email/request", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: value, purpose: "LINK_EMAIL" }),
-    })
-    const result = (await response.json()) as {
-      challengeId?: string
-      devOtp?: string
-      message?: string
-    }
-    if (response.ok && result.challengeId) {
+
+    try {
+      const response = await fetch("/api/auth/email/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: value, purpose: "LINK_EMAIL" }),
+      })
+      const result = (await response.json()) as {
+        challengeId?: string
+        devOtp?: string
+        message?: string
+      }
+
+      if (!response.ok || !result.challengeId)
+        throw new Error(result.message ?? "Не удалось отправить код.")
+
       setChallengeId(result.challengeId)
+      setOtp("")
       if (result.devOtp) toast.info(`Test mode: код ${result.devOtp}`)
-    } else toast.error(result.message ?? "Не удалось отправить код.")
-    setPending(false)
-  }
-  async function verifyEmail(event: React.FormEvent) {
-    event.preventDefault()
-    setPending(true)
-    const response = await fetch("/api/auth/email/verify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ challengeId, otp }),
-    })
-    const result = (await response.json()) as { message?: string }
-    if (response.ok) {
-      toast.success("Email привязан.")
-      router.refresh()
-    } else toast.error(result.message ?? "Не удалось привязать email.")
-    setPending(false)
-  }
-  async function linkTelegram() {
-    setPending(true)
-    const response = await fetch("/api/auth/telegram/start", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ purpose: "LINK_TELEGRAM" }),
-    })
-    const result = (await response.json()) as { url?: string; message?: string }
-    if (response.ok && result.url) window.location.assign(result.url)
-    else {
-      toast.error(result.message ?? "Telegram недоступен.")
+      window.setTimeout(() => otpRef.current?.focus(), 0)
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Не удалось отправить код."
+      )
+    } finally {
       setPending(false)
     }
   }
-  async function updateTelegramSettings(next: { transactional: boolean; news: boolean }) {
-    setSettings(next)
-    const response = await fetch("/api/telegram/settings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(next),
-    })
-    if (!response.ok) {
-      setSettings(settings)
-      toast.error("Не удалось сохранить настройки уведомлений.")
+
+  async function verifyEmail(value: string) {
+    if (!challengeId || pending) return
+    setPending(true)
+
+    try {
+      const response = await fetch("/api/auth/email/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ challengeId, otp: value }),
+      })
+      const result = (await response.json()) as { message?: string }
+
+      if (!response.ok)
+        throw new Error(result.message ?? "Не удалось привязать email.")
+
+      toast.success("Email привязан.")
+      changeEmailDialog(false)
+      router.refresh()
+    } catch (error) {
+      setOtp("")
+      toast.error(
+        error instanceof Error ? error.message : "Не удалось привязать email."
+      )
+      window.setTimeout(() => otpRef.current?.focus(), 0)
+    } finally {
+      setPending(false)
     }
   }
+
+  async function linkTelegram() {
+    setPending(true)
+
+    try {
+      const response = await fetch("/api/auth/telegram/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ purpose: "LINK_TELEGRAM" }),
+      })
+      const result = (await response.json()) as {
+        url?: string
+        message?: string
+      }
+
+      if (!response.ok || !result.url)
+        throw new Error(result.message ?? "Telegram недоступен.")
+
+      window.location.assign(result.url)
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Telegram недоступен."
+      )
+      setPending(false)
+    }
+  }
+
   return (
     <div className="soft-panel flex flex-col gap-3 p-3">
       <p className="text-center text-sm font-semibold">Способы входа</p>
-      <MethodRow
+
+      <MethodCard
         icon={MailIcon}
         label="Email"
         value={email ?? "Не привязан"}
         connected={Boolean(email)}
+        action={
+          !email ? (
+            <Dialog open={emailDialogOpen} onOpenChange={changeEmailDialog}>
+              <DialogTrigger
+                render={
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={pending}
+                  />
+                }
+              >
+                Привязать
+              </DialogTrigger>
+              <DialogContent className="w-full min-w-0 gap-5 p-5 sm:max-w-sm">
+                <DialogHeader className="items-center text-center">
+                  <DialogTitle className="text-lg font-semibold">
+                    {challengeId ? "Введите код" : "Привязать email"}
+                  </DialogTitle>
+                  <DialogDescription>
+                    {challengeId
+                      ? "Введите шестизначный код из письма."
+                      : "Укажите email, который будет использоваться для входа."}
+                  </DialogDescription>
+                </DialogHeader>
+
+                {challengeId ? (
+                  <div className="relative flex w-full min-w-0 flex-col gap-4 pt-1">
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="outline"
+                      className="absolute -top-1 left-0"
+                      aria-label="Изменить email"
+                      disabled={pending}
+                      onClick={() => {
+                        setChallengeId(undefined)
+                        setOtp("")
+                      }}
+                    >
+                      <ArrowLeftIcon />
+                    </Button>
+                    <FieldGroup className="min-w-0 pt-10">
+                      <Field className="min-w-0">
+                        <FieldLabel className="sr-only">
+                          Код из письма
+                        </FieldLabel>
+                        <InputOTP
+                          ref={otpRef}
+                          value={otp}
+                          onChange={(value) =>
+                            setOtp(value.replace(/\D/g, "").slice(0, 6))
+                          }
+                          onComplete={(value) => void verifyEmail(value)}
+                          maxLength={6}
+                          inputMode="numeric"
+                          autoComplete="one-time-code"
+                          pushPasswordManagerStrategy="none"
+                          containerClassName="w-full min-w-0 justify-center"
+                          disabled={pending}
+                        >
+                          <InputOTPGroup>
+                            {Array.from({ length: 6 }).map((_, index) => (
+                              <InputOTPSlot key={index} index={index} />
+                            ))}
+                          </InputOTPGroup>
+                        </InputOTP>
+                      </Field>
+                    </FieldGroup>
+                  </div>
+                ) : (
+                  <form className="w-full" onSubmit={linkEmail}>
+                    <FieldGroup>
+                      <Field>
+                        <FieldLabel className="sr-only" htmlFor="link-email">
+                          Email
+                        </FieldLabel>
+                        <InputGroup className="h-11 rounded-[18px] bg-input/50">
+                          <InputGroupInput
+                            id="link-email"
+                            name="email"
+                            type="email"
+                            autoComplete="email"
+                            placeholder="Email"
+                            required
+                            disabled={pending}
+                          />
+                          <InputGroupAddon
+                            align="inline-end"
+                            className="pr-1.5"
+                          >
+                            <InputGroupButton
+                              type="submit"
+                              size="icon-sm"
+                              variant="default"
+                              aria-label="Отправить код"
+                              disabled={pending}
+                            >
+                              <ArrowRightIcon />
+                            </InputGroupButton>
+                          </InputGroupAddon>
+                        </InputGroup>
+                      </Field>
+                    </FieldGroup>
+                  </form>
+                )}
+              </DialogContent>
+            </Dialog>
+          ) : undefined
+        }
       />
-      {!email ? (
-        challengeId ? (
-          <form onSubmit={verifyEmail}>
-            <FieldGroup>
-              <Field>
-                <FieldLabel className="sr-only">Код</FieldLabel>
-                <InputOTP
-                  value={otp}
-                  onChange={setOtp}
-                  maxLength={6}
-                  disabled={pending}
-                >
-                  <InputOTPGroup>
-                    {Array.from({ length: 6 }).map((_, index) => (
-                      <InputOTPSlot key={index} index={index} />
-                    ))}
-                  </InputOTPGroup>
-                </InputOTP>
-                <Button
-                  className="mt-2 w-full"
-                  disabled={pending || otp.length !== 6}
-                >
-                  Подтвердить
-                </Button>
-              </Field>
-            </FieldGroup>
-          </form>
-        ) : (
-          <form onSubmit={linkEmail}>
-            <FieldGroup>
-              <Field orientation="horizontal">
-                <FieldLabel className="sr-only" htmlFor="link-email">
-                  Email
-                </FieldLabel>
-                <Input
-                  id="link-email"
-                  name="email"
-                  type="email"
-                  placeholder="you@example.com"
-                  required
-                  disabled={pending}
-                />
-                <Button type="submit" variant="outline" disabled={pending}>
-                  Привязать
-                </Button>
-              </Field>
-            </FieldGroup>
-          </form>
-        )
-      ) : null}
-      <MethodRow
+
+      <MethodCard
         icon={SendIcon}
         label="Telegram"
-        value={telegramId ? `id: ${telegramId}` : "Не привязан"}
+        value={
+          telegramId
+            ? telegramUsername
+              ? `@${telegramUsername.replace(/^@/, "")}`
+              : "Username не указан"
+            : "Не привязан"
+        }
         connected={Boolean(telegramId)}
+        action={
+          !telegramId ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={linkTelegram}
+              disabled={pending}
+            >
+              Привязать
+            </Button>
+          ) : undefined
+        }
       />
-      {!telegramId ? (
-        <Button
-          type="button"
-          variant="outline"
-          onClick={linkTelegram}
-          disabled={pending}
-        >
-          Привязать Telegram
-        </Button>
-      ) : settings ? (
-        <FieldGroup>
-          <Field orientation="horizontal">
-            <FieldLabel htmlFor="telegram-transactional">Сервисные уведомления</FieldLabel>
-            <Switch id="telegram-transactional" checked={settings.transactional} onCheckedChange={(value) => updateTelegramSettings({ ...settings, transactional: value })} />
-          </Field>
-          <Field orientation="horizontal">
-            <FieldLabel htmlFor="telegram-news">Новости</FieldLabel>
-            <Switch id="telegram-news" checked={settings.news} onCheckedChange={(value) => updateTelegramSettings({ ...settings, news: value })} />
-          </Field>
-        </FieldGroup>
-      ) : null}
     </div>
   )
 }
 
-function MethodRow({
+function MethodCard({
+  action,
+  connected,
   icon: Icon,
   label,
   value,
-  connected,
 }: {
+  action?: React.ReactNode
+  connected: boolean
   icon: typeof MailIcon
   label: string
   value: string
-  connected: boolean
 }) {
   return (
-    <div className="flex min-h-[52px] items-center justify-between gap-3 rounded-2xl border border-border/70 bg-background/25 p-3">
-      <div className="flex min-w-0 items-center gap-3">
-        <PulsarIconContainer icon={Icon} />
-        <div className="min-w-0">
-          <p className="text-xs text-muted-foreground">{label}</p>
-          <p className="truncate text-sm font-medium">{value}</p>
+    <div className="rounded-2xl border border-border/70 bg-background/25 p-3">
+      <div className="flex min-h-10 items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <PulsarIconContainer icon={Icon} />
+          <div className="min-w-0">
+            <p className="text-xs text-muted-foreground">{label}</p>
+            <p className="truncate text-sm font-medium">{value}</p>
+          </div>
+        </div>
+        <div className="shrink-0">
+          {connected ? (
+            <Badge variant="secondary">
+              <CheckIcon data-icon="inline-start" />
+              Привязан
+            </Badge>
+          ) : (
+            action
+          )}
         </div>
       </div>
-      {connected ? (
-        <Badge variant="secondary">
-          <CheckIcon data-icon="inline-start" />
-          Привязан
-        </Badge>
-      ) : null}
     </div>
   )
 }

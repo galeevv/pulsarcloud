@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { getConfig } from "@/src/server/config"
 import { requestEmailChallenge } from "@/src/server/domain/auth/service"
 import {
   requireSameOrigin,
@@ -7,7 +8,6 @@ import {
 import {
   requestFingerprint,
   requireWebSession,
-  setEmailChallengeCookie,
 } from "@/src/server/transport/web/session"
 
 const requestSchema = z.object({
@@ -33,8 +33,13 @@ export async function POST(request: Request) {
       ipHash: fingerprint.ipHash,
       userAgentHash: fingerprint.userAgentHash,
     })
-    await setEmailChallengeCookie(result.challengeId)
-    return Response.json(result)
+    return Response.json({
+      challengeId: result.challengeId,
+      expiresAt: result.expiresAt,
+      ...(getConfig().localAuthAdaptersEnabled && result.devOtp
+        ? { devOtp: result.devOtp }
+        : {}),
+    })
   } catch (error) {
     return routeErrorResponse(error)
   }

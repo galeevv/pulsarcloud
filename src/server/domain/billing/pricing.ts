@@ -13,13 +13,19 @@ export type PriceQuote = {
   extraDevicesPriceMinor: number
   ltePriceMinor: number
   discountMinor: number
+  durationDiscountMinor: number
+  referralDiscountMinor: number
   pricingVersion: number
   snapshotJson: string
 }
 
 export function calculatePrice(
   settings: PricingSettings,
-  input: { durationMonths: number; deviceLimit: number; lteEnabled: boolean }
+  input: {
+    durationMonths: number
+    deviceLimit: number
+    lteEnabled: boolean
+  }
 ): PriceQuote {
   if (
     ![1, 3, 6, 12].includes(input.durationMonths) ||
@@ -43,8 +49,12 @@ export function calculatePrice(
     : 0
   const subtotalMinor = basePriceMinor + extraDevicesPriceMinor + ltePriceMinor
   const discountPct = discounts[String(months)] ?? 0
-  const discountMinor = Math.round((subtotalMinor * discountPct) / 100)
-  const amountMinor = subtotalMinor - discountMinor
+  const discountedMinor = subtotalMinor * (1 - discountPct / 100)
+  const amountMinor = Math.round(discountedMinor / 100) * 100
+  const durationDiscountMinor = subtotalMinor - amountMinor
+  const referralFriendDiscountPct = 0
+  const referralDiscountMinor = 0
+  const discountMinor = durationDiscountMinor
   const snapshot = {
     months,
     durationDays: durationDays[months],
@@ -54,6 +64,9 @@ export function calculatePrice(
     extraDevicesPriceMinor,
     ltePriceMinor,
     discountPct,
+    durationDiscountMinor,
+    referralFriendDiscountPct,
+    referralDiscountMinor,
     discountMinor,
     amountMinor,
     currency: "RUB",
@@ -68,6 +81,8 @@ export function calculatePrice(
     extraDevicesPriceMinor,
     ltePriceMinor,
     discountMinor,
+    durationDiscountMinor,
+    referralDiscountMinor,
     pricingVersion: settings.version,
     snapshotJson: JSON.stringify(snapshot),
   }

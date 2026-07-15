@@ -85,5 +85,8 @@ class TestEmailSender implements EmailSender {
 }
 
 export function getEmailSender(): EmailSender {
-  return getConfig().testMode ? new TestEmailSender() : new ResendEmailSender()
+  const config = getConfig()
+  return config.localAuthAdaptersEnabled
+    ? new TestEmailSender()
+    : new ResendEmailSender()
 }

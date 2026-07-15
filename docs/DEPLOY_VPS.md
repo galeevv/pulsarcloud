@@ -109,12 +109,21 @@ Replace `YOUR_EMAIL`. This creates one SAN certificate covering all three names 
 
 ## 5. Build an immutable release
 
-Use a fresh Linux release directory. The example clones Git; an artifact/`rsync` workflow is also valid if it excludes `.env*`, databases, `node_modules`, and `.next`.
+Use a fresh Linux release directory. The example clones Git; an artifact/`rsync` workflow is also valid if it excludes `.env*`, databases, `node_modules`, and `.next`. Archives created on Windows can carry synthetic `0666`/`0777` modes: normalize source directories to `0755`, regular source files to `0644`, and deployment/backup shell scripts to `0755` before building. No file or directory in a finished release may be world-writable; `audit-production.sh` enforces this after deployment.
 
 ```bash
 release="/opt/pulsar/releases/$(date -u +%Y%m%dT%H%M%SZ)"
 sudo install -d -o pulsar -g pulsar -m 0755 "$release"
 sudo -u pulsar git clone --depth=1 REPOSITORY_URL "$release"
+
+# First installation only: populate the API token and squad UUIDs before the
+# build validates production configuration. This requires TLS from section 4.
+if ! sudo grep -Eq '^REMNAWAVE_API_TOKEN=.+$' /etc/pulsar/pulsar.env || \
+   ! sudo grep -Eq '^REMNAWAVE_STANDARD_SQUAD_UUID=[0-9a-fA-F-]{36}$' /etc/pulsar/pulsar.env || \
+   ! sudo grep -Eq '^REMNAWAVE_LTE_SQUAD_UUID=[0-9a-fA-F-]{36}$' /etc/pulsar/pulsar.env; then
+  sudo bash "$release/deploy/remnawave/install-panel.sh"
+  sudo bash "$release/deploy/remnawave/bootstrap-panel.sh"
+fi
 
 sudo -u pulsar RELEASE="$release" bash -lc '
   cd "$RELEASE"
@@ -130,7 +139,7 @@ sudo -u pulsar RELEASE="$release" bash -lc '
 '
 ```
 
-Replace `REPOSITORY_URL`. `npm ci --include=dev` is intentional: production worker startup uses the `tsx` loader. The build packaging step removes env files from standalone output and copies static/public assets.
+Replace `REPOSITORY_URL`. On a first install, the Remnawave bootstrap must run after the release source and TLS exist but before `next build`; it creates the protected API token plus Standard/LTE squad UUIDs required by production configuration. Subsequent immutable releases reuse those values and do not repeat the first-install branch. `npm ci --include=dev` is intentional: production worker startup uses the `tsx` loader. The build packaging step removes env files from standalone output and copies static/public assets.
 
 ## 6. Backup, migrate, seed, and switch atomically
 
@@ -143,6 +152,7 @@ if sudo test -s /var/lib/pulsar/pulsar.db; then
 fi
 
 sudo -u pulsar RELEASE="$release" bash -lc '
+  umask 077
   set -a
   . /etc/pulsar/pulsar.env
   set +a
@@ -212,19 +222,27 @@ sudo ufw enable
 
 ss -ltnp
 curl -fsS http://127.0.0.1:3000/api/health/live
-curl -fsS http://127.0.0.1:3020/api/auth/status
-curl -fsS http://127.0.0.1:3010/ -o /dev/null
+curl -fsS \
+  -H 'Host: panel.pulsar-cloud.space' \
+  -H 'X-Forwarded-Proto: https' \
+  -H 'Connection: close' \
+  http://127.0.0.1:3020/api/auth/status
+curl -fsS --resolve sub.pulsar-cloud.space:443:127.0.0.1 \
+  https://sub.pulsar-cloud.space/ -o /dev/null
 curl -fsS https://pulsar-cloud.space/api/health/ready
 curl -fsS https://panel.pulsar-cloud.space/api/auth/status
 curl -fsS https://sub.pulsar-cloud.space/ -o /dev/null
 systemctl --no-pager --full status pulsar-web pulsar-worker pulsar-backup.timer
 docker compose -f /opt/remnawave/docker-compose.yml ps
 docker compose -f /opt/remnawave/subscription/docker-compose.yml ps
+sudo bash /opt/pulsar/current/deploy/pulsar/audit-production.sh
 ```
 
-Do not allow ports 3000, 3010, 3020, 3021, or 6767 through UFW; they must remain loopback-only. SQLite has no listener. Confirm that no Remnawave Node or VPN inbound port is present on this host. Configure Telegram webhook `https://pulsar-cloud.space/api/integrations/telegram/webhook` with its secret header and Platega callback `https://pulsar-cloud.space/api/integrations/payments/webhook`.
+The final command is a read-only audit: it parses (but never sources or prints) the protected env, checks that billing/test mode remain off, runs SQLite integrity and permission checks, validates the immutable release and systemd units, rejects public internal listeners or unexpected UFW allows, and checks TLS, public health, framing headers, Panel, and subscription endpoints. Any `FAIL` is a deployment blocker; rerun it after correcting the underlying configuration.
 
-Current acceptance covers the website, Panel, and subscription-page availability only. It does not prove Pulsar provisioning: the production HTTP provider remains an integration stub and `BILLING_ENABLED` must remain `false`. Before enabling billing, implement and contract-test that adapter, then verify one provider sandbox payment, provisioning/outbox completion, a usable subscription URL on a separate Node, duplicate callback idempotency, and an on-demand backup.
+Do not allow ports 3000, 3010, 3020, 3021, or 6767 through UFW; they must remain loopback-only. SQLite has no listener. Confirm that no Remnawave Node or VPN inbound port is present on this host. Configure Telegram webhook `https://pulsar-cloud.space/api/integrations/telegram/webhook` with its secret header and the Platega callback alias `https://pulsar-cloud.space/api/integrations/payments/platega/callback`.
+
+Current acceptance proves the website, Panel, subscription page, and the Remnawave 2.8 management provider: create, Standard/LTE update, lookup, URL rotation, subscription-page response, and cleanup passed against the live Panel. It still does not prove delivery of usable VPN traffic because no separate Node/Host exists, and no complete Platega payment → callback → worker → working connection run has passed. Keep `BILLING_ENABLED=false` until those two conditions, duplicate callback idempotency, and rollback handling are accepted together.
 
 ## 10. Rollback
 

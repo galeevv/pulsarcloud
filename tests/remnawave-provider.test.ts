@@ -17,6 +17,7 @@ function remoteUser(
 ) {
   return {
     response: {
+      id: 17,
       uuid: remoteUserUuid,
       shortUuid: "short-user-id",
       status: "ACTIVE",
@@ -31,6 +32,25 @@ function remoteUser(
   }
 }
 
+function remoteDevices(hwids = ["device-hwid-001"]) {
+  return {
+    response: {
+      total: hwids.length,
+      devices: hwids.map((hwid, index) => ({
+        hwid,
+        userId: 17,
+        platform: "Android",
+        osVersion: "14",
+        deviceModel: index === 0 ? "Mi Note 10 Lite" : null,
+        userAgent: "Happ/1.0",
+        requestIp: "192.0.2.1",
+        createdAt: "2026-07-14T12:00:00.000Z",
+        updatedAt: "2026-07-14T12:30:00.000Z",
+      })),
+    },
+  }
+}
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -38,15 +58,42 @@ function jsonResponse(body: unknown, status = 200) {
   })
 }
 
-function createProvider(fetchImplementation: typeof fetch) {
+function createProvider(
+  fetchImplementation: typeof fetch,
+  userNamespace = "pulsar"
+) {
   return new RemnawaveHttpProvider({
     baseUrl: "https://panel.example.test",
     apiToken: "test-token-that-must-never-appear-in-errors",
+    userNamespace,
     standardSquadUuid,
     lteSquadUuid,
     timeoutMs: 1_000,
     fetchImplementation,
   })
+}
+
+async function captureCreatedUsername(userNamespace: string) {
+  let callNumber = 0
+  let createdUsername = ""
+  const fetchImplementation = (async (
+    _input: URL | RequestInfo,
+    init?: RequestInit
+  ) => {
+    callNumber += 1
+    if (callNumber === 1) return jsonResponse({ message: "not found" }, 404)
+    const body = JSON.parse(String(init?.body)) as { username?: string }
+    createdUsername = body.username ?? ""
+    return jsonResponse(remoteUser(), 201)
+  }) as typeof fetch
+  const provider = createProvider(fetchImplementation, userNamespace)
+  await provider.upsertSubscriber({
+    localUserId: "same-local-user-id",
+    expiresAt: new Date("2027-07-13T12:00:00.000Z"),
+    deviceLimit: 1,
+    lteEnabled: false,
+  })
+  return createdUsername
 }
 
 test("Remnawave provider creates a deterministic standard subscriber", async () => {
@@ -89,6 +136,24 @@ test("Remnawave provider creates a deterministic standard subscriber", async () 
   assert.deepEqual(body.activeInternalSquads, [standardSquadUuid])
   assert.equal(body.trafficLimitBytes, 0)
   assert.equal(body.trafficLimitStrategy, "NO_RESET")
+})
+
+test("Remnawave provider namespaces deterministic usernames", async () => {
+  const productionUsername = await captureCreatedUsername("pulsar")
+  const repeatedProductionUsername = await captureCreatedUsername("pulsar")
+  const localTestUsername = await captureCreatedUsername("pulsar_local_test")
+
+  assert.equal(productionUsername, repeatedProductionUsername)
+  assert.notEqual(productionUsername, localTestUsername)
+  assert.match(productionUsername, /^pulsar_[a-f0-9]{24}$/)
+  assert.match(localTestUsername, /^pulsar_[a-f0-9]{24}$/)
+})
+
+test("Remnawave provider rejects an unsafe user namespace", () => {
+  assert.throws(
+    () => createProvider(fetch, "Pulsar production/../local"),
+    /user namespace is invalid/i
+  )
 })
 
 test("Remnawave provider updates one user and grants both squads for LTE", async () => {
@@ -152,6 +217,45 @@ test("Remnawave provider reads desired state and LTE entitlement", async () => {
     state.subscriptionUrl,
     "https://sub.pulsar-cloud.space/short-user-id"
   )
+})
+
+test("Remnawave provider lists and deletes only a subscriber's HWID device", async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = []
+  const fetchImplementation = (async (
+    input: URL | RequestInfo,
+    init?: RequestInit
+  ) => {
+    calls.push({ url: String(input), init })
+    if (calls.length === 1) return jsonResponse(remoteDevices())
+    if (calls.length === 2) return jsonResponse(remoteDevices())
+    return jsonResponse(remoteDevices([]))
+  }) as typeof fetch
+  const provider = createProvider(fetchImplementation)
+
+  const listed = await provider.getSubscriberDevices(remoteUserUuid)
+  assert.equal(listed.length, 1)
+  assert.equal(listed[0]?.deviceModel, "Mi Note 10 Lite")
+  assert.equal(listed[0]?.platform, "Android")
+  assert.ok(listed[0]?.updatedAt instanceof Date)
+  assert.equal(
+    calls[0]?.url,
+    `https://panel.example.test/api/hwid/devices/${remoteUserUuid}`
+  )
+
+  const remaining = await provider.deleteSubscriberDevice({
+    remoteUserId: remoteUserUuid,
+    hwid: "device-hwid-001",
+  })
+  assert.deepEqual(remaining, [])
+  assert.equal(
+    calls[2]?.url,
+    "https://panel.example.test/api/hwid/devices/delete"
+  )
+  assert.equal(calls[2]?.init?.method, "POST")
+  assert.deepEqual(JSON.parse(String(calls[2]?.init?.body)), {
+    userUuid: remoteUserUuid,
+    hwid: "device-hwid-001",
+  })
 })
 
 test("Remnawave provider revokes and returns a rotated subscription URL", async () => {

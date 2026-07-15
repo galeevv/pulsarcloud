@@ -5,7 +5,8 @@ import type {
   PreviewSubscription,
 } from "@/src/frontend-preview/view-models"
 
-export async function getPricingView(): Promise<PreviewPricing> {
+export async function getPricingView(userId: string): Promise<PreviewPricing> {
+  void userId
   const settings = await db.pricingSettings.findUniqueOrThrow({
     where: { key: "default" },
   })
@@ -26,8 +27,10 @@ export async function getPricingView(): Promise<PreviewPricing> {
   })
   return {
     baseMonthlyPriceRub: settings.baseMonthlyPriceMinor / 100,
+    pricingVersion: settings.version,
     durationOptions,
     extraDeviceMonthlyPriceRub: settings.extraDeviceMonthlyPriceMinor / 100,
+    deviceLimitUpgradePriceRub: settings.deviceLimitUpgradePriceMinor / 100,
     lteMonthlyPriceRub: settings.lteMonthlyPriceMinor / 100,
     minDeviceLimit: settings.minDeviceLimit,
     maxDeviceLimit: settings.maxDeviceLimit,
@@ -67,23 +70,58 @@ export async function getSubscriptionView(
   }
 }
 
-export async function getUserView(userId: string) {
+export async function getWalletBalanceView(userId: string) {
+  const wallet = await db.walletAccount.findUnique({
+    where: { userId },
+    select: { availableMinor: true },
+  })
+
+  return (wallet?.availableMinor ?? 0) / 100
+}
+
+export async function getLastPurchasePreferencesView(userId: string) {
+  return db.payment.findFirst({
+    where: { userId, status: "CONFIRMED" },
+    orderBy: [{ confirmedAt: "desc" }, { createdAt: "desc" }],
+    select: { deviceLimit: true, lteEnabled: true },
+  })
+}
+
+export async function getProfileView(userId: string) {
+  return db.user.findUniqueOrThrow({
+    where: { id: userId },
+    select: {
+      identities: true,
+    },
+  })
+}
+
+export async function getSupportMessagesView(userId: string) {
+  const conversation = await db.supportConversation.findUnique({
+    where: { userId },
+    select: {
+      messages: {
+        orderBy: { createdAt: "desc" },
+        take: 200,
+      },
+    },
+  })
+
+  return conversation?.messages ?? []
+}
+
+export async function getReferralsView(userId: string) {
   const user = await db.user.findUniqueOrThrow({
     where: { id: userId },
-    include: {
-      identities: true,
+    select: {
       wallet: true,
       referralProfile: true,
-      telegramProfile: true,
       sentInvites: {
         include: { invited: { include: { identities: true } }, reward: true },
         orderBy: { createdAt: "desc" },
         take: 100,
       },
       payouts: { orderBy: { createdAt: "desc" }, take: 50 },
-      supportConversation: {
-        include: { messages: { orderBy: { createdAt: "desc" }, take: 200 } },
-      },
     },
   })
   return {

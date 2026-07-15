@@ -27,22 +27,26 @@ import {
 import { formatPreviewRub } from "@/src/frontend-preview/format"
 import {
   getPricingView,
+  getLastPurchasePreferencesView,
   getSubscriptionView,
-  getUserView,
+  getReferralsView,
 } from "@/src/server/queries/user-dashboard"
 import { requireWebSession } from "@/src/server/transport/web/session"
 
 export const metadata: Metadata = {
-  title: "Реферальная программа",
+  title: { absolute: "PULSAR" },
 }
 
 export default async function ReferralsPage() {
   const session = await requireWebSession("USER")
-  const [{ user, inviteUrl }, settings, subscription] = await Promise.all([
-    getUserView(session.userId),
-    getPricingView(),
-    getSubscriptionView(session.userId),
-  ])
+  const [{ user, inviteUrl }, settings, subscription, lastPurchase] =
+    await Promise.all([
+      getReferralsView(session.userId),
+      getPricingView(session.userId),
+      getSubscriptionView(session.userId),
+      getLastPurchasePreferencesView(session.userId),
+    ])
+  const balanceRub = (user.wallet?.availableMinor ?? 0) / 100
   if (!user.referralProfile?.isEnabled)
     return (
       <main className="pulsar-container">
@@ -57,36 +61,27 @@ export default async function ReferralsPage() {
               <EmptyMedia variant="icon">
                 <GiftIcon />
               </EmptyMedia>
-              <EmptyTitle>
-                Реферальная программа откроется после оплаты
-              </EmptyTitle>
+              <EmptyTitle>Реферальная программа</EmptyTitle>
               <EmptyDescription>
-                После подтверждения первого платежа здесь появится ваша ссылка.
+                Оплатите подписку — персональная ссылка появится здесь
+                автоматически.
               </EmptyDescription>
             </EmptyHeader>
             <EmptyContent>
               <SubscriptionPaymentAction
                 settings={settings}
+                walletBalanceRub={balanceRub}
                 triggerLabel={
                   subscription ? "Продлить подписку" : "Оплатить подписку"
                 }
-                initialDeviceLimit={
-                  subscription?.nextDeviceLimit ?? subscription?.deviceLimit
-                }
-                initialLteEnabled={
-                  subscription?.nextLteEnabled ?? subscription?.lteEnabled
-                }
-                renewsActiveSubscription={Boolean(
-                  subscription &&
-                  ["ACTIVE", "TRIAL"].includes(subscription.status)
-                )}
+                initialDeviceLimit={lastPurchase?.deviceLimit}
+                initialLteEnabled={lastPurchase?.lteEnabled}
               />
             </EmptyContent>
           </Empty>
         </PulsarAssetCard>
       </main>
     )
-  const balanceRub = (user.wallet?.availableMinor ?? 0) / 100
   const inviteItems = user.sentInvites.map((invite) => ({
     id: invite.id,
     createdAtLabel: formatDate(invite.createdAt),
@@ -130,7 +125,7 @@ export default async function ReferralsPage() {
           title="Баланс"
           titleClassName="text-xs font-normal text-muted-foreground"
           description={
-            <span className="text-base font-semibold">
+            <span className="text-base font-semibold text-foreground">
               {formatPreviewRub(balanceRub)}
             </span>
           }
@@ -150,7 +145,9 @@ export default async function ReferralsPage() {
             title="Ваша ссылка"
             titleClassName="text-xs font-normal text-muted-foreground"
             description={
-              <span className="font-mono text-sm">{compactUrl(inviteUrl)}</span>
+              <span className="font-mono text-sm text-foreground">
+                {compactUrl(inviteUrl)}
+              </span>
             }
             action={
               <CopyButton

@@ -5,15 +5,12 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { Toaster } from "@/components/ui/sonner"
 
 export const metadata: Metadata = {
-  title: {
-    default: "PulsarVPN",
-    template: "%s | PulsarVPN",
-  },
+  title: "PULSAR",
   description: "Личный кабинет PulsarVPN",
   icons: {
-    icon: "/logo/logo.png",
-    shortcut: "/logo/logo.png",
-    apple: "/logo/logo.png",
+    icon: "/logo/logo-no-bg-preview (carve.photos).png",
+    shortcut: "/logo/logo-no-bg-preview (carve.photos).png",
+    apple: "/logo/logo-no-bg-preview (carve.photos).png",
   },
 }
 

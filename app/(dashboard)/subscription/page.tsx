@@ -2,32 +2,21 @@ import type { Metadata } from "next"
 import type { ComponentProps } from "react"
 import {
   AlertCircleIcon,
-  CalendarClockIcon,
   InfoIcon,
   KeyRoundIcon,
   Link2Icon,
   RadioIcon,
-  SmartphoneIcon,
 } from "lucide-react"
 import { CopyButton } from "@/components/app/copy-button"
-import { RegenerateLinkDialog } from "@/components/app/regenerate-link-dialog"
+import { SubscriptionDevicesCard } from "@/components/app/subscription-devices-card"
 import {
-  PulsarActionRow,
   PulsarAssetCard,
-  PulsarIconContainer,
+  PulsarActionRow,
   pulsarLinkButtonClass,
 } from "@/components/app/pulsar-primitives"
 import { SubscriptionPaymentAction } from "@/components/app/subscription-payment-action"
+import { SubscriptionStatusPoller } from "@/components/app/subscription-status-poller"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Badge } from "@/components/ui/badge"
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
 import {
   Empty,
   EmptyContent,
@@ -36,10 +25,12 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty"
-import { Progress } from "@/components/ui/progress"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   getPricingView,
+  getLastPurchasePreferencesView,
   getSubscriptionView,
+  getWalletBalanceView,
 } from "@/src/server/queries/user-dashboard"
 import { requireWebSession } from "@/src/server/transport/web/session"
 import type {
@@ -48,26 +39,28 @@ import type {
 } from "@/src/frontend-preview/view-models"
 
 export const metadata: Metadata = {
-  title: "Подписка",
+  title: { absolute: "PULSAR" },
 }
 
 export default async function SubscriptionPage() {
   const session = await requireWebSession("USER")
-  const [subscription, settings] = await Promise.all([
-    getSubscriptionView(session.userId),
-    getPricingView(),
-  ])
+  const [subscription, settings, walletBalanceRub, lastPurchase] =
+    await Promise.all([
+      getSubscriptionView(session.userId),
+      getPricingView(session.userId),
+      getWalletBalanceView(session.userId),
+      getLastPurchasePreferencesView(session.userId),
+    ])
   const status = subscription?.status ?? "NONE"
   const hasActiveSubscription =
     subscription && ["ACTIVE", "TRIAL"].includes(status)
   const hasSubscriptionRecord = Boolean(subscription && status !== "NONE")
+  const isConnectionReady = Boolean(
+    hasActiveSubscription &&
+    subscription?.syncStatus === "SYNCED" &&
+    subscription?.subscriptionUrl
+  )
   const subscriptionSummary = getSubscriptionSummary(subscription, status)
-  const subscriptionProgress = subscription
-    ? getRemainingSubscriptionProgress(subscription)
-    : 0
-  const subscriptionProgressTone = subscription
-    ? getProgressTone(subscription, status, subscriptionProgress)
-    : "inactive"
 
   return (
     <main className="pulsar-container">
@@ -87,49 +80,16 @@ export default async function SubscriptionPage() {
         )}
 
         {!hasSubscriptionRecord ? (
-          <SubscriptionEmptyState settings={settings} />
+          <SubscriptionEmptyState
+            settings={settings}
+            walletBalanceRub={walletBalanceRub}
+          />
         ) : subscription ? (
           <>
-            {hasActiveSubscription ? (
+            {isConnectionReady ? (
               <SubscriptionUrlCard url={subscription.subscriptionUrl} />
-            ) : null}
-
-            <div className="soft-panel flex flex-col gap-3 p-4">
-              <div className="flex items-center justify-between gap-3 text-sm">
-                <span className="text-muted-foreground">Период доступа</span>
-                <span className="font-medium">
-                  {subscription.expiresAt
-                    ? `до ${formatSubscriptionDate(subscription.expiresAt)}`
-                    : "без срока"}
-                </span>
-              </div>
-              <Progress
-                value={subscriptionProgress}
-                aria-label="Период доступа подписки"
-                data-tone={subscriptionProgressTone}
-                className="pulsar-progress w-full"
-              />
-            </div>
-
-            {subscription.nextDeviceLimit !== null ||
-            subscription.nextLteEnabled !== null ? (
-              <Alert>
-                <CalendarClockIcon />
-                <AlertTitle>Параметры следующего периода</AlertTitle>
-                <AlertDescription>
-                  {subscription.nextParametersAt
-                    ? `С ${formatSubscriptionDate(subscription.nextParametersAt)} — `
-                    : "После окончания текущего периода — "}
-                  {formatDeviceLimit(
-                    subscription.nextDeviceLimit ?? subscription.deviceLimit
-                  )}
-                  ,{" "}
-                  {(subscription.nextLteEnabled ?? subscription.lteEnabled)
-                    ? "с LTE"
-                    : "без LTE"}
-                  .
-                </AlertDescription>
-              </Alert>
+            ) : hasActiveSubscription ? (
+              <SubscriptionProvisioningSkeleton />
             ) : null}
 
             {subscription.lastUserFriendlyError &&
@@ -144,52 +104,52 @@ export default async function SubscriptionPage() {
             ) : null}
 
             {hasActiveSubscription ? (
-              subscription.syncStatus === "SYNCED" &&
-              subscription.subscriptionUrl ? (
-                <div className="flex flex-col gap-3">
-                  <a
-                    href={subscription.subscriptionUrl}
-                    className={pulsarLinkButtonClass()}
-                  >
-                    <Link2Icon data-icon="inline-start" />
-                    Подключить в Happ
-                  </a>
-                  <RegenerateLinkDialog />
-                  <SubscriptionPaymentAction
-                    settings={settings}
-                    triggerLabel="Продлить подписку"
-                    initialDeviceLimit={
-                      subscription.nextDeviceLimit ?? subscription.deviceLimit
-                    }
-                    initialLteEnabled={
-                      subscription.nextLteEnabled ?? subscription.lteEnabled
-                    }
-                    renewsActiveSubscription
-                  />
-                </div>
+              isConnectionReady && subscription.subscriptionUrl ? (
+                <a
+                  href={subscription.subscriptionUrl}
+                  className={pulsarLinkButtonClass()}
+                >
+                  <Link2Icon data-icon="inline-start" />
+                  Подключить в Happ
+                </a>
               ) : (
-                <ProvisioningStatus subscription={subscription} />
+                <>
+                  <SubscriptionStatusPoller
+                    active
+                    initialSyncStatus={subscription.syncStatus}
+                    initialHasSubscriptionUrl={Boolean(
+                      subscription.subscriptionUrl
+                    )}
+                    initialDeviceLimit={subscription.deviceLimit}
+                  />
+                  <ProvisioningStatus subscription={subscription} />
+                </>
               )
             ) : (
               <SubscriptionPaymentAction
                 settings={settings}
+                walletBalanceRub={walletBalanceRub}
                 triggerLabel="Возобновить подписку"
-                initialDeviceLimit={
-                  subscription.nextDeviceLimit ?? subscription.deviceLimit
-                }
-                initialLteEnabled={
-                  subscription.nextLteEnabled ?? subscription.lteEnabled
-                }
+                initialDeviceLimit={lastPurchase?.deviceLimit}
+                initialLteEnabled={lastPurchase?.lteEnabled}
               />
             )}
           </>
         ) : (
-          <SubscriptionEmptyState settings={settings} />
+          <SubscriptionEmptyState
+            settings={settings}
+            walletBalanceRub={walletBalanceRub}
+          />
         )}
       </PulsarAssetCard>
 
-      {hasSubscriptionRecord && subscription ? (
-        <SubscriptionDevicesCard subscription={subscription} />
+      {isConnectionReady && subscription ? (
+        <SubscriptionDevicesCard
+          deviceLimit={subscription.deviceLimit}
+          maxDeviceLimit={settings.maxDeviceLimit}
+          deviceLimitUpgradePriceRub={settings.deviceLimitUpgradePriceRub}
+          pricingVersion={settings.pricingVersion}
+        />
       ) : null}
     </main>
   )
@@ -197,8 +157,10 @@ export default async function SubscriptionPage() {
 
 function SubscriptionEmptyState({
   settings,
+  walletBalanceRub,
 }: {
   settings: ComponentProps<typeof SubscriptionPaymentAction>["settings"]
+  walletBalanceRub: number
 }) {
   return (
     <Empty>
@@ -206,14 +168,16 @@ function SubscriptionEmptyState({
         <EmptyMedia variant="icon">
           <RadioIcon />
         </EmptyMedia>
-        <EmptyTitle>Оплатите подписку</EmptyTitle>
+        <EmptyTitle>Подписка</EmptyTitle>
         <EmptyDescription>
-          После оплаты здесь появится ссылка для Happ.
+          Здесь можно управлять подключением, устройствами и параметрами
+          подписки.
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent className="w-full">
         <SubscriptionPaymentAction
           settings={settings}
+          walletBalanceRub={walletBalanceRub}
           triggerLabel="Оплатить подписку"
         />
       </EmptyContent>
@@ -241,33 +205,19 @@ function SubscriptionUrlCard({ url }: { url: string | null }) {
   )
 }
 
-function SubscriptionDevicesCard({
-  subscription,
-}: {
-  subscription: PreviewSubscription
-}) {
+function SubscriptionProvisioningSkeleton() {
   return (
-    <Card className="rounded-3xl border border-border/70 bg-card/40 py-0">
-      <CardHeader className="p-4 pb-0">
-        <CardTitle>Устройства</CardTitle>
-        <CardDescription>
-          По тарифу можно подключить до{" "}
-          {formatDeviceLimit(subscription.deviceLimit)}.
-        </CardDescription>
-        <CardAction>
-          <Badge variant="secondary">Лимит: {subscription.deviceLimit}</Badge>
-        </CardAction>
-      </CardHeader>
-      <CardContent className="p-4">
-        <div className="soft-panel flex items-center gap-3 p-4">
-          <PulsarIconContainer icon={SmartphoneIcon} size="md" />
-          <p className="text-sm text-muted-foreground">
-            Фактическая статистика подключений появится после синхронизации с
-            Remnawave.
-          </p>
+    <div className="flex flex-col gap-3" aria-label="Готовим подключение">
+      <div className="soft-panel flex min-h-[62px] items-center gap-3 p-3">
+        <Skeleton className="size-9 shrink-0" />
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <Skeleton className="h-3 w-24" />
+          <Skeleton className="h-4 w-3/4" />
         </div>
-      </CardContent>
-    </Card>
+        <Skeleton className="size-8 shrink-0" />
+      </div>
+      <Skeleton className="h-10 w-full" />
+    </div>
   )
 }
 
@@ -307,7 +257,7 @@ function getSubscriptionSummary(
 ) {
   if (!subscription || status === "NONE") {
     return {
-      title: "Оплатите подписку",
+      title: "Подписка",
     }
   }
 
@@ -320,68 +270,6 @@ function getSubscriptionSummary(
   return {
     title: "Подписка",
   }
-}
-
-function getProgressTone(
-  subscription: { expiresAt: Date | null },
-  status: string,
-  progress: number
-) {
-  if (status === "EXPIRED" || status === "CANCELED" || progress <= 0) {
-    return "danger"
-  }
-
-  if (!subscription.expiresAt) {
-    return "healthy"
-  }
-
-  const daysLeft = getDaysLeft(subscription.expiresAt)
-
-  if (daysLeft <= 7 || progress <= 18) {
-    return "danger"
-  }
-
-  if (daysLeft <= 14 || progress <= 35) {
-    return "warning"
-  }
-
-  return "healthy"
-}
-
-function getRemainingSubscriptionProgress(subscription: {
-  startsAt: Date | null
-  expiresAt: Date | null
-}) {
-  if (!subscription.startsAt || !subscription.expiresAt) {
-    return 100
-  }
-
-  const start = subscription.startsAt.getTime()
-  const end = subscription.expiresAt.getTime()
-  const total = end - start
-
-  if (total <= 0) {
-    return 0
-  }
-
-  const remaining = end - Date.now()
-  const value = (remaining / total) * 100
-
-  return Math.min(100, Math.max(0, Math.round(value)))
-}
-
-function getDaysLeft(expiresAt: Date) {
-  const msInDay = 24 * 60 * 60 * 1000
-
-  return Math.max(0, Math.ceil((expiresAt.getTime() - Date.now()) / msInDay))
-}
-
-function formatSubscriptionDate(date: Date) {
-  return new Intl.DateTimeFormat("ru-RU", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(date)
 }
 
 function formatCompactSubscriptionUrl(url: string) {
@@ -400,28 +288,4 @@ function formatCompactSubscriptionUrl(url: string) {
 
     return token ? `...${token.slice(-10)}` : url
   }
-}
-
-function formatDeviceLimit(deviceLimit: number) {
-  return `${deviceLimit} ${pluralizeRu(deviceLimit, [
-    "устройство",
-    "устройства",
-    "устройств",
-  ])}`
-}
-
-function pluralizeRu(value: number, forms: [string, string, string]) {
-  const abs = Math.abs(value)
-  const mod10 = abs % 10
-  const mod100 = abs % 100
-
-  if (mod10 === 1 && mod100 !== 11) {
-    return forms[0]
-  }
-
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
-    return forms[1]
-  }
-
-  return forms[2]
 }

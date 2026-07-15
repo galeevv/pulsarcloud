@@ -13,13 +13,16 @@ import {
 } from "@/components/app/pulsar-primitives"
 import { SetupVpnAction } from "@/components/app/setup-vpn-action"
 import { SubscriptionPaymentAction } from "@/components/app/subscription-payment-action"
+import { SubscriptionStatusPoller } from "@/components/app/subscription-status-poller"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { formatPreviewRub } from "@/src/frontend-preview/format"
 import {
   getPricingView,
+  getLastPurchasePreferencesView,
   getSubscriptionView,
+  getWalletBalanceView,
 } from "@/src/server/queries/user-dashboard"
 import { requireWebSession } from "@/src/server/transport/web/session"
 import type {
@@ -28,15 +31,18 @@ import type {
 } from "@/src/frontend-preview/view-models"
 
 export const metadata: Metadata = {
-  title: "Главная",
+  title: { absolute: "PULSAR" },
 }
 
 export default async function HomePage() {
   const session = await requireWebSession("USER")
-  const [subscription, settings] = await Promise.all([
-    getSubscriptionView(session.userId),
-    getPricingView(),
-  ])
+  const [subscription, settings, walletBalanceRub, lastPurchase] =
+    await Promise.all([
+      getSubscriptionView(session.userId),
+      getPricingView(session.userId),
+      getWalletBalanceView(session.userId),
+      getLastPurchasePreferencesView(session.userId),
+    ])
   const status = subscription?.status ?? "NONE"
   const renewalLabel =
     status === "NONE" ? "Оплатить подписку" : "Продлить подписку"
@@ -77,43 +83,49 @@ export default async function HomePage() {
         </div>
         <div className="grid w-full gap-3">
           {isActiveProvisioning && subscription ? (
-            <Alert
-              variant={
-                subscription.syncStatus === "FAILED" ? "destructive" : "default"
-              }
-              className="text-left"
-            >
-              {subscription.syncStatus === "FAILED" ? (
-                <AlertCircleIcon />
-              ) : (
-                <InfoIcon />
-              )}
-              <AlertTitle>
-                {subscription.syncStatus === "FAILED"
-                  ? "Не удалось подготовить подключение"
-                  : "Готовим подключение"}
-              </AlertTitle>
-              <AlertDescription>
-                {subscription.syncStatus === "FAILED"
-                  ? (subscription.lastUserFriendlyError ??
-                    "Мы повторим синхронизацию автоматически. Повторная оплата не требуется.")
-                  : "Подписка уже активна. Ссылка появится после синхронизации, повторная оплата не требуется."}
-              </AlertDescription>
-            </Alert>
+            <>
+              <SubscriptionStatusPoller
+                active
+                initialSyncStatus={subscription.syncStatus}
+                initialHasSubscriptionUrl={Boolean(
+                  subscription.subscriptionUrl
+                )}
+                initialDeviceLimit={subscription.deviceLimit}
+              />
+              <Alert
+                variant={
+                  subscription.syncStatus === "FAILED"
+                    ? "destructive"
+                    : "default"
+                }
+                className="text-left"
+              >
+                {subscription.syncStatus === "FAILED" ? (
+                  <AlertCircleIcon />
+                ) : (
+                  <InfoIcon />
+                )}
+                <AlertTitle>
+                  {subscription.syncStatus === "FAILED"
+                    ? "Не удалось подготовить подключение"
+                    : "Готовим подключение"}
+                </AlertTitle>
+                <AlertDescription>
+                  {subscription.syncStatus === "FAILED"
+                    ? (subscription.lastUserFriendlyError ??
+                      "Мы повторим синхронизацию автоматически. Повторная оплата не требуется.")
+                    : "Подписка уже активна. Ссылка появится после синхронизации, повторная оплата не требуется."}
+                </AlertDescription>
+              </Alert>
+            </>
           ) : (
             <>
               <SubscriptionPaymentAction
                 settings={settings}
+                walletBalanceRub={walletBalanceRub}
                 triggerLabel={renewalLabel}
-                initialDeviceLimit={
-                  subscription?.nextDeviceLimit ?? subscription?.deviceLimit
-                }
-                initialLteEnabled={
-                  subscription?.nextLteEnabled ?? subscription?.lteEnabled
-                }
-                renewsActiveSubscription={Boolean(
-                  subscription && ["ACTIVE", "TRIAL"].includes(status)
-                )}
+                initialDeviceLimit={lastPurchase?.deviceLimit}
+                initialLteEnabled={lastPurchase?.lteEnabled}
               />
               <SetupVpnAction subscriptionUrl={subscription?.subscriptionUrl} />
             </>
@@ -140,8 +152,8 @@ export default async function HomePage() {
                   бесплатно.
                 </span>
                 <span className="block">
-                  Вы получаете {formatPreviewRub(settings.referralRewardRub)}{" "}
-                  после его оплаты.
+                  Вам {formatPreviewRub(settings.referralRewardRub)} после
+                  оплаты друга.
                 </span>
               </p>
             </div>

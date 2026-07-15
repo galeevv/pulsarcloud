@@ -59,6 +59,11 @@ enum PaymentStatus {
   PARTIALLY_REFUNDED
 }
 
+enum PaymentPurpose {
+  SUBSCRIPTION
+  DEVICE_LIMIT_UPGRADE
+}
+
 enum SubscriptionStatus {
   TRIAL
   ACTIVE
@@ -95,6 +100,7 @@ enum ReferralRewardStatus {
 enum WalletLedgerType {
   REFERRAL_REWARD
   REFERRAL_REWARD_REVERSAL
+  SUBSCRIPTION_PAYMENT
   PAYOUT_RESERVE
   PAYOUT_RELEASE
   PAYOUT_PAID
@@ -262,11 +268,13 @@ model PricingSettings {
   key                          String   @unique @default("default")
   baseMonthlyPriceMinor        Int
   extraDeviceMonthlyPriceMinor Int
+  deviceLimitUpgradePriceMinor Int      @default(5000)
   lteMonthlyPriceMinor         Int
   durationDiscountsJson        String
   minDeviceLimit               Int      @default(1)
   maxDeviceLimit               Int      @default(5)
   referralRewardMinor          Int      @default(7500)
+  referralFriendDiscountPct    Int      @default(0)
   referralTrialDays            Int      @default(3)
   minimalPayoutMinor           Int      @default(15000)
   version                      Int      @default(1)
@@ -280,6 +288,7 @@ model Payment {
   externalPaymentId      String?             @unique
   idempotencyKey         String              @unique
   status                 PaymentStatus       @default(CREATED)
+  purpose                PaymentPurpose      @default(SUBSCRIPTION)
   amountMinor            Int
   currency               String              @default("RUB")
   durationDays           Int
@@ -516,7 +525,7 @@ model TelegramProfile {
   lastName                          String?
   canReceiveMessages                Boolean   @default(true)
   transactionalNotificationsEnabled Boolean   @default(true)
-  newsNotificationsEnabled          Boolean   @default(false)
+  newsNotificationsEnabled          Boolean   @default(true)
   botStartedAt                      DateTime?
   botBlockedAt                      DateTime?
   updatedAt                         DateTime  @updatedAt
