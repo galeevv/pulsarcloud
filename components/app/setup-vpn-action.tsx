@@ -386,17 +386,16 @@ function SetupVpnFlow({
                       <span className="truncate">{displaySubscriptionUrl}</span>
                       <CopyIcon className="size-4 shrink-0" />
                     </button>
-                    <Button
-                      type="button"
+                    <a
+                      href={`happ://add/${effectiveSubscriptionUrl}`}
                       className={cn(
                         buttonVariants({ size: "lg" }),
                         pulsarControlClass
                       )}
-                      onClick={() => window.location.assign(effectiveSubscriptionUrl)}
                     >
                       <Link2Icon data-icon="inline-start" />
                       Подключить в Happ
-                    </Button>
+                    </a>
                     <Button
                       type="button"
                       size="lg"

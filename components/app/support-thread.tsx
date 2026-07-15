@@ -89,7 +89,10 @@ export function SupportThread({
   return (
     <MessageScrollerProvider autoScroll defaultScrollPosition="end">
       <MessageScroller className="min-h-0 flex-1">
-        <MessageScrollerViewport aria-label="Сообщения поддержки">
+        <MessageScrollerViewport
+          aria-label="Сообщения поддержки"
+          style={{ scrollbarGutter: messages.length ? "stable" : "auto" }}
+        >
           <MessageScrollerContent
             aria-live="polite"
             aria-relevant="additions text"

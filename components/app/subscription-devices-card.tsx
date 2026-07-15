@@ -9,7 +9,10 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
-import { PulsarActionRow } from "@/components/app/pulsar-primitives"
+import {
+  PulsarActionRow,
+  pulsarCtaClass,
+} from "@/components/app/pulsar-primitives"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
   AlertDialog,
@@ -42,6 +45,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Separator } from "@/components/ui/separator"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { formatPreviewRub } from "@/src/frontend-preview/format"
 
@@ -107,7 +111,7 @@ export function SubscriptionDevicesCard({
   const freeSlots = Math.max(0, deviceLimit - visibleDevices.length)
 
   return (
-    <Card className="rounded-3xl border border-border/70 bg-card/40 py-0">
+    <Card className="gap-0 rounded-3xl border border-border/70 bg-card/40 py-0">
       <CardHeader className="p-4 pb-0">
         <CardTitle>Устройства</CardTitle>
         <CardDescription>
@@ -117,7 +121,7 @@ export function SubscriptionDevicesCard({
           <Badge variant="secondary">Лимит: {deviceLimit}</Badge>
         </CardAction>
       </CardHeader>
-      <CardContent className="flex flex-col gap-2 p-4">
+      <CardContent className="flex flex-col gap-2 px-4 pt-2 pb-4">
         {loading ? (
           Array.from({ length: Math.min(deviceLimit, 3) }, (_, index) => (
             <Skeleton key={index} className="h-[62px] w-full" />
@@ -158,12 +162,15 @@ export function SubscriptionDevicesCard({
         )}
 
         {deviceLimit < maximum ? (
-          <DeviceLimitUpgradeDialog
-            currentDeviceLimit={deviceLimit}
-            maxDeviceLimit={maximum}
-            deviceLimitUpgradePriceRub={deviceLimitUpgradePriceRub}
-            pricingVersion={pricingVersion}
-          />
+          <>
+            <Separator className="my-1" />
+            <DeviceLimitUpgradeDialog
+              currentDeviceLimit={deviceLimit}
+              maxDeviceLimit={maximum}
+              deviceLimitUpgradePriceRub={deviceLimitUpgradePriceRub}
+              pricingVersion={pricingVersion}
+            />
+          </>
         ) : null}
       </CardContent>
     </Card>
@@ -317,7 +324,7 @@ function DeviceLimitUpgradeDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <PulsarActionRow
-        icon={PlusIcon}
+        icon={SmartphoneIcon}
         title="Дополнительные"
         description={`За каждое устройство доплата ${formatPreviewRub(deviceLimitUpgradePriceRub)}`}
         action={
@@ -338,9 +345,7 @@ function DeviceLimitUpgradeDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Увеличить лимит устройств</DialogTitle>
-          <DialogDescription>
-            Выберите новый лимит. Уменьшить его в текущей подписке нельзя.
-          </DialogDescription>
+          <DialogDescription>Выберите лимит выше текущего.</DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-3">
@@ -375,19 +380,15 @@ function DeviceLimitUpgradeDialog({
           </p>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="w-full">
           <Button
             type="button"
-            variant="outline"
+            size="lg"
+            className={pulsarCtaClass}
             disabled={pending}
-            onClick={() => setOpen(false)}
+            onClick={createPayment}
           >
-            Отмена
-          </Button>
-          <Button type="button" disabled={pending} onClick={createPayment}>
-            {pending
-              ? "Создаём платёж…"
-              : `Оплатить ${formatPreviewRub(amountMinor / 100)}`}
+            {pending ? "Создаём платёж…" : formatPreviewRub(amountMinor / 100)}
           </Button>
         </DialogFooter>
       </DialogContent>

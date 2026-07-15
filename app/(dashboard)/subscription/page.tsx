@@ -67,7 +67,7 @@ export default async function SubscriptionPage() {
       <PulsarAssetCard
         src="/details/observed.gif"
         alt="PulsarVPN"
-        contentClassName="flex min-h-56 flex-col justify-center gap-4"
+        contentClassName="flex flex-col gap-4"
       >
         {hasSubscriptionRecord ? (
           <div className="flex flex-col items-center text-center">
@@ -106,7 +106,7 @@ export default async function SubscriptionPage() {
             {hasActiveSubscription ? (
               isConnectionReady && subscription.subscriptionUrl ? (
                 <a
-                  href={subscription.subscriptionUrl}
+                  href={`happ://add/${subscription.subscriptionUrl}`}
                   className={pulsarLinkButtonClass()}
                 >
                   <Link2Icon data-icon="inline-start" />

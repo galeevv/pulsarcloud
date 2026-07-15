@@ -71,6 +71,22 @@ test("navigation and primary preview interfaces remain wired", async () => {
   assert.match(support, /SupportComposer/)
 })
 
+test("Happ connection actions use the subscription deeplink", async () => {
+  const subscription = await readFile(
+    path.join(root, "app/(dashboard)/subscription/page.tsx"),
+    "utf8"
+  )
+  const setup = await readFile(
+    path.join(root, "components/app/setup-vpn-action.tsx"),
+    "utf8"
+  )
+
+  assert.ok(
+    subscription.includes("href={`happ://add/${subscription.subscriptionUrl}`}")
+  )
+  assert.ok(setup.includes("href={`happ://add/${effectiveSubscriptionUrl}`}"))
+})
+
 test("authentication uses toast feedback and OTP auto-submit", async () => {
   const auth = await readFile(
     path.join(root, "components/auth/auth-card.tsx"),

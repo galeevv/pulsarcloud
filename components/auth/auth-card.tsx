@@ -27,6 +27,7 @@ import {
   InputOTPSlot,
 } from "@/components/ui/input-otp"
 import { Separator } from "@/components/ui/separator"
+import { cn } from "@/lib/utils"
 
 type ApiError = { message?: string }
 type ErrorTarget = "email" | "otp" | "telegram"
@@ -193,7 +194,10 @@ export function AuthCard({
         src="/hero/pulsar.gif"
         alt="PulsarVPN"
         cardClassName="isolate w-full max-w-md"
-        contentClassName="relative flex min-h-56 w-full min-w-0 flex-col justify-center gap-4 overflow-hidden"
+        contentClassName={cn(
+          "relative flex w-full min-w-0 flex-col gap-4 overflow-hidden",
+          !challengeId && "min-h-56 justify-center"
+        )}
       >
         {challengeId ? (
           <Button
@@ -264,7 +268,7 @@ export function AuthCard({
                 type="button"
                 size="sm"
                 variant="link"
-                className="h-auto px-0 text-sm"
+                className="h-auto w-fit self-center px-0 py-0 text-sm"
                 disabled={pending || resendSeconds > 0}
                 onClick={() => void requestEmailCode()}
               >
@@ -272,6 +276,9 @@ export function AuthCard({
                   ? `Отправить новый код через ${resendSeconds} сек.`
                   : "Отправить новый код"}
               </Button>
+              <p className="text-center text-sm text-muted-foreground">
+                Не нашли письмо? Проверьте папку «Спам».
+              </p>
             </div>
           ) : (
             <>

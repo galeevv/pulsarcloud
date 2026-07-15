@@ -173,34 +173,37 @@ export function LoginMethodsManager({
                 Привязать
               </DialogTrigger>
               <DialogContent className="w-full min-w-0 gap-5 p-5 sm:max-w-sm">
-                <DialogHeader className="items-center text-center">
+                {challengeId ? (
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="outline"
+                    className="absolute top-5 left-5"
+                    aria-label="Изменить email"
+                    disabled={pending}
+                    onClick={() => {
+                      setChallengeId(undefined)
+                      setOtp("")
+                    }}
+                  >
+                    <ArrowLeftIcon />
+                  </Button>
+                ) : null}
+
+                <DialogHeader className="items-center px-10 text-center">
                   <DialogTitle className="text-lg font-semibold">
                     {challengeId ? "Введите код" : "Привязать email"}
                   </DialogTitle>
                   <DialogDescription>
                     {challengeId
                       ? "Введите шестизначный код из письма."
-                      : "Укажите email, который будет использоваться для входа."}
+                      : "Укажите email для входа."}
                   </DialogDescription>
                 </DialogHeader>
 
                 {challengeId ? (
-                  <div className="relative flex w-full min-w-0 flex-col gap-4 pt-1">
-                    <Button
-                      type="button"
-                      size="icon-sm"
-                      variant="outline"
-                      className="absolute -top-1 left-0"
-                      aria-label="Изменить email"
-                      disabled={pending}
-                      onClick={() => {
-                        setChallengeId(undefined)
-                        setOtp("")
-                      }}
-                    >
-                      <ArrowLeftIcon />
-                    </Button>
-                    <FieldGroup className="min-w-0 pt-10">
+                  <div className="flex w-full min-w-0 flex-col gap-3">
+                    <FieldGroup className="min-w-0">
                       <Field className="min-w-0">
                         <FieldLabel className="sr-only">
                           Код из письма
@@ -227,6 +230,9 @@ export function LoginMethodsManager({
                         </InputOTP>
                       </Field>
                     </FieldGroup>
+                    <p className="text-center text-sm text-muted-foreground">
+                      Не нашли письмо? Проверьте папку «Спам».
+                    </p>
                   </div>
                 ) : (
                   <form className="w-full" onSubmit={linkEmail}>
