@@ -10,7 +10,6 @@ import {
   HeadphonesIcon,
   LayoutDashboardIcon,
   LogOutIcon,
-  RadioTowerIcon,
   SendIcon,
   UsersIcon,
   WalletCardsIcon,
@@ -54,7 +53,6 @@ type NavigationItem = {
   icon: LucideIcon
   activePath?: string
   legacyTab?: string
-  subscriptionStatus?: string
   legacyFallback?: boolean
 }
 
@@ -69,17 +67,9 @@ const navigation: Array<{ label: string; items: NavigationItem[] }> = [
       },
       {
         label: "Пользователи",
-        href: "/admin/legacy?tab=users",
+        href: "/admin/users",
         icon: UsersIcon,
         activePath: "/admin/users",
-        legacyTab: "users",
-      },
-      {
-        label: "Подписки",
-        href: "/admin/legacy?tab=users&subscriptionStatus=ACTIVE",
-        icon: RadioTowerIcon,
-        legacyTab: "users",
-        subscriptionStatus: "ACTIVE",
       },
     ],
   },
@@ -152,12 +142,7 @@ function isNavigationItemActive(
       )
     }
     if (item.legacyTab !== activeTab) return false
-    if (item.subscriptionStatus) {
-      return searchParams.get("subscriptionStatus") === item.subscriptionStatus
-    }
-    return item.legacyTab === "users"
-      ? searchParams.get("subscriptionStatus") !== "ACTIVE"
-      : true
+    return true
   }
   return pathname === item.href
 }
@@ -264,7 +249,7 @@ function AdminHeader({ testMode }: { testMode: boolean }) {
   const pathname = usePathname()
 
   return (
-    <header className="sticky top-4 z-40 shrink-0">
+    <header className="relative top-4 shrink-0">
       <div className="mx-auto w-full max-w-[1200px] px-4 md:px-6">
         <div className="rounded-3xl border border-border/70 bg-background/70 px-3 py-3 backdrop-blur-xl">
           <div className="flex items-center justify-between gap-6">

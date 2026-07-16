@@ -87,10 +87,10 @@ export default async function AdminUserDetailsPage({
   })
 
   return (
-    <main className="pulsar-admin-container">
+    <div className="pulsar-admin-container">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">Пользователь</h1>
+          <h2 className="text-2xl font-semibold">Пользователь</h2>
           <p className="font-mono text-xs text-muted-foreground">{user.id}</p>
         </div>
         <Button
@@ -267,7 +267,7 @@ export default async function AdminUserDetailsPage({
           ])}
         />
       </DetailsCard>
-    </main>
+    </div>
   )
 }
 

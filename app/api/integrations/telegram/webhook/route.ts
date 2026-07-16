@@ -4,18 +4,46 @@ import {
   hashToken,
   safeEqual,
 } from "@/src/server/infrastructure/security/crypto"
+import {
+  isTelegramCallbackAction,
+  type TelegramCallbackAction,
+} from "@/src/server/domain/telegram/service"
 
 type TelegramUpdate = {
   update_id?: number
   message?: unknown
   callback_query?: unknown
+  my_chat_member?: unknown
+}
+
+type StoredTelegramFrom = {
+  id: string
+  username?: string
+  firstName?: string
+  lastName?: string
 }
 
 type StoredTelegramMessage = {
   command: "start" | "account" | "notifications" | "help" | "other"
   startTokenHash?: string
   chat?: { id: string; type?: string }
-  from?: { id: string; username?: string }
+  from?: StoredTelegramFrom
+}
+
+type StoredTelegramCallback = {
+  id?: string
+  action?: TelegramCallbackAction | "other"
+  from?: StoredTelegramFrom
+  message?: {
+    messageId?: string
+    chat?: { id: string; type?: string }
+  }
+}
+
+type StoredMyChatMember = {
+  chat?: { id: string; type?: string }
+  from?: StoredTelegramFrom
+  status?: string
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -28,6 +56,35 @@ function telegramId(value: unknown) {
   return typeof value === "number" && Number.isSafeInteger(value)
     ? String(value)
     : undefined
+}
+
+function shortString(value: unknown, max: number) {
+  return typeof value === "string" && value.length > 0
+    ? value.slice(0, max)
+    : undefined
+}
+
+function normalizeFrom(value: unknown): StoredTelegramFrom | undefined {
+  const from = record(value)
+  const id = telegramId(from?.id)
+  if (!id) return undefined
+  const username = shortString(from?.username, 64)
+  const firstName = shortString(from?.first_name, 128)
+  const lastName = shortString(from?.last_name, 128)
+  return {
+    id,
+    ...(username ? { username } : {}),
+    ...(firstName ? { firstName } : {}),
+    ...(lastName ? { lastName } : {}),
+  }
+}
+
+function normalizeChat(value: unknown) {
+  const chat = record(value)
+  const id = telegramId(chat?.id)
+  if (!id) return undefined
+  const type = shortString(chat?.type, 32)
+  return { id, ...(type ? { type } : {}) }
 }
 
 function commandFromText(
@@ -49,26 +106,67 @@ function commandFromText(
 
 export function normalizeTelegramUpdate(update: TelegramUpdate) {
   const message = record(update.message)
-  if (!message) return {}
-  const chat = record(message.chat)
-  const from = record(message.from)
-  const chatId = telegramId(chat?.id)
-  const fromId = telegramId(from?.id)
-  const chatType =
-    typeof chat?.type === "string" ? chat.type.slice(0, 32) : undefined
-  const username =
-    typeof from?.username === "string" ? from.username.slice(0, 64) : undefined
-  return {
-    message: {
-      ...commandFromText(message.text),
-      ...(chatId
-        ? { chat: { id: chatId, ...(chatType ? { type: chatType } : {}) } }
-        : {}),
-      ...(fromId
-        ? { from: { id: fromId, ...(username ? { username } : {}) } }
-        : {}),
-    } satisfies StoredTelegramMessage,
+  if (message)
+    return {
+      message: {
+        ...commandFromText(message.text),
+        ...(normalizeChat(message.chat)
+          ? { chat: normalizeChat(message.chat) }
+          : {}),
+        ...(normalizeFrom(message.from)
+          ? { from: normalizeFrom(message.from) }
+          : {}),
+      } satisfies StoredTelegramMessage,
+    }
+
+  const callback = record(update.callback_query)
+  if (callback) {
+    const callbackMessage = record(callback.message)
+    const action = isTelegramCallbackAction(callback.data)
+      ? callback.data
+      : "other"
+    const messageId = telegramId(callbackMessage?.message_id)
+    return {
+      callbackQuery: {
+        ...(shortString(callback.id, 256)
+          ? { id: shortString(callback.id, 256) }
+          : {}),
+        action,
+        ...(normalizeFrom(callback.from)
+          ? { from: normalizeFrom(callback.from) }
+          : {}),
+        ...(callbackMessage
+          ? {
+              message: {
+                ...(messageId ? { messageId } : {}),
+                ...(normalizeChat(callbackMessage.chat)
+                  ? { chat: normalizeChat(callbackMessage.chat) }
+                  : {}),
+              },
+            }
+          : {}),
+      } satisfies StoredTelegramCallback,
+    }
   }
+
+  const membership = record(update.my_chat_member)
+  if (membership) {
+    const newMember = record(membership.new_chat_member)
+    return {
+      myChatMember: {
+        ...(normalizeChat(membership.chat)
+          ? { chat: normalizeChat(membership.chat) }
+          : {}),
+        ...(normalizeFrom(membership.from)
+          ? { from: normalizeFrom(membership.from) }
+          : {}),
+        ...(shortString(newMember?.status, 32)
+          ? { status: shortString(newMember?.status, 32) }
+          : {}),
+      } satisfies StoredMyChatMember,
+    }
+  }
+  return {}
 }
 
 export async function POST(request: Request) {
@@ -103,7 +201,9 @@ export async function POST(request: Request) {
             ? "message"
             : update.callback_query
               ? "callback_query"
-              : "other",
+              : update.my_chat_member
+                ? "my_chat_member"
+                : "other",
           // Telegram start parameters are bearer credentials. Persist only a
           // normalized command and its HMAC, never the raw message text.
           payloadJson: JSON.stringify(normalizeTelegramUpdate(update)),

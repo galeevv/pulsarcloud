@@ -131,3 +131,44 @@ export async function getReferralsView(userId: string) {
       : null,
   }
 }
+
+export async function getReferralSummaryView(userId: string) {
+  const now = new Date()
+  const [profile, invitedUsers, activeUsers, rewards, wallet] =
+    await Promise.all([
+      db.referralProfile.findUnique({ where: { userId } }),
+      db.referralInvite.count({ where: { inviterUserId: userId } }),
+      db.referralInvite.count({
+        where: {
+          inviterUserId: userId,
+          invited: {
+            subscription: {
+              is: {
+                status: { in: ["ACTIVE", "TRIAL"] },
+                expiresAt: { gt: now },
+              },
+            },
+          },
+        },
+      }),
+      db.referralReward.aggregate({
+        where: { inviterUserId: userId, status: { not: "REVERSED" } },
+        _sum: { amountMinor: true },
+      }),
+      db.walletAccount.findUnique({
+        where: { userId },
+        select: { availableMinor: true },
+      }),
+    ])
+
+  return {
+    inviteUrl:
+      profile?.isEnabled && profile.inviteCode
+        ? `${getConfig().appUrl}/?invite=${profile.inviteCode}`
+        : null,
+    invitedUsers,
+    activeUsers,
+    rewardMinor: rewards._sum.amountMinor ?? 0,
+    availableMinor: wallet?.availableMinor ?? 0,
+  }
+}

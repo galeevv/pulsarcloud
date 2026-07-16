@@ -99,22 +99,9 @@ function formatRubMinor(amountMinor: number) {
   }).format(amountMinor / 100)
 }
 
-function parseHeartbeat(valueJson: string | undefined) {
-  if (!valueJson) return null
-  try {
-    const value = JSON.parse(valueJson) as { at?: string }
-    if (!value.at) return null
-    const date = new Date(value.at)
-    return Number.isFinite(date.getTime()) ? date : null
-  } catch {
-    return null
-  }
-}
-
 export async function getAdminDashboardView() {
   const now = new Date()
   const weekStart = new Date(now.getTime() - 7 * DAY_MS)
-  const dayStart = new Date(now.getTime() - DAY_MS)
   const previousWeekStart = new Date(now.getTime() - 14 * DAY_MS)
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
   const previousMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1)
@@ -134,21 +121,10 @@ export async function getAdminDashboardView() {
     trialSubscriptions,
     revenueThisMonth,
     revenuePreviousMonth,
-    pendingPayments,
     pendingPayouts,
     openSupportConversations,
     failedJobs,
-    pendingJobs,
     failedSubscriptionSyncs,
-    manualReferralReviews,
-    fulfillmentReviews,
-    refundReviews,
-    telegramProfiles,
-    reachableTelegramProfiles,
-    newsSubscribers,
-    failedTelegramDeliveries,
-    workerState,
-    outboxState,
     recentUsers,
     recentPayments,
     recentAdminActions,
@@ -184,7 +160,6 @@ export async function getAdminDashboardView() {
       },
       _sum: { amountMinor: true },
     }),
-    db.payment.count({ where: { status: { in: ["CREATED", "PENDING"] } } }),
     db.payoutRequest.count({
       where: { status: { in: ["PENDING", "APPROVED"] } },
     }),
@@ -198,62 +173,15 @@ export async function getAdminDashboardView() {
         },
       },
     }),
-    db.outboxJob.count({ where: { status: { in: ["FAILED", "DEAD"] } } }),
     db.outboxJob.count({
-      where: { status: { in: ["PENDING", "PROCESSING"] } },
+      where: {
+        status: { in: ["FAILED", "DEAD"] },
+        type: { not: "PROVISION_SUBSCRIPTION" },
+      },
     }),
     db.subscription.count({
       where: { syncStatus: "FAILED", expiresAt: { gt: now } },
     }),
-    db.referralReward.count({ where: { status: "MANUAL_REVIEW" } }),
-    db.payment.count({
-      where: {
-        status: "CONFIRMED",
-        subscriptionEvents: {
-          some: { type: "PAYMENT_FULFILLMENT_REVIEW_REQUIRED" },
-          none: {
-            type: {
-              in: [
-                "PAYMENT_FULFILLMENT_RESOLVED_STAGED_PLAN",
-                "PAYMENT_FULFILLMENT_REFUND_REQUIRED",
-              ],
-            },
-          },
-        },
-      },
-    }),
-    db.payment.count({
-      where: {
-        status: { in: ["REFUNDED", "PARTIALLY_REFUNDED"] },
-        subscriptionEvents: {
-          some: { type: "REFUND_REVIEW_REQUIRED" },
-          none: {
-            type: {
-              in: ["REFUND_REVIEW_SUSPENDED", "REFUND_REVIEW_KEPT_ACTIVE"],
-            },
-          },
-        },
-      },
-    }),
-    db.telegramProfile.count(),
-    db.telegramProfile.count({
-      where: { canReceiveMessages: true, chatId: { not: null } },
-    }),
-    db.telegramProfile.count({
-      where: {
-        canReceiveMessages: true,
-        chatId: { not: null },
-        newsNotificationsEnabled: true,
-      },
-    }),
-    db.telegramBroadcastDelivery.count({
-      where: {
-        status: "FAILED",
-        broadcast: { createdAt: { gte: dayStart } },
-      },
-    }),
-    db.systemState.findUnique({ where: { key: "worker_heartbeat" } }),
-    db.outboxJob.groupBy({ by: ["status"], _count: { _all: true } }),
     db.user.findMany({
       where: { role: "USER" },
       orderBy: { createdAt: "desc" },
@@ -370,23 +298,11 @@ export async function getAdminDashboardView() {
     ]
   })
 
-  const workerHeartbeatAt = parseHeartbeat(workerState?.valueJson)
-  const workerReady = Boolean(
-    workerHeartbeatAt &&
-    now.getTime() - workerHeartbeatAt.getTime() <
-      Math.max(60_000, config.worker.pollIntervalMs * 10)
-  )
   const openSupport = openSupportConversations.filter(
     (conversation) => conversation.messages[0]?.authorRole === "USER"
   ).length
-  const manualReviews =
-    manualReferralReviews + fulfillmentReviews + refundReviews
   const attentionTotal =
-    pendingPayouts +
-    openSupport +
-    failedJobs +
-    failedSubscriptionSyncs +
-    manualReviews
+    pendingPayouts + openSupport + failedJobs + failedSubscriptionSyncs
   const adminActivityTitle = config.admin.telegramUsername
     ? config.admin.telegramUsername.startsWith("@")
       ? config.admin.telegramUsername
@@ -460,23 +376,6 @@ export async function getAdminDashboardView() {
       openSupport,
       failedJobs,
       failedSubscriptionSyncs,
-      manualReviews,
-    },
-    system: {
-      workerReady,
-      workerHeartbeatAt,
-      pendingJobs,
-      failedJobs,
-      pendingPayments,
-      outbox: Object.fromEntries(
-        outboxState.map((item) => [item.status, item._count._all])
-      ),
-      remnawaveProvider: config.remnawave.provider,
-      billingEnabled: config.payments.enabled,
-      telegramProfiles,
-      reachableTelegramProfiles,
-      newsSubscribers,
-      failedTelegramDeliveries,
     },
     topReferrers,
     activities,

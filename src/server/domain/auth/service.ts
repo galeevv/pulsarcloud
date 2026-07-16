@@ -470,11 +470,101 @@ type TelegramStartCredential =
   | { rawStartToken: string; startTokenHash?: never }
   | { startTokenHash: string; rawStartToken?: never }
 
+type VerifiedTelegramUser = {
+  telegramId: string
+  username?: string
+  firstName?: string
+  lastName?: string
+  chatId: string
+}
+
+async function resolveTelegramUser(
+  tx: Prisma.TransactionClient,
+  input: VerifiedTelegramUser & {
+    requestedUserId?: string
+    inviteCode?: string | null
+  }
+) {
+  let identity = await tx.authIdentity.findUnique({
+    where: { telegramId: input.telegramId },
+  })
+  if (
+    input.requestedUserId &&
+    identity &&
+    identity.userId !== input.requestedUserId
+  )
+    throw new BusinessError("AUTH_IDENTITY_IN_USE", 409)
+
+  let created = false
+  let userId = input.requestedUserId ?? identity?.userId
+  if (!userId) {
+    const user = await createUserGraph(tx, { isTest: getConfig().testMode })
+    userId = user.id
+    created = true
+    await applyReferralOnRegistration(tx, {
+      invitedUserId: userId,
+      inviteCode: input.inviteCode,
+    })
+  }
+
+  const user = await tx.user.findUniqueOrThrow({ where: { id: userId } })
+  if (user.status !== "ACTIVE" || user.isTest !== getConfig().testMode)
+    throw new BusinessError("AUTH_FORBIDDEN", 403)
+
+  if (!identity)
+    identity = await tx.authIdentity.create({
+      data: {
+        userId,
+        provider: "TELEGRAM",
+        providerSubject: input.telegramId,
+        telegramId: input.telegramId,
+        telegramUsername: input.username,
+        verifiedAt: new Date(),
+      },
+    })
+  else if (identity.telegramUsername !== input.username)
+    identity = await tx.authIdentity.update({
+      where: { id: identity.id },
+      data: { telegramUsername: input.username },
+    })
+
+  await tx.telegramProfile.upsert({
+    where: { userId },
+    create: {
+      userId,
+      telegramId: input.telegramId,
+      username: input.username,
+      firstName: input.firstName,
+      lastName: input.lastName,
+      chatId: input.chatId,
+      botStartedAt: new Date(),
+    },
+    update: {
+      username: input.username,
+      firstName: input.firstName,
+      lastName: input.lastName,
+      chatId: input.chatId,
+      canReceiveMessages: true,
+      botStartedAt: new Date(),
+      botBlockedAt: null,
+    },
+  })
+  return { userId, created }
+}
+
+export async function ensureTelegramBotUser(input: VerifiedTelegramUser) {
+  if (input.chatId !== input.telegramId)
+    throw new BusinessError("AUTH_FORBIDDEN", 403)
+  return authTransaction((tx) => resolveTelegramUser(tx, input))
+}
+
 export async function completeTelegramStart(
   input: TelegramStartCredential & {
     challengeId?: string
     telegramId: string
     username?: string
+    firstName?: string
+    lastName?: string
     chatId?: string
   }
 ) {
@@ -514,57 +604,25 @@ export async function completeTelegramStart(
       input.telegramId !== getConfig().admin.telegramId
     )
       throw new BusinessError("ADMIN_FORBIDDEN", 403)
-    let identity = await tx.authIdentity.findUnique({
+    const identity = await tx.authIdentity.findUnique({
       where: { telegramId: input.telegramId },
     })
-    let userId: string
-    if (challenge.purpose === "LINK_TELEGRAM") {
-      if (!challenge.requestedByUserId)
-        throw new BusinessError("AUTH_FORBIDDEN")
-      if (identity && identity.userId !== challenge.requestedByUserId)
-        throw new BusinessError("AUTH_IDENTITY_IN_USE", 409)
-      userId = challenge.requestedByUserId
-    } else if (identity) userId = identity.userId
-    else {
-      if (challenge.purpose === "ADMIN_LOGIN")
-        throw new BusinessError("ADMIN_FORBIDDEN", 403)
-      const user = await createUserGraph(tx, { isTest: getConfig().testMode })
-      userId = user.id
-      await applyReferralOnRegistration(tx, {
-        invitedUserId: userId,
-        inviteCode: challenge.inviteCodeSnapshot,
-      })
-    }
-    if (!identity)
-      identity = await tx.authIdentity.create({
-        data: {
-          userId,
-          provider: "TELEGRAM",
-          providerSubject: input.telegramId,
-          telegramId: input.telegramId,
-          telegramUsername: input.username,
-          verifiedAt: new Date(),
-        },
-      })
-    const user = await tx.user.findUniqueOrThrow({ where: { id: userId } })
-    if (user.isTest !== getConfig().testMode)
-      throw new BusinessError("AUTH_FORBIDDEN", 403)
-    await tx.telegramProfile.upsert({
-      where: { userId },
-      create: {
-        userId,
-        telegramId: input.telegramId,
-        username: input.username,
-        chatId: input.chatId,
-        botStartedAt: new Date(),
-      },
-      update: {
-        username: input.username,
-        chatId: input.chatId,
-        canReceiveMessages: true,
-        botStartedAt: new Date(),
-        botBlockedAt: null,
-      },
+    if (challenge.purpose === "LINK_TELEGRAM" && !challenge.requestedByUserId)
+      throw new BusinessError("AUTH_FORBIDDEN")
+    if (challenge.purpose === "ADMIN_LOGIN" && !identity)
+      throw new BusinessError("ADMIN_FORBIDDEN", 403)
+    if (!input.chatId) throw new BusinessError("AUTH_FORBIDDEN", 403)
+    const { userId } = await resolveTelegramUser(tx, {
+      telegramId: input.telegramId,
+      username: input.username,
+      firstName: input.firstName,
+      lastName: input.lastName,
+      chatId: input.chatId,
+      requestedUserId:
+        challenge.purpose === "LINK_TELEGRAM"
+          ? challenge.requestedByUserId!
+          : undefined,
+      inviteCode: challenge.inviteCodeSnapshot,
     })
     const completionToken = randomToken(32)
     const completionPayload =
