@@ -35,7 +35,7 @@ export async function GET(request: Request) {
     const destination = result.linked
       ? "/profile"
       : result.kind === "ADMIN"
-        ? "/admin"
+        ? "/admin/dashboard"
         : "/home"
     return NextResponse.redirect(`${getConfig().appUrl}${destination}`)
   } catch (error) {

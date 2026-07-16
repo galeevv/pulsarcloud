@@ -14,7 +14,7 @@ export default async function Page({
   searchParams: Promise<{ authError?: "expired" | "used"; invite?: string }>
 }) {
   const params = await searchParams
-  if (await getSession("ADMIN")) redirect("/admin")
+  if (await getSession("ADMIN")) redirect("/admin/dashboard")
   if (await getSession("USER")) redirect("/home")
 
   return <AuthCard authError={params.authError} invite={params.invite} />

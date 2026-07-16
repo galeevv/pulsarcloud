@@ -93,7 +93,10 @@ export default async function AdminUserDetailsPage({
           <h1 className="text-2xl font-semibold">Пользователь</h1>
           <p className="font-mono text-xs text-muted-foreground">{user.id}</p>
         </div>
-        <Button variant="outline" render={<Link href="/admin" />}>
+        <Button
+          variant="outline"
+          render={<Link href="/admin/legacy?tab=users" />}
+        >
           ← В admin
         </Button>
       </div>

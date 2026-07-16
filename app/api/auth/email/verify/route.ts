@@ -31,7 +31,7 @@ export async function POST(request: Request) {
       await setSessionCookie(result.rawSession, result.kind)
     return Response.json({
       ok: true,
-      redirectTo: result.kind === "ADMIN" ? "/admin" : "/home",
+      redirectTo: result.kind === "ADMIN" ? "/admin/dashboard" : "/home",
       linked: result.linked,
     })
   } catch (error) {

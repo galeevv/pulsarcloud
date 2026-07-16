@@ -66,6 +66,16 @@ type SubscriptionDevicesCardProps = {
   pricingVersion: number
 }
 
+function formatDeviceCountAfterPreposition(count: number) {
+  const absoluteCount = Math.abs(count)
+  const lastTwoDigits = absoluteCount % 100
+  const lastDigit = absoluteCount % 10
+  const noun =
+    lastDigit === 1 && lastTwoDigits !== 11 ? "устройства" : "устройств"
+
+  return `${count} ${noun}`
+}
+
 export function SubscriptionDevicesCard({
   deviceLimit,
   maxDeviceLimit,
@@ -112,16 +122,16 @@ export function SubscriptionDevicesCard({
 
   return (
     <Card className="gap-0 rounded-3xl border border-border/70 bg-card/40 py-0">
-      <CardHeader className="p-4 pb-0">
+      <CardHeader className="gap-0 p-4 pb-0">
         <CardTitle>Устройства</CardTitle>
         <CardDescription>
-          По тарифу можно подключить до {formatDeviceLimit(deviceLimit)}.
+          Можно подключить до {formatDeviceCountAfterPreposition(deviceLimit)}.
         </CardDescription>
         <CardAction>
           <Badge variant="secondary">Лимит: {deviceLimit}</Badge>
         </CardAction>
       </CardHeader>
-      <CardContent className="flex flex-col gap-2 px-4 pt-2 pb-4">
+      <CardContent className="flex flex-col gap-2 px-4 pt-4 pb-4">
         {loading ? (
           Array.from({ length: Math.min(deviceLimit, 3) }, (_, index) => (
             <Skeleton key={index} className="h-[62px] w-full" />
@@ -187,8 +197,7 @@ function DeviceRow({
   const [open, setOpen] = React.useState(false)
   const [pending, setPending] = React.useState(false)
   const title = device.deviceModel || device.platform || "Устройство"
-  const system = [device.platform, device.osVersion].filter(Boolean).join(" ")
-  const compactHwid = `HWID …${device.hwid.slice(-8)}`
+  const platform = device.platform
 
   async function deleteDevice() {
     setPending(true)
@@ -220,7 +229,7 @@ function DeviceRow({
     <PulsarActionRow
       icon={SmartphoneIcon}
       title={title}
-      description={[system, compactHwid].filter(Boolean).join(" · ")}
+      description={platform || "Подключено через Happ"}
       action={
         <AlertDialog open={open} onOpenChange={setOpen}>
           <AlertDialogTrigger
@@ -394,20 +403,4 @@ function DeviceLimitUpgradeDialog({
       </DialogContent>
     </Dialog>
   )
-}
-
-function formatDeviceLimit(deviceLimit: number) {
-  return `${deviceLimit} ${pluralizeRu(deviceLimit, [
-    "устройство",
-    "устройства",
-    "устройств",
-  ])}`
-}
-
-function pluralizeRu(value: number, forms: [string, string, string]) {
-  const mod10 = Math.abs(value) % 10
-  const mod100 = Math.abs(value) % 100
-  if (mod10 === 1 && mod100 !== 11) return forms[0]
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return forms[1]
-  return forms[2]
 }

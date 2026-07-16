@@ -25,7 +25,7 @@ export async function GET(request: Request) {
     })
     await setSessionCookie(result.rawSession, result.kind)
     return NextResponse.redirect(
-      `${getConfig().appUrl}${result.kind === "ADMIN" ? "/admin" : "/home"}`
+      `${getConfig().appUrl}${result.kind === "ADMIN" ? "/admin/dashboard" : "/home"}`
     )
   } catch {
     return NextResponse.redirect(

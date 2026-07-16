@@ -608,13 +608,13 @@ test(
             headers: { Cookie: adminCookie },
             redirect: "manual",
           })
-          assertRedirectPath(adminRoot, "/admin")
+          assertRedirectPath(adminRoot, "/admin/dashboard")
 
           const bothRoot = await fetch(`${origin}/`, {
             headers: { Cookie: `${userCookie}; ${adminCookie}` },
             redirect: "manual",
           })
-          assertRedirectPath(bothRoot, "/admin")
+          assertRedirectPath(bothRoot, "/admin/dashboard")
         }
       )
 

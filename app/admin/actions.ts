@@ -60,7 +60,7 @@ export async function setUserStatus(formData: FormData) {
       },
     })
   })
-  revalidatePath("/admin")
+  revalidatePath("/admin", "layout")
 }
 export async function revokeUserSessions(formData: FormData) {
   const session = await admin()
@@ -82,7 +82,7 @@ export async function revokeUserSessions(formData: FormData) {
       },
     })
   })
-  revalidatePath("/admin")
+  revalidatePath("/admin", "layout")
 }
 export async function extendSubscription(formData: FormData) {
   const session = await admin()
@@ -176,7 +176,7 @@ export async function extendSubscription(formData: FormData) {
       },
     })
   })
-  revalidatePath("/admin")
+  revalidatePath("/admin", "layout")
 }
 export async function retryProvisioning(formData: FormData) {
   const session = await admin()
@@ -208,7 +208,7 @@ export async function retryProvisioning(formData: FormData) {
       },
     })
   })
-  revalidatePath("/admin")
+  revalidatePath("/admin", "layout")
 }
 export async function regenerateSubscriptionUrl(formData: FormData) {
   const session = await admin()
@@ -242,7 +242,7 @@ export async function regenerateSubscriptionUrl(formData: FormData) {
       },
     })
   })
-  revalidatePath("/admin")
+  revalidatePath("/admin", "layout")
 }
 export async function adjustWallet(
   _previousState: WalletAdjustmentActionState,
@@ -280,7 +280,7 @@ export async function adjustWallet(
       idempotencyKey: parsed.data.idempotencyKey,
       correlationId: correlationId(),
     })
-    revalidatePath("/admin")
+    revalidatePath("/admin", "layout")
     revalidatePath(`/admin/users/${parsed.data.userId}`)
     return {
       status: "success",
@@ -332,7 +332,7 @@ export async function reconcilePayment(formData: FormData) {
       },
     })
   })
-  revalidatePath("/admin")
+  revalidatePath("/admin", "layout")
 }
 export async function abandonUncertainCheckout(formData: FormData) {
   const session = await admin()
@@ -362,7 +362,7 @@ export async function abandonUncertainCheckout(formData: FormData) {
       },
     })
   })
-  revalidatePath("/admin")
+  revalidatePath("/admin", "layout")
 }
 export async function payoutAction(formData: FormData) {
   const session = await admin()
@@ -376,7 +376,7 @@ export async function payoutAction(formData: FormData) {
     reason: String(formData.get("reason") ?? ""),
     correlationId: correlationId(),
   })
-  revalidatePath("/admin")
+  revalidatePath("/admin", "layout")
 }
 export async function replySupport(formData: FormData) {
   const session = await admin()
@@ -408,7 +408,7 @@ export async function replySupport(formData: FormData) {
       },
     })
   })
-  revalidatePath("/admin")
+  revalidatePath("/admin", "layout")
 }
 export async function setSupportStatus(formData: FormData) {
   const session = await admin()
@@ -432,7 +432,7 @@ export async function setSupportStatus(formData: FormData) {
       },
     })
   })
-  revalidatePath("/admin")
+  revalidatePath("/admin", "layout")
 }
 export async function retryJob(formData: FormData) {
   const session = await admin()
@@ -468,7 +468,7 @@ export async function retryJob(formData: FormData) {
       },
     })
   })
-  revalidatePath("/admin")
+  revalidatePath("/admin", "layout")
 }
 export async function updatePricing(formData: FormData) {
   const session = await admin()
@@ -534,7 +534,7 @@ export async function updatePricing(formData: FormData) {
       },
     })
   })
-  revalidatePath("/admin")
+  revalidatePath("/admin", "layout")
 }
 
 export async function resolveRefundReview(formData: FormData) {
@@ -633,7 +633,7 @@ export async function resolveRefundReview(formData: FormData) {
       },
     })
   })
-  revalidatePath("/admin")
+  revalidatePath("/admin", "layout")
 }
 export async function resolveReferralRewardReview(formData: FormData) {
   const session = await admin()
@@ -706,7 +706,7 @@ export async function resolveReferralRewardReview(formData: FormData) {
       },
     })
   })
-  revalidatePath("/admin")
+  revalidatePath("/admin", "layout")
 }
 export async function resolvePaymentFulfillmentReview(formData: FormData) {
   const session = await admin()
@@ -795,7 +795,7 @@ export async function resolvePaymentFulfillmentReview(formData: FormData) {
       },
     })
   })
-  revalidatePath("/admin")
+  revalidatePath("/admin", "layout")
 }
 export async function createBroadcastDraft(formData: FormData) {
   const session = await admin()
@@ -843,7 +843,7 @@ export async function createBroadcastDraft(formData: FormData) {
       },
     })
   })
-  revalidatePath("/admin")
+  revalidatePath("/admin", "layout")
 }
 
 export async function queueBroadcastDraft(formData: FormData) {
@@ -900,7 +900,7 @@ export async function queueBroadcastDraft(formData: FormData) {
       },
     })
   })
-  revalidatePath("/admin")
+  revalidatePath("/admin", "layout")
 }
 
 export async function cancelBroadcast(formData: FormData) {
@@ -939,5 +939,5 @@ export async function cancelBroadcast(formData: FormData) {
       },
     })
   })
-  revalidatePath("/admin")
+  revalidatePath("/admin", "layout")
 }
