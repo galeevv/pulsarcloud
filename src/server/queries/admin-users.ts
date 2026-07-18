@@ -50,7 +50,6 @@ export async function getAdminUsersView(input: {
     ...(query
       ? {
           OR: [
-            { id: { contains: query } },
             {
               identities: {
                 some: {

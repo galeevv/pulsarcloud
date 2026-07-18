@@ -6,7 +6,17 @@ import {
 import { getEmailSender } from "@/src/server/infrastructure/email"
 import { getProvisioningProvider } from "@/src/server/infrastructure/remnawave/provider"
 import { getTelegramGateway } from "@/src/server/infrastructure/telegram/gateway"
-import { completeTelegramStart } from "@/src/server/domain/auth/service"
+import {
+  completeTelegramStart,
+  ensureTelegramBotUser,
+} from "@/src/server/domain/auth/service"
+import {
+  getTelegramMainScreen,
+  getTelegramScreen,
+  getTelegramUserId,
+  isTelegramCallbackAction,
+  updateTelegramReachability,
+} from "@/src/server/domain/telegram/service"
 import { getConfig } from "@/src/server/config"
 import {
   expireOverduePendingPayments,
@@ -551,23 +561,111 @@ export async function handleJob(job: Job) {
         command?: "start" | "account" | "notifications" | "help" | "other"
         startTokenHash?: string
         chat?: { id?: string; type?: string }
-        from?: { id?: string; username?: string }
+        from?: {
+          id?: string
+          username?: string
+          firstName?: string
+          lastName?: string
+        }
+      }
+      callbackQuery?: {
+        id?: string
+        action?: string
+        from?: { id?: string }
+        message?: {
+          messageId?: string
+          chat?: { id?: string; type?: string }
+        }
+      }
+      myChatMember?: {
+        chat?: { id?: string; type?: string }
+        from?: { id?: string }
+        status?: string
       }
     }
+    const markProcessed = () =>
+      db.telegramUpdateLog.update({
+        where: { id: log.id },
+        data: { processedAt: new Date(), processingError: null },
+      })
+
+    const membership = update.myChatMember
+    if (membership) {
+      if (
+        membership.chat?.type === "private" &&
+        membership.chat.id &&
+        membership.from?.id === membership.chat.id &&
+        membership.status
+      )
+        await updateTelegramReachability({
+          telegramId: membership.from.id,
+          chatId: membership.chat.id,
+          status: membership.status,
+        })
+      await markProcessed()
+      return
+    }
+
+    const callback = update.callbackQuery
+    if (callback) {
+      const gateway = getTelegramGateway()
+      let answerText: string | undefined
+      let showAlert = false
+      let processingError: unknown
+      try {
+        const chat = callback.message?.chat
+        const fromId = callback.from?.id
+        if (
+          chat?.type !== "private" ||
+          !chat.id ||
+          !fromId ||
+          chat.id !== fromId ||
+          !callback.message?.messageId
+        ) {
+          answerText = "Меню доступно только в личном чате с ботом."
+          showAlert = true
+        } else if (!isTelegramCallbackAction(callback.action)) {
+          answerText = "Эта кнопка больше не поддерживается. Отправьте /start."
+          showAlert = true
+        } else {
+          const userId = await getTelegramUserId(fromId)
+          if (!userId) {
+            answerText = "Сначала отправьте /start."
+            showAlert = true
+          } else {
+            const screen = await getTelegramScreen(userId, callback.action)
+            await gateway.editMessageText({
+              chatId: chat.id,
+              messageId: callback.message.messageId,
+              text: screen.text,
+              replyMarkup: screen.replyMarkup,
+            })
+          }
+        }
+      } catch (error) {
+        processingError = error
+        answerText = "Не удалось обновить данные. Попробуйте ещё раз."
+        showAlert = true
+      }
+      if (callback.id)
+        await gateway.answerCallbackQuery({
+          callbackQueryId: callback.id,
+          text: answerText,
+          showAlert,
+        })
+      if (processingError) throw processingError
+      await markProcessed()
+      return
+    }
+
     const message = update.message
     if (!message?.from?.id || !message.chat?.id) {
-      await db.telegramUpdateLog.update({
-        where: { id: log.id },
-        data: { processedAt: new Date() },
-      })
+      await markProcessed()
       return
     }
     const chatId = message.chat.id
     if (message.chat.type !== "private" || chatId !== message.from.id) {
-      await db.telegramUpdateLog.update({
-        where: { id: log.id },
-        data: { processedAt: new Date() },
-      })
+      await markProcessed()
       return
     }
     if (message.command === "start" && message.startTokenHash) {
@@ -575,27 +673,26 @@ export async function handleJob(job: Job) {
         startTokenHash: message.startTokenHash,
         telegramId: message.from.id,
         username: message.from.username,
+        firstName: message.from.firstName,
+        lastName: message.from.lastName,
         chatId,
       })
-    } else if (message.command === "account")
+    } else {
+      const account = await ensureTelegramBotUser({
+        telegramId: message.from.id,
+        username: message.from.username,
+        firstName: message.from.firstName,
+        lastName: message.from.lastName,
+        chatId,
+      })
+      const screen = await getTelegramMainScreen(account.userId)
       await getTelegramGateway().sendMessage({
         chatId,
-        text: `Личный кабинет: ${getConfig().appUrl}/home`,
+        text: screen.text,
+        replyMarkup: screen.replyMarkup,
       })
-    else if (message.command === "notifications")
-      await getTelegramGateway().sendMessage({
-        chatId,
-        text: "Настройки уведомлений доступны в профиле Pulsar.",
-      })
-    else
-      await getTelegramGateway().sendMessage({
-        chatId,
-        text: "Pulsar помогает войти в кабинет и присылает уведомления. Команды: /account, /notifications, /help",
-      })
-    await db.telegramUpdateLog.update({
-      where: { id: log.id },
-      data: { processedAt: new Date() },
-    })
+    }
+    await markProcessed()
     return
   }
   if (job.type === "SEND_TELEGRAM_LOGIN_COMPLETION") {

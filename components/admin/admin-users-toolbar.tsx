@@ -2,7 +2,7 @@
 
 import { SearchIcon, XIcon } from "lucide-react"
 import { usePathname, useRouter } from "next/navigation"
-import { useState, useTransition } from "react"
+import { useCallback, useEffect, useState, useTransition } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
@@ -35,29 +35,33 @@ export function AdminUsersToolbar({
   const [search, setSearch] = useState(query)
   const [pending, startTransition] = useTransition()
 
-  function navigate(nextFilter: AdminUserFilter, nextQuery = search) {
-    const params = new URLSearchParams()
-    const normalizedQuery = nextQuery.trim()
-    if (normalizedQuery) params.set("q", normalizedQuery)
-    if (nextFilter !== "all") params.set("status", nextFilter)
-    const suffix = params.size ? `?${params.toString()}` : ""
-    startTransition(() => router.push(`${pathname}${suffix}`))
-  }
+  const navigate = useCallback(
+    (nextFilter: AdminUserFilter, nextQuery: string) => {
+      const params = new URLSearchParams()
+      const normalizedQuery = nextQuery.trim()
+      if (normalizedQuery) params.set("q", normalizedQuery)
+      if (nextFilter !== "all") params.set("status", nextFilter)
+      const suffix = params.size ? `?${params.toString()}` : ""
+      startTransition(() => router.push(`${pathname}${suffix}`))
+    },
+    [pathname, router]
+  )
+
+  useEffect(() => {
+    if (search.trim() === query) return
+    const timeout = window.setTimeout(() => navigate(filter, search), 350)
+    return () => window.clearTimeout(timeout)
+  }, [filter, navigate, query, search])
 
   return (
-    <form
-      onSubmit={(event) => {
-        event.preventDefault()
-        navigate(filter)
-      }}
-    >
+    <form onSubmit={(event) => event.preventDefault()}>
       <FieldGroup className="gap-3">
         <Field>
           <FieldLabel htmlFor="admin-user-search" className="sr-only">
             Поиск пользователей
           </FieldLabel>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <InputGroup className="h-10 flex-1">
+          <div className="flex gap-2">
+            <InputGroup className="h-10 flex-1" data-disabled={pending}>
               <InputGroupAddon>
                 <SearchIcon />
               </InputGroupAddon>
@@ -66,14 +70,11 @@ export function AdminUsersToolbar({
                 name="q"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Telegram username, email или внутренний ID"
+                placeholder="Telegram username или email"
                 autoComplete="off"
                 maxLength={100}
               />
             </InputGroup>
-            <Button type="submit" disabled={pending}>
-              Найти
-            </Button>
             {query || filter !== "all" ? (
               <Button
                 type="button"
@@ -100,7 +101,7 @@ export function AdminUsersToolbar({
             value={[filter]}
             onValueChange={(values) => {
               const nextFilter = values[0] as AdminUserFilter | undefined
-              if (nextFilter) navigate(nextFilter)
+              if (nextFilter) navigate(nextFilter, search)
             }}
             variant="outline"
             size="sm"

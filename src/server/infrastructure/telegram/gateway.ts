@@ -44,12 +44,15 @@ class BotApiGateway implements TelegramGateway {
   private async call<T>(method: string, payload: Record<string, unknown>) {
     const token = getConfig().telegram.botToken
     if (!token) throw new Error("TELEGRAM_BOT_TOKEN is missing")
-    const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(10_000),
-    })
+    const response = await fetch(
+      `https://api.telegram.org/bot${token}/${method}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(10_000),
+      }
+    )
     const body = (await response.json()) as {
       ok: boolean
       result?: T
@@ -95,7 +98,10 @@ class BotApiGateway implements TelegramGateway {
       )
       return { messageId: String(result.message_id) }
     } catch (error) {
-      if (error instanceof Error && /message is not modified/i.test(error.message))
+      if (
+        error instanceof Error &&
+        /message is not modified/i.test(error.message)
+      )
         return { messageId: input.messageId }
       throw error
     }

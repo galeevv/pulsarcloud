@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 import { ChevronLeftIcon, ChevronRightIcon, UsersIcon } from "lucide-react"
 import Link from "next/link"
 
+import { AdminUserTableRow } from "@/components/admin/admin-user-table-row"
 import { AdminUsersToolbar } from "@/components/admin/admin-users-toolbar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -129,7 +130,6 @@ export default async function AdminUsersPage({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>ID</TableHead>
                   <TableHead>Telegram username</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead>Подписка</TableHead>
@@ -140,17 +140,17 @@ export default async function AdminUsersPage({
               </TableHeader>
               <TableBody>
                 {view.users.map((user) => (
-                  <TableRow key={user.id}>
-                    <TableCell>
+                  <AdminUserTableRow
+                    key={user.id}
+                    href={`/admin/users/${user.id}`}
+                  >
+                    <TableCell className="font-medium">
                       <Link
                         href={`/admin/users/${user.id}`}
-                        className="font-mono text-xs font-medium underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                        className="underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                       >
-                        {user.id}
+                        {telegramLabel(user.telegramUsername)}
                       </Link>
-                    </TableCell>
-                    <TableCell>
-                      {telegramLabel(user.telegramUsername)}
                     </TableCell>
                     <TableCell>{user.email ?? "Почта не привязана"}</TableCell>
                     <TableCell>
@@ -169,7 +169,7 @@ export default async function AdminUsersPage({
                     <TableCell className="text-right tabular-nums">
                       {user.referrals}
                     </TableCell>
-                  </TableRow>
+                  </AdminUserTableRow>
                 ))}
               </TableBody>
             </Table>

@@ -137,16 +137,18 @@ async function getSubscriptionScreen(userId: string): Promise<TelegramScreen> {
     FAILED: "ошибка синхронизации",
     NOT_REQUIRED: "синхронизация не требуется",
   }
-  const remainingDays = Math.max(
-    0,
-    Math.ceil((subscription.expiresAt.getTime() - Date.now()) / 86_400_000)
-  )
+  const remainingDays = subscription.expiresAt
+    ? Math.max(
+        0,
+        Math.ceil((subscription.expiresAt.getTime() - Date.now()) / 86_400_000)
+      )
+    : 0
   return {
     text: [
       "Подписка",
       "",
       `Статус: ${statuses[subscription.status] ?? subscription.status}`,
-      `Дата окончания: ${dateFormatter.format(subscription.expiresAt)}`,
+      `Дата окончания: ${subscription.expiresAt ? dateFormatter.format(subscription.expiresAt) : "—"}`,
       `Осталось дней: ${remainingDays}`,
       `Устройств: ${subscription.deviceLimit}`,
       `LTE-доступ: ${subscription.lteEnabled ? "есть" : "нет"}`,

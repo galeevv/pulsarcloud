@@ -36,6 +36,30 @@ function telegramStartToken(url: string) {
   )
 }
 
+function telegramWebhookRequest(
+  update: Record<string, unknown>,
+  secret = process.env.TELEGRAM_WEBHOOK_SECRET!
+) {
+  return new Request("http://localhost/api/integrations/telegram/webhook", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-telegram-bot-api-secret-token": secret,
+    },
+    body: JSON.stringify(update),
+  })
+}
+
+async function processTelegramUpdate(updateId: string) {
+  await modules.jobs.handleJob({
+    id: `telegram-job-${updateId}`,
+    type: "PROCESS_TELEGRAM_UPDATE",
+    payloadJson: JSON.stringify({ updateId }),
+    attempts: 1,
+    aggregateId: updateId,
+  })
+}
+
 async function loadModules() {
   const [
     { db, initializeDatabase, withBusyRetry },
@@ -48,6 +72,7 @@ async function loadModules() {
     support,
     subscriptions,
     telegramWebhook,
+    telegramGateway,
     security,
   ] = await Promise.all([
     import("@/src/server/infrastructure/db/client"),
@@ -60,6 +85,7 @@ async function loadModules() {
     import("@/src/server/domain/support/service"),
     import("@/src/server/domain/subscriptions/service"),
     import("@/app/api/integrations/telegram/webhook/route"),
+    import("@/src/server/infrastructure/telegram/gateway"),
     import("@/src/server/infrastructure/security/crypto"),
   ])
   const createCheckout = async (
@@ -89,6 +115,7 @@ async function loadModules() {
     support,
     subscriptions,
     telegramWebhook,
+    telegramGateway,
     security,
   }
 }
@@ -1112,6 +1139,301 @@ test("test-mode Telegram simulator links Telegram to the requesting user", async
     ).userId,
     user.userId
   )
+})
+
+test("plain /start registers a shared user graph and reuses it", async () => {
+  modules.telegramGateway.resetTestTelegramGatewayEvents()
+  const update = {
+    update_id: 220001,
+    message: {
+      text: "/start",
+      chat: { id: 900000201, type: "private" },
+      from: {
+        id: 900000201,
+        username: "menu_user",
+        first_name: "Ирина",
+        last_name: "Пульсар",
+      },
+    },
+  }
+  const first = await modules.telegramWebhook.POST(
+    telegramWebhookRequest(update)
+  )
+  const duplicate = await modules.telegramWebhook.POST(
+    telegramWebhookRequest(update)
+  )
+  assert.equal(first.status, 200)
+  assert.equal(duplicate.status, 200)
+  assert.equal(
+    await modules.db.telegramUpdateLog.count({
+      where: { updateId: "220001" },
+    }),
+    1
+  )
+  assert.equal(
+    await modules.db.outboxJob.count({
+      where: { dedupeKey: "telegram-update:220001" },
+    }),
+    1
+  )
+
+  await processTelegramUpdate("220001")
+  const identity = await modules.db.authIdentity.findUniqueOrThrow({
+    where: { telegramId: "900000201" },
+  })
+  const user = await modules.db.user.findUniqueOrThrow({
+    where: { id: identity.userId },
+    include: { wallet: true, referralProfile: true, telegramProfile: true },
+  })
+  assert.ok(user.wallet)
+  assert.ok(user.referralProfile)
+  assert.equal(user.telegramProfile?.firstName, "Ирина")
+  assert.equal(user.telegramProfile?.newsNotificationsEnabled, true)
+
+  const sent = modules.telegramGateway
+    .getTestTelegramGatewayEvents()
+    .find((event) => event.type === "sendMessage")
+  assert.ok(sent && sent.type === "sendMessage")
+  assert.match(sent.text, /Добро пожаловать, Ирина в PULSAR/)
+  const markup = JSON.stringify(sent.replyMarkup)
+  assert.match(markup, /menu:subscription/)
+  assert.match(markup, /menu:balance/)
+  assert.match(markup, /menu:referrals/)
+  assert.match(markup, /menu:support/)
+  assert.match(markup, /http:\/\/localhost:3000\/home/)
+  assert.doesNotMatch(markup, /web_app/)
+
+  const userCount = await modules.db.user.count()
+  await modules.telegramWebhook.POST(
+    telegramWebhookRequest({
+      ...update,
+      update_id: 220002,
+      message: { ...update.message, text: "/help" },
+    })
+  )
+  await processTelegramUpdate("220002")
+  assert.equal(await modules.db.user.count(), userCount)
+  assert.equal(
+    (
+      await modules.db.authIdentity.findUniqueOrThrow({
+        where: { telegramId: "900000201" },
+      })
+    ).userId,
+    identity.userId
+  )
+})
+
+test("Telegram menu callbacks read subscription, wallet, and referrals from the shared database", async () => {
+  const identity = await modules.db.authIdentity.findUniqueOrThrow({
+    where: { telegramId: "900000201" },
+  })
+  await modules.db.walletAccount.update({
+    where: { userId: identity.userId },
+    data: { availableMinor: 12_345 },
+  })
+  await modules.db.referralProfile.update({
+    where: { userId: identity.userId },
+    data: { isEnabled: true, enabledAt: new Date() },
+  })
+  await modules.db.subscription.create({
+    data: {
+      userId: identity.userId,
+      status: "ACTIVE",
+      startedAt: new Date(),
+      expiresAt: new Date(Date.now() + 10 * 86_400_000),
+      deviceLimit: 4,
+      lteEnabled: true,
+      subscriptionUrl: "https://sub.pulsar-cloud.space/test-user",
+      syncStatus: "SYNCED",
+      syncVersion: 1,
+    },
+  })
+
+  const callbacks = [
+    [220003, "callback-subscription", "menu:subscription"],
+    [220004, "callback-balance", "menu:balance"],
+    [220005, "callback-referrals", "menu:referrals"],
+  ] as const
+  for (const [updateId, callbackId, data] of callbacks) {
+    modules.telegramGateway.resetTestTelegramGatewayEvents()
+    const response = await modules.telegramWebhook.POST(
+      telegramWebhookRequest({
+        update_id: updateId,
+        callback_query: {
+          id: callbackId,
+          from: { id: 900000201 },
+          message: {
+            message_id: 77,
+            chat: { id: 900000201, type: "private" },
+          },
+          data,
+        },
+      })
+    )
+    assert.equal(response.status, 200)
+    await processTelegramUpdate(String(updateId))
+    const events = modules.telegramGateway.getTestTelegramGatewayEvents()
+    const edited = events.find((event) => event.type === "editMessageText")
+    assert.ok(edited && edited.type === "editMessageText")
+    assert.ok(
+      events.some(
+        (event) =>
+          event.type === "answerCallbackQuery" &&
+          event.callbackQueryId === callbackId
+      )
+    )
+    if (data === "menu:subscription") {
+      assert.match(edited.text, /Статус: активна/)
+      assert.match(edited.text, /Устройств: 4/)
+      assert.match(edited.text, /LTE-доступ: есть/)
+      assert.match(edited.text, /Remnawave: синхронизирована/)
+      assert.match(
+        JSON.stringify(edited.replyMarkup),
+        /https:\/\/sub.pulsar-cloud.space\/test-user/
+      )
+    }
+    if (data === "menu:balance") assert.match(edited.text, /Доступно: 123 ₽/)
+    if (data === "menu:referrals") {
+      assert.match(edited.text, /Реферальная ссылка: http:\/\/localhost:3000/)
+      assert.match(JSON.stringify(edited.replyMarkup), /copy_text/)
+    }
+  }
+})
+
+test("/start login token signs in the existing Telegram identity", async () => {
+  const identity = await modules.db.authIdentity.findUniqueOrThrow({
+    where: { telegramId: "900000201" },
+  })
+  const challenge = await modules.auth.requestTelegramChallenge({})
+  const token = telegramStartToken(challenge.url)
+  const response = await modules.telegramWebhook.POST(
+    telegramWebhookRequest({
+      update_id: 220009,
+      message: {
+        text: `/start ${token}`,
+        chat: { id: 900000201, type: "private" },
+        from: { id: 900000201, username: "menu_user" },
+      },
+    })
+  )
+  assert.equal(response.status, 200)
+  await processTelegramUpdate("220009")
+  assert.equal(
+    (
+      await modules.db.authIdentity.findUniqueOrThrow({
+        where: { telegramId: "900000201" },
+      })
+    ).userId,
+    identity.userId
+  )
+  const completed = await modules.db.loginChallenge.findUniqueOrThrow({
+    where: { id: challenge.challengeId },
+  })
+  assert.equal(completed.status, "COMPLETED")
+  assert.ok(completed.completionTokenHash)
+  const completionJob = await modules.db.outboxJob.findFirstOrThrow({
+    where: {
+      type: "SEND_TELEGRAM_LOGIN_COMPLETION",
+      aggregateId: challenge.challengeId,
+    },
+  })
+  modules.telegramGateway.resetTestTelegramGatewayEvents()
+  await modules.jobs.handleJob(completionJob)
+  const completionMessage = modules.telegramGateway
+    .getTestTelegramGatewayEvents()
+    .find((event) => event.type === "sendMessage")
+  assert.ok(completionMessage?.type === "sendMessage")
+  const completionMarkup = JSON.stringify(completionMessage.replyMarkup)
+  assert.match(completionMarkup, /Вернуться в Pulsar/)
+  assert.match(completionMarkup, /\/api\/auth\/telegram\/complete\?token=/)
+  assert.doesNotMatch(completionMarkup, /web_app/)
+})
+
+test("Telegram linking rejects an identity owned by another shared user", async () => {
+  const ownerIdentity = await modules.db.authIdentity.findUniqueOrThrow({
+    where: { telegramId: "900000201" },
+  })
+  const target = await modules.db.$transaction((tx) =>
+    modules.users.createUserGraph(tx, { isTest: true })
+  )
+  const challenge = await modules.auth.requestTelegramChallenge({
+    purpose: "LINK_TELEGRAM",
+    requestedByUserId: target.id,
+  })
+  await assert.rejects(
+    () =>
+      modules.auth.completeTelegramStart({
+        challengeId: challenge.challengeId,
+        rawStartToken: telegramStartToken(challenge.url),
+        telegramId: "900000201",
+        chatId: "900000201",
+      }),
+    (error: unknown) =>
+      (error as { code?: string }).code === "AUTH_IDENTITY_IN_USE"
+  )
+  assert.equal(
+    (
+      await modules.db.authIdentity.findUniqueOrThrow({
+        where: { telegramId: "900000201" },
+      })
+    ).userId,
+    ownerIdentity.userId
+  )
+  assert.equal(
+    (
+      await modules.db.loginChallenge.findUniqueOrThrow({
+        where: { id: challenge.challengeId },
+      })
+    ).status,
+    "PENDING"
+  )
+})
+
+test("Telegram webhook rejects an invalid secret without persisting the update", async () => {
+  const response = await modules.telegramWebhook.POST(
+    telegramWebhookRequest(
+      {
+        update_id: 220006,
+        message: {
+          text: "/start",
+          chat: { id: 900000206, type: "private" },
+          from: { id: 900000206 },
+        },
+      },
+      "wrong-secret-value"
+    )
+  )
+  assert.equal(response.status, 401)
+  assert.equal(
+    await modules.db.telegramUpdateLog.count({
+      where: { updateId: "220006" },
+    }),
+    0
+  )
+})
+
+test("my_chat_member tracks bot blocking and unblocking", async () => {
+  for (const [updateId, status, expected] of [
+    [220007, "kicked", false],
+    [220008, "member", true],
+  ] as const) {
+    await modules.telegramWebhook.POST(
+      telegramWebhookRequest({
+        update_id: updateId,
+        my_chat_member: {
+          chat: { id: 900000201, type: "private" },
+          from: { id: 900000201 },
+          new_chat_member: { status },
+        },
+      })
+    )
+    await processTelegramUpdate(String(updateId))
+    const profile = await modules.db.telegramProfile.findUniqueOrThrow({
+      where: { telegramId: "900000201" },
+    })
+    assert.equal(profile.canReceiveMessages, expected)
+    assert.equal(Boolean(profile.botBlockedAt), !expected)
+  }
 })
 
 test("Telegram webhook persists only a start-token hash", async () => {
