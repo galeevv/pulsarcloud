@@ -1,6 +1,8 @@
 import type { Prisma } from "@/src/generated/prisma/client"
 
+import { getConfig } from "@/src/server/config"
 import { db } from "@/src/server/infrastructure/db/client"
+import { requireWebSession } from "@/src/server/transport/web/session"
 
 export const ADMIN_USER_FILTERS = [
   "all",
@@ -26,11 +28,13 @@ export async function getAdminUsersView(input: {
   filter: AdminUserFilter
   page: number
 }) {
+  await requireWebSession("ADMIN")
   const now = new Date()
   const query = input.query.trim().slice(0, 100)
   const telegramQuery = query.replace(/^@/, "")
   const where: Prisma.UserWhereInput = {
     role: "USER",
+    isTest: getConfig().testMode,
     ...(input.filter === "none"
       ? { subscription: { is: null } }
       : input.filter === "expired"

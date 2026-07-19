@@ -20,6 +20,13 @@ import {
 } from "@/src/server/infrastructure/security/crypto"
 
 const PAYMENT_RECONCILIATION_DELAY_MS = 60_000
+
+function planDurationMonthsFromDays(value: number) {
+  for (const [months, days] of Object.entries(durationDays))
+    if (days === value) return Number(months)
+  return null
+}
+
 export type CheckoutPaymentMethod = "SBP" | "WALLET"
 export type CheckoutSelection = {
   userId: string
@@ -903,6 +910,9 @@ export async function applyPaymentEvent(
         startsAt.getTime() + payment.durationDays * 86_400_000
       )
       const syncVersion = (current?.syncVersion ?? 0) + 1
+      const planDurationMonths = planDurationMonthsFromDays(
+        payment.durationDays
+      )
       const subscription = current
         ? await tx.subscription.update({
             where: { id: current.id },
@@ -911,6 +921,7 @@ export async function applyPaymentEvent(
               expiresAt,
               deviceLimit: payment.deviceLimit,
               lteEnabled: payment.lteEnabled,
+              planDurationMonths,
               nextDeviceLimit: null,
               nextLteEnabled: null,
               nextParametersAt: null,
@@ -928,6 +939,7 @@ export async function applyPaymentEvent(
               expiresAt,
               deviceLimit: payment.deviceLimit,
               lteEnabled: payment.lteEnabled,
+              planDurationMonths,
               syncStatus: "PENDING",
               syncVersion,
             },

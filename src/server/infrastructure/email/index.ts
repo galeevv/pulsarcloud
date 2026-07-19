@@ -8,6 +8,11 @@ export interface EmailSender {
     expiresMinutes: number
     magicLinkUrl: string
   }): Promise<void>
+  sendSupportReply(input: {
+    to: string
+    body: string
+    conversationUrl: string
+  }): Promise<void>
 }
 
 type OtpEmailContentInput = Pick<
@@ -61,6 +66,34 @@ export function renderOtpEmail(input: OtpEmailContentInput) {
 </html>`
 }
 
+export function renderSupportReplyEmail(input: {
+  body: string
+  conversationUrl: string
+}) {
+  const body = escapeHtml(input.body).replaceAll("\n", "<br>")
+  const conversationUrl = escapeHtml(input.conversationUrl)
+  return `<!doctype html>
+<html lang="ru">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ответ поддержки Pulsar</title></head>
+<body style="margin:0;background:#080808;color:#f5f5f5;font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;background:#080808;padding:28px 12px">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;max-width:560px;border:1px solid #292929;border-radius:24px;background:#0c0c0c;overflow:hidden">
+        <tr><td style="padding:30px 30px 12px">
+          <h1 style="margin:0;font-size:22px;line-height:1.3;color:#f5f5f5">Ответ поддержки Pulsar</h1>
+        </td></tr>
+        <tr><td style="padding:8px 30px 20px;color:#d4d4d4;font-size:14px;line-height:1.65">${body}</td></tr>
+        <tr><td style="padding:0 30px 30px">
+          <a href="${conversationUrl}" target="_blank" style="display:block;padding:14px 20px;border-radius:15px;background:#f1f1f1;color:#111111;text-align:center;text-decoration:none;font-size:14px;font-weight:700">Открыть диалог</a>
+        </td></tr>
+      </table>
+      <p style="margin:16px 0 0;color:#555555;font-size:11px">Pulsar Cloud · поддержка</p>
+    </td></tr>
+  </table>
+</body>
+</html>`
+}
+
 class ResendEmailSender implements EmailSender {
   private readonly client = new Resend(getConfig().resend.apiKey)
   async sendOtp(input: {
@@ -78,10 +111,27 @@ class ResendEmailSender implements EmailSender {
     })
     if (error) throw new Error(`Resend rejected OTP delivery: ${error.message}`)
   }
+
+  async sendSupportReply(input: {
+    to: string
+    body: string
+    conversationUrl: string
+  }) {
+    const { error } = await this.client.emails.send({
+      from: getConfig().resend.from,
+      to: input.to,
+      subject: "Ответ поддержки Pulsar",
+      text: `${input.body}\n\nПродолжить диалог: ${input.conversationUrl}`,
+      html: renderSupportReplyEmail(input),
+    })
+    if (error)
+      throw new Error(`Resend rejected support delivery: ${error.message}`)
+  }
 }
 
 class TestEmailSender implements EmailSender {
   async sendOtp() {}
+  async sendSupportReply() {}
 }
 
 export function getEmailSender(): EmailSender {

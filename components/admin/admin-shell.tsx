@@ -10,12 +10,13 @@ import {
   HeadphonesIcon,
   LayoutDashboardIcon,
   LogOutIcon,
+  PackageIcon,
   SendIcon,
   UsersIcon,
   WalletCardsIcon,
 } from "lucide-react"
 import Link from "next/link"
-import { usePathname, useSearchParams } from "next/navigation"
+import { usePathname } from "next/navigation"
 import { useState } from "react"
 import { toast } from "sonner"
 
@@ -52,8 +53,6 @@ type NavigationItem = {
   href: string
   icon: LucideIcon
   activePath?: string
-  legacyTab?: string
-  legacyFallback?: boolean
 }
 
 const navigation: Array<{ label: string; items: NavigationItem[] }> = [
@@ -78,15 +77,21 @@ const navigation: Array<{ label: string; items: NavigationItem[] }> = [
     items: [
       {
         label: "Платежи",
-        href: "/admin/legacy?tab=payments",
+        href: "/admin/payments",
         icon: CreditCardIcon,
-        legacyTab: "payments",
+        activePath: "/admin/payments",
       },
       {
         label: "Выплаты",
-        href: "/admin/legacy?tab=payouts",
+        href: "/admin/payouts",
         icon: WalletCardsIcon,
-        legacyTab: "payouts",
+        activePath: "/admin/payouts",
+      },
+      {
+        label: "Тарифы",
+        href: "/admin/plans",
+        icon: PackageIcon,
+        activePath: "/admin/plans",
       },
     ],
   },
@@ -95,15 +100,15 @@ const navigation: Array<{ label: string; items: NavigationItem[] }> = [
     items: [
       {
         label: "Поддержка",
-        href: "/admin/legacy?tab=support",
+        href: "/admin/support",
         icon: HeadphonesIcon,
-        legacyTab: "support",
+        activePath: "/admin/support",
       },
       {
         label: "Telegram",
-        href: "/admin/legacy?tab=telegram",
+        href: "/admin/telegram",
         icon: SendIcon,
-        legacyTab: "telegram",
+        activePath: "/admin/telegram",
       },
     ],
   },
@@ -112,9 +117,9 @@ const navigation: Array<{ label: string; items: NavigationItem[] }> = [
     items: [
       {
         label: "Операции",
-        href: "/admin/legacy?tab=jobs",
+        href: "/admin/operations",
         icon: ActivityIcon,
-        legacyFallback: true,
+        activePath: "/admin/operations",
       },
     ],
   },
@@ -122,28 +127,22 @@ const navigation: Array<{ label: string; items: NavigationItem[] }> = [
 
 function pageTitle(pathname: string) {
   if (pathname.startsWith("/admin/dashboard")) return "Dashboard"
-  if (pathname.startsWith("/admin/legacy")) return "Операции"
   if (pathname.startsWith("/admin/users")) return "Пользователи"
+  if (pathname.startsWith("/admin/payments")) return "Платежи"
+  if (pathname.startsWith("/admin/payouts")) return "Выплаты"
+  if (pathname.startsWith("/admin/plans")) return "Тарифы"
+  if (pathname.startsWith("/admin/support")) return "Поддержка"
+  if (pathname.startsWith("/admin/telegram")) return "Telegram"
+  if (pathname.startsWith("/admin/operations")) return "Операции"
   if (pathname.startsWith("/admin/test")) return "Test mode"
   return "Pulsar Admin"
 }
 
 function isNavigationItemActive(
   pathname: string,
-  searchParams: { get(name: string): string | null },
   item: NavigationItem
 ) {
   if (item.activePath && pathname.startsWith(item.activePath)) return true
-  if (pathname === "/admin/legacy") {
-    const activeTab = searchParams.get("tab") ?? "users"
-    if (item.legacyFallback) {
-      return !["users", "payments", "payouts", "support", "telegram"].includes(
-        activeTab
-      )
-    }
-    if (item.legacyTab !== activeTab) return false
-    return true
-  }
   return pathname === item.href
 }
 
@@ -280,7 +279,6 @@ export function AdminShell({
   testMode: boolean
 }) {
   const pathname = usePathname()
-  const searchParams = useSearchParams()
 
   return (
     <SidebarProvider>
@@ -298,11 +296,7 @@ export function AdminShell({
                         <SidebarMenuButton
                           className="rounded-lg"
                           tooltip={item.label}
-                          isActive={isNavigationItemActive(
-                            pathname,
-                            searchParams,
-                            item
-                          )}
+                          isActive={isNavigationItemActive(pathname, item)}
                           render={<AdminSidebarLink href={item.href} />}
                         >
                           <Icon />

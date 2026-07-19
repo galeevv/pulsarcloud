@@ -1436,6 +1436,79 @@ test("my_chat_member tracks bot blocking and unblocking", async () => {
   }
 })
 
+test("legacy Telegram broadcasts still skip users who disabled news", async () => {
+  modules.telegramGateway.resetTestTelegramGatewayEvents()
+  const optedIn = await modules.db.$transaction((tx) =>
+    modules.users.createUserGraph(tx, { isTest: true })
+  )
+  const optedOut = await modules.db.$transaction((tx) =>
+    modules.users.createUserGraph(tx, { isTest: true })
+  )
+  await modules.db.telegramProfile.createMany({
+    data: [
+      {
+        userId: optedIn.id,
+        telegramId: "900000301",
+        chatId: "900000301",
+        newsNotificationsEnabled: true,
+      },
+      {
+        userId: optedOut.id,
+        telegramId: "900000302",
+        chatId: "900000302",
+        newsNotificationsEnabled: false,
+      },
+    ],
+  })
+  const admin = await modules.db.user.findFirstOrThrow({
+    where: { role: "ADMIN", isTest: true },
+  })
+  const broadcast = await modules.db.telegramBroadcast.create({
+    data: {
+      createdByAdminId: admin.id,
+      title: "Проверка согласия",
+      body: "Новость должна прийти только подписанному пользователю.",
+      // Simulates a row created before ALL_REACHABLE was removed from the
+      // admin composer.
+      target: "ALL_REACHABLE",
+      status: "QUEUED",
+      queuedAt: new Date(),
+      deliveries: {
+        create: [{ userId: optedIn.id }, { userId: optedOut.id }],
+      },
+    },
+  })
+
+  await modules.jobs.handleJob({
+    id: "legacy-broadcast-news-consent",
+    type: "SEND_TELEGRAM_BROADCAST_BATCH",
+    payloadJson: JSON.stringify({ broadcastId: broadcast.id, batch: 0 }),
+    attempts: 1,
+    aggregateId: broadcast.id,
+  })
+
+  const deliveries = await modules.db.telegramBroadcastDelivery.findMany({
+    where: { broadcastId: broadcast.id },
+    orderBy: { userId: "asc" },
+  })
+  assert.equal(
+    deliveries.find((delivery) => delivery.userId === optedIn.id)?.status,
+    "SENT"
+  )
+  assert.equal(
+    deliveries.find((delivery) => delivery.userId === optedOut.id)?.status,
+    "SKIPPED"
+  )
+  const messages = modules.telegramGateway
+    .getTestTelegramGatewayEvents()
+    .filter((event) => event.type === "sendMessage")
+  assert.equal(messages.length, 1)
+  assert.equal(
+    messages[0]?.type === "sendMessage" && messages[0].chatId,
+    "900000301"
+  )
+})
+
 test("Telegram webhook persists only a start-token hash", async () => {
   const challenge = await modules.auth.requestTelegramChallenge({})
   const token = telegramStartToken(challenge.url)
@@ -2210,7 +2283,7 @@ test("verified renewal applies the paid parameters immediately", async () => {
   })
   const renewal = await modules.billing.createCheckout({
     userId: user.id,
-    durationMonths: 1,
+    durationMonths: 12,
     deviceLimit: 2,
     lteEnabled: false,
     idempotencyKey: "review-renewal",
@@ -2278,6 +2351,7 @@ test("verified renewal applies the paid parameters immediately", async () => {
   assert.equal(subscription.lteEnabled, true)
   assert.equal(subscription.nextDeviceLimit, null)
   assert.equal(subscription.nextLteEnabled, null)
+  assert.equal(subscription.planDurationMonths, 12)
 })
 
 test("test login cannot consume a real user's identity", async () => {

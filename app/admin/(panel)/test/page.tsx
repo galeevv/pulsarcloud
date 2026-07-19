@@ -57,7 +57,7 @@ export default async function AdminTestPage() {
     ? decryptSensitive(latestOtpChallenge.devOtpEncrypted)
     : null
   return (
-    <main className="pulsar-admin-container">
+    <main className="mx-auto flex w-full max-w-[1200px] flex-col gap-4 px-4 pt-8 pb-4 md:px-6 md:pb-6">
       <div>
         <h1 className="text-2xl font-semibold">Test mode</h1>
         <p className="text-sm text-muted-foreground">

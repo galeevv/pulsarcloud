@@ -16,6 +16,7 @@ export async function GET() {
       where: { userId: session.userId },
       select: {
         messages: {
+          where: { isInternal: false },
           orderBy: { createdAt: "desc" },
           take: 200,
           select: { id: true, authorRole: true, body: true, createdAt: true },

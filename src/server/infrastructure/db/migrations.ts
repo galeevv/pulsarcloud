@@ -5,6 +5,8 @@ export const EXPECTED_MIGRATIONS = [
   "20260714220000_immediate_subscription_options",
   "20260714223000_trial_lte_and_notifications",
   "20260714234000_subscription_devices_and_upgrades",
+  "20260718120000_admin_plans_and_support_notes",
+  "20260718133000_subscription_plan_duration",
 ] as const
 
 export type MigrationRecord = {

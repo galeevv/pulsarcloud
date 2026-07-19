@@ -5,7 +5,11 @@ import {
 } from "@/src/server/infrastructure/security/crypto"
 import { getEmailSender } from "@/src/server/infrastructure/email"
 import { getProvisioningProvider } from "@/src/server/infrastructure/remnawave/provider"
-import { getTelegramGateway } from "@/src/server/infrastructure/telegram/gateway"
+import {
+  getTelegramGateway,
+  isPermanentTelegramDeliveryError,
+  TelegramGatewayError,
+} from "@/src/server/infrastructure/telegram/gateway"
 import {
   completeTelegramStart,
   ensureTelegramBotUser,
@@ -437,6 +441,63 @@ export async function handleJob(job: Job) {
     })
     return
   }
+  if (job.type === "SEND_SUPPORT_REPLY") {
+    const messageId = String(payload.messageId)
+    const message = await db.supportMessage.findUnique({
+      where: { id: messageId },
+      include: {
+        conversation: {
+          include: {
+            user: {
+              include: {
+                identities: true,
+                telegramProfile: true,
+              },
+            },
+          },
+        },
+      },
+    })
+    if (
+      !message ||
+      message.authorRole !== "ADMIN" ||
+      message.isInternal ||
+      message.conversation.user.role !== "USER" ||
+      message.conversation.user.isTest !== getConfig().testMode
+    )
+      return
+
+    const channel = String(
+      payload.channel ?? message.conversation.channel
+    ).toUpperCase()
+    if (channel === "WEB") return
+
+    if (channel === "TELEGRAM") {
+      const profile = message.conversation.user.telegramProfile
+      if (!profile?.chatId || !profile.canReceiveMessages)
+        throw new Error("Support reply Telegram channel is unavailable")
+      await getTelegramGateway().sendMessage({
+        chatId: profile.chatId,
+        text: `${message.body}\n\nПродолжить диалог: ${getConfig().appUrl}/support`,
+      })
+      return
+    }
+
+    if (channel === "EMAIL") {
+      const email = message.conversation.user.identities.find(
+        (identity) => identity.emailNormalized
+      )?.emailNormalized
+      if (!email) throw new Error("Support reply email channel is unavailable")
+      await getEmailSender().sendSupportReply({
+        to: email,
+        body: message.body,
+        conversationUrl: `${getConfig().appUrl}/support`,
+      })
+      return
+    }
+
+    throw new Error("Unsupported support reply channel")
+  }
   if (job.type === "PROVISION_SUBSCRIPTION") {
     const subscriptionId = String(payload.subscriptionId)
     const syncVersion = Number(payload.syncVersion)
@@ -778,11 +839,16 @@ export async function handleJob(job: Job) {
           messages[String(payload.template)] ?? "Важное уведомление Pulsar.",
       })
     } catch (error) {
-      if (error instanceof Error && /blocked|forbidden/i.test(error.message))
+      if (
+        error instanceof TelegramGatewayError &&
+        error.reason === "RECIPIENT_UNAVAILABLE"
+      ) {
         await db.telegramProfile.update({
           where: { id: profile.id },
           data: { canReceiveMessages: false, botBlockedAt: new Date() },
         })
+        return
+      }
       throw error
     }
     return
@@ -790,8 +856,14 @@ export async function handleJob(job: Job) {
   if (job.type === "SEND_TELEGRAM_BROADCAST_BATCH") {
     const broadcastId = String(payload.broadcastId)
     const batch = Number(payload.batch ?? 0)
-    const broadcast = await db.telegramBroadcast.findUnique({
-      where: { id: broadcastId },
+    const config = getConfig()
+    const broadcast = await db.telegramBroadcast.findFirst({
+      where: {
+        id: broadcastId,
+        createdBy: {
+          is: { role: "ADMIN", isTest: config.testMode },
+        },
+      },
     })
     if (!broadcast || ["CANCELED", "COMPLETED"].includes(broadcast.status))
       return
@@ -806,7 +878,17 @@ export async function handleJob(job: Job) {
     })
     for (const delivery of deliveries) {
       const profile = delivery.user.telegramProfile
-      if (!profile?.chatId || !profile.canReceiveMessages)
+      if (
+        delivery.user.role !== "USER" ||
+        delivery.user.status !== "ACTIVE" ||
+        delivery.user.isTest !== config.testMode ||
+        !profile?.chatId ||
+        !profile.canReceiveMessages ||
+        // Every TelegramBroadcast is news, including historical
+        // ALL_REACHABLE rows. Transactional notifications are handled by
+        // SEND_TELEGRAM_NOTIFICATION above and use their own preference.
+        !profile.newsNotificationsEnabled
+      )
         await db.telegramBroadcastDelivery.update({
           where: { id: delivery.id },
           data: { status: "SKIPPED" },
@@ -826,10 +908,8 @@ export async function handleJob(job: Job) {
             },
           })
         } catch (error) {
-          if (
-            error instanceof Error &&
-            /blocked|forbidden/i.test(error.message)
-          )
+          if (!isPermanentTelegramDeliveryError(error)) throw error
+          if (error.reason === "RECIPIENT_UNAVAILABLE")
             await db.telegramProfile.update({
               where: { id: profile.id },
               data: { canReceiveMessages: false, botBlockedAt: new Date() },
@@ -839,9 +919,9 @@ export async function handleJob(job: Job) {
             data: {
               status: "FAILED",
               error:
-                error instanceof Error
-                  ? error.message.slice(0, 500)
-                  : String(error),
+                error.reason === "RECIPIENT_UNAVAILABLE"
+                  ? "Telegram recipient is unavailable"
+                  : "Telegram rejected the broadcast message",
             },
           })
         }
@@ -850,14 +930,16 @@ export async function handleJob(job: Job) {
       where: { broadcastId, status: "PENDING" },
     })
     if (remaining)
-      await db.outboxJob.create({
-        data: {
+      await db.outboxJob.upsert({
+        where: { dedupeKey: `broadcast:${broadcastId}:batch:${batch + 1}` },
+        create: {
           type: "SEND_TELEGRAM_BROADCAST_BATCH",
           aggregateType: "TelegramBroadcast",
           aggregateId: broadcastId,
           payloadJson: JSON.stringify({ broadcastId, batch: batch + 1 }),
           dedupeKey: `broadcast:${broadcastId}:batch:${batch + 1}`,
         },
+        update: {},
       })
     else
       await db.telegramBroadcast.update({

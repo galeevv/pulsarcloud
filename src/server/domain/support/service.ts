@@ -42,10 +42,29 @@ export async function sendSupportMessage(input: {
   }
   return withBusyRetry(() =>
     db.$transaction(async (tx) => {
+      const existing = await tx.supportConversation.findUnique({
+        where: { userId: input.userId },
+        select: { workflowState: true },
+      })
+      const workflowState = input.admin
+        ? ("ANSWERED" as const)
+        : existing?.workflowState === "ANSWERED" ||
+            existing?.workflowState === "CLOSED"
+          ? ("WAITING" as const)
+          : existing?.workflowState ?? ("NEW" as const)
       const conversation = await tx.supportConversation.upsert({
         where: { userId: input.userId },
-        create: { userId: input.userId },
-        update: { status: "OPEN", lastMessageAt: new Date() },
+        create: {
+          userId: input.userId,
+          status: "OPEN",
+          workflowState,
+          channel: "WEB",
+        },
+        update: {
+          status: "OPEN",
+          workflowState,
+          lastMessageAt: new Date(),
+        },
       })
       return tx.supportMessage.create({
         data: {

@@ -40,28 +40,101 @@ export interface TelegramGateway {
   }): Promise<void>
 }
 
+export type TelegramGatewayFailureReason =
+  | "CALLBACK_QUERY_EXPIRED"
+  | "CONFIGURATION"
+  | "MESSAGE_NOT_MODIFIED"
+  | "PERMANENT_REQUEST"
+  | "RATE_LIMITED"
+  | "RECIPIENT_UNAVAILABLE"
+  | "TRANSIENT"
+
+export class TelegramGatewayError extends Error {
+  readonly name = "TelegramGatewayError"
+
+  constructor(
+    readonly reason: TelegramGatewayFailureReason,
+    readonly statusCode: number | null = null,
+    readonly retryAfterSeconds: number | null = null
+  ) {
+    super(`TELEGRAM_${reason}`)
+  }
+}
+
+export function classifyTelegramGatewayFailure(
+  statusCode: number,
+  description: string
+): TelegramGatewayFailureReason {
+  if (/message is not modified/i.test(description)) return "MESSAGE_NOT_MODIFIED"
+  if (
+    /query is too old|query id is invalid|query_id_invalid/i.test(description)
+  )
+    return "CALLBACK_QUERY_EXPIRED"
+  if (
+    statusCode === 403 ||
+    /bot was blocked|blocked by the user|user is deactivated|chat not found|forbidden/i.test(
+      description
+    )
+  )
+    return "RECIPIENT_UNAVAILABLE"
+  if (statusCode === 429) return "RATE_LIMITED"
+  if (statusCode === 401) return "CONFIGURATION"
+  if (statusCode === 400) return "PERMANENT_REQUEST"
+  return "TRANSIENT"
+}
+
+export function isPermanentTelegramDeliveryError(
+  error: unknown
+): error is TelegramGatewayError {
+  return (
+    error instanceof TelegramGatewayError &&
+    (error.reason === "PERMANENT_REQUEST" ||
+      error.reason === "RECIPIENT_UNAVAILABLE")
+  )
+}
+
 class BotApiGateway implements TelegramGateway {
   private async call<T>(method: string, payload: Record<string, unknown>) {
     const token = getConfig().telegram.botToken
-    if (!token) throw new Error("TELEGRAM_BOT_TOKEN is missing")
-    const response = await fetch(
-      `https://api.telegram.org/bot${token}/${method}`,
-      {
+    if (!token) throw new TelegramGatewayError("CONFIGURATION")
+    let response: Response
+    try {
+      response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(10_000),
-      }
-    )
-    const body = (await response.json()) as {
+      })
+    } catch {
+      throw new TelegramGatewayError("TRANSIENT")
+    }
+    let body: {
       ok: boolean
       result?: T
       description?: string
+      error_code?: number
+      parameters?: {
+        retry_after?: number
+      }
     }
-    if (!response.ok || !body.ok || body.result === undefined)
-      throw new Error(
-        `Telegram ${method} failed: ${body.description ?? response.status}`
+    try {
+      body = (await response.json()) as typeof body
+    } catch {
+      throw new TelegramGatewayError("TRANSIENT", response.status)
+    }
+    if (!response.ok || !body.ok || body.result === undefined) {
+      const statusCode = body.error_code ?? response.status
+      const retryAfterSeconds = body.parameters?.retry_after
+      throw new TelegramGatewayError(
+        classifyTelegramGatewayFailure(statusCode, body.description ?? ""),
+        statusCode,
+        typeof retryAfterSeconds === "number" &&
+          Number.isFinite(retryAfterSeconds) &&
+          retryAfterSeconds > 0
+          ? Math.min(Math.ceil(retryAfterSeconds), 86_400)
+          : null
       )
+    }
     return body.result
   }
 
@@ -99,8 +172,8 @@ class BotApiGateway implements TelegramGateway {
       return { messageId: String(result.message_id) }
     } catch (error) {
       if (
-        error instanceof Error &&
-        /message is not modified/i.test(error.message)
+        error instanceof TelegramGatewayError &&
+        error.reason === "MESSAGE_NOT_MODIFIED"
       )
         return { messageId: input.messageId }
       throw error
@@ -122,10 +195,8 @@ class BotApiGateway implements TelegramGateway {
       // Telegram callback queries are short lived. A retried outbox job may
       // legitimately render the requested screen after the query expired.
       if (
-        error instanceof Error &&
-        /query is too old|query id is invalid|query_id_invalid/i.test(
-          error.message
-        )
+        error instanceof TelegramGatewayError &&
+        error.reason === "CALLBACK_QUERY_EXPIRED"
       )
         return
       throw error

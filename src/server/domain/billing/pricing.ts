@@ -3,6 +3,19 @@ import { BusinessError } from "@/src/server/application/errors"
 
 export const durationDays = { 1: 30, 3: 90, 6: 180, 12: 365 } as const
 export type DurationMonths = keyof typeof durationDays
+export const durationMonthsOptions = [1, 3, 6, 12] as const
+
+export function availableDurationMonths(
+  settings: Pick<PricingSettings, "availableDurationsJson">
+): DurationMonths[] {
+  try {
+    const parsed = JSON.parse(settings.availableDurationsJson) as unknown
+    if (!Array.isArray(parsed)) return []
+    return durationMonthsOptions.filter((months) => parsed.includes(months))
+  } catch {
+    return []
+  }
+}
 
 export type PriceQuote = {
   amountMinor: number
@@ -25,10 +38,15 @@ export function calculatePrice(
     durationMonths: number
     deviceLimit: number
     lteEnabled: boolean
+    allowUnavailable?: boolean
   }
 ): PriceQuote {
   if (
-    ![1, 3, 6, 12].includes(input.durationMonths) ||
+    !durationMonthsOptions.includes(input.durationMonths as DurationMonths) ||
+    (!input.allowUnavailable &&
+      !availableDurationMonths(settings).includes(
+        input.durationMonths as DurationMonths
+      )) ||
     input.deviceLimit < settings.minDeviceLimit ||
     input.deviceLimit > settings.maxDeviceLimit
   ) {

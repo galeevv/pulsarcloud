@@ -4,6 +4,7 @@ import type {
   PreviewPricing,
   PreviewSubscription,
 } from "@/src/frontend-preview/view-models"
+import { availableDurationMonths } from "@/src/server/domain/billing/pricing"
 
 export async function getPricingView(userId: string): Promise<PreviewPricing> {
   void userId
@@ -14,7 +15,7 @@ export async function getPricingView(userId: string): Promise<PreviewPricing> {
     string,
     number
   >
-  const durationOptions = [1, 3, 6, 12].map((months) => {
+  const durationOptions = availableDurationMonths(settings).map((months) => {
     const discountPct = discounts[String(months)] ?? 0
     return {
       months,
@@ -101,6 +102,7 @@ export async function getSupportMessagesView(userId: string) {
     where: { userId },
     select: {
       messages: {
+        where: { isInternal: false },
         orderBy: { createdAt: "desc" },
         take: 200,
       },

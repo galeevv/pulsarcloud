@@ -1,7 +1,27 @@
+import type { AuditLog } from "@/src/generated/prisma/client"
+
 import { getConfig } from "@/src/server/config"
 import { db } from "@/src/server/infrastructure/db/client"
+import { requireWebSession } from "@/src/server/transport/web/session"
 
 const DAY_MS = 86_400_000
+const SCOPED_ENTITY_TYPES = new Set([
+  "User",
+  "Payment",
+  "Subscription",
+  "PayoutRequest",
+  "SupportConversation",
+  "SupportMessage",
+  "TelegramBroadcast",
+  "LoginChallenge",
+  "WalletAccount",
+  "OutboxJob",
+])
+
+type EntityRef = {
+  entityType: string
+  entityId: string | null
+}
 
 type Identity = {
   provider: string
@@ -100,6 +120,8 @@ function formatRubMinor(amountMinor: number) {
 }
 
 export async function getAdminDashboardView() {
+  await requireWebSession("ADMIN")
+
   const now = new Date()
   const weekStart = new Date(now.getTime() - 7 * DAY_MS)
   const previousWeekStart = new Date(now.getTime() - 14 * DAY_MS)
@@ -130,29 +152,59 @@ export async function getAdminDashboardView() {
     recentAdminActions,
     topReferrerCounts,
   ] = await Promise.all([
-    db.user.count({ where: { role: "USER" } }),
     db.user.count({
-      where: { role: "USER", createdAt: { gte: weekStart } },
+      where: { role: "USER", isTest: config.testMode },
     }),
     db.user.count({
       where: {
         role: "USER",
+        isTest: config.testMode,
+        createdAt: { gte: weekStart },
+      },
+    }),
+    db.user.count({
+      where: {
+        role: "USER",
+        isTest: config.testMode,
         createdAt: { gte: previousWeekStart, lt: weekStart },
       },
     }),
     db.subscription.count({
-      where: { status: "ACTIVE", expiresAt: { gt: now } },
+      where: {
+        status: "ACTIVE",
+        expiresAt: { gt: now },
+        user: {
+          is: { role: "USER", isTest: config.testMode },
+        },
+      },
     }),
     db.subscription.count({
-      where: { status: "TRIAL", expiresAt: { gt: now } },
+      where: {
+        status: "TRIAL",
+        expiresAt: { gt: now },
+        user: {
+          is: { role: "USER", isTest: config.testMode },
+        },
+      },
     }),
     db.payment.aggregate({
-      where: { status: "CONFIRMED", confirmedAt: { gte: monthStart } },
+      where: {
+        status: "CONFIRMED",
+        confirmedAt: { gte: monthStart },
+        isTest: config.testMode,
+        user: {
+          is: { role: "USER", isTest: config.testMode },
+        },
+      },
       _sum: { amountMinor: true },
     }),
     db.payment.aggregate({
       where: {
         status: "CONFIRMED",
+        isTest: config.testMode,
+        user: {
+          is: { role: "USER", isTest: config.testMode },
+        },
         confirmedAt: {
           gte: previousMonthStart,
           lt: previousMonthComparableEnd,
@@ -161,29 +213,41 @@ export async function getAdminDashboardView() {
       _sum: { amountMinor: true },
     }),
     db.payoutRequest.count({
-      where: { status: { in: ["PENDING", "APPROVED"] } },
+      where: {
+        status: { in: ["PENDING", "APPROVED"] },
+        user: {
+          is: { role: "USER", isTest: config.testMode },
+        },
+      },
     }),
     db.supportConversation.findMany({
-      where: { status: "OPEN" },
+      where: {
+        status: "OPEN",
+        user: {
+          is: { role: "USER", isTest: config.testMode },
+        },
+      },
       select: {
         messages: {
+          where: { isInternal: false },
           orderBy: { createdAt: "desc" },
           take: 1,
           select: { authorRole: true },
         },
       },
     }),
-    db.outboxJob.count({
+    findFailedJobsForEnvironment(config.testMode),
+    db.subscription.count({
       where: {
-        status: { in: ["FAILED", "DEAD"] },
-        type: { not: "PROVISION_SUBSCRIPTION" },
+        syncStatus: "FAILED",
+        expiresAt: { gt: now },
+        user: {
+          is: { role: "USER", isTest: config.testMode },
+        },
       },
     }),
-    db.subscription.count({
-      where: { syncStatus: "FAILED", expiresAt: { gt: now } },
-    }),
     db.user.findMany({
-      where: { role: "USER" },
+      where: { role: "USER", isTest: config.testMode },
       orderBy: { createdAt: "desc" },
       take: 6,
       select: {
@@ -210,6 +274,10 @@ export async function getAdminDashboardView() {
     db.payment.findMany({
       where: {
         status: { in: ["CONFIRMED", "REFUNDED", "PARTIALLY_REFUNDED"] },
+        isTest: config.testMode,
+        user: {
+          is: { role: "USER", isTest: config.testMode },
+        },
       },
       orderBy: { updatedAt: "desc" },
       take: 8,
@@ -244,20 +312,17 @@ export async function getAdminDashboardView() {
         },
       },
     }),
-    db.auditLog.findMany({
-      where: { actorType: "ADMIN" },
-      orderBy: { createdAt: "desc" },
-      take: 6,
-      select: {
-        id: true,
-        action: true,
-        entityType: true,
-        entityId: true,
-        createdAt: true,
-      },
-    }),
+    findRecentAdminActionsForEnvironment(config.testMode, 6),
     db.referralInvite.groupBy({
       by: ["inviterUserId"],
+      where: {
+        inviter: {
+          is: { role: "USER", isTest: config.testMode },
+        },
+        invited: {
+          is: { role: "USER", isTest: config.testMode },
+        },
+      },
       _count: { _all: true },
       orderBy: { _count: { inviterUserId: "desc" } },
       take: 5,
@@ -268,7 +333,11 @@ export async function getAdminDashboardView() {
     (referrer) => referrer.inviterUserId
   )
   const topReferrerUsers = await db.user.findMany({
-    where: { id: { in: topReferrerIds }, role: "USER" },
+    where: {
+      id: { in: topReferrerIds },
+      role: "USER",
+      isTest: config.testMode,
+    },
     select: {
       id: true,
       identities: {
@@ -302,7 +371,7 @@ export async function getAdminDashboardView() {
     (conversation) => conversation.messages[0]?.authorRole === "USER"
   ).length
   const attentionTotal =
-    pendingPayouts + openSupport + failedJobs + failedSubscriptionSyncs
+    pendingPayouts + openSupport + failedJobs.length + failedSubscriptionSyncs
   const adminActivityTitle = config.admin.telegramUsername
     ? config.admin.telegramUsername.startsWith("@")
       ? config.admin.telegramUsername
@@ -374,10 +443,254 @@ export async function getAdminDashboardView() {
     attention: {
       pendingPayouts,
       openSupport,
-      failedJobs,
+      failedJobs: failedJobs.length,
       failedSubscriptionSyncs,
     },
     topReferrers,
     activities,
   }
+}
+
+async function findFailedJobsForEnvironment(isTest: boolean) {
+  const jobs = await db.outboxJob.findMany({
+    where: {
+      status: { in: ["FAILED", "DEAD"] },
+      NOT: {
+        aggregateType: "Subscription",
+        type: {
+          in: ["PROVISION_SUBSCRIPTION", "RECONCILE_SUBSCRIPTION_STATE"],
+        },
+      },
+    },
+    select: {
+      id: true,
+      aggregateType: true,
+      aggregateId: true,
+    },
+  })
+  const scopedKeys = await resolveEnvironmentEntityKeys(
+    jobs.map((job) => ({
+      entityType: job.aggregateType,
+      entityId: job.aggregateId,
+    })),
+    isTest
+  )
+
+  return jobs.filter((job) =>
+    scopedKeys.has(entityKey(job.aggregateType, job.aggregateId))
+  )
+}
+
+async function findRecentAdminActionsForEnvironment(
+  isTest: boolean,
+  limit: number
+) {
+  const admins = await db.user.findMany({
+    where: { role: "ADMIN", isTest },
+    select: { id: true },
+  })
+  const adminIds = admins.map((admin) => admin.id)
+  if (!adminIds.length) return []
+
+  const actions: Array<
+    Pick<
+      AuditLog,
+      "id" | "action" | "entityType" | "entityId" | "createdAt"
+    >
+  > = []
+  let cursor: string | undefined
+
+  while (actions.length < limit) {
+    const batch = await db.auditLog.findMany({
+      where: {
+        actorType: "ADMIN",
+        actorId: { in: adminIds },
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: 50,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      select: {
+        id: true,
+        action: true,
+        entityType: true,
+        entityId: true,
+        createdAt: true,
+      },
+    })
+    if (!batch.length) break
+
+    const scopedKeys = await resolveEnvironmentEntityKeys(batch, isTest)
+    for (const entry of batch) {
+      if (
+        entry.entityId &&
+        SCOPED_ENTITY_TYPES.has(entry.entityType) &&
+        scopedKeys.has(entityKey(entry.entityType, entry.entityId))
+      )
+        actions.push(entry)
+      if (actions.length === limit) break
+    }
+    if (batch.length < 50) break
+    cursor = batch.at(-1)?.id
+  }
+
+  return actions
+}
+
+async function resolveEnvironmentEntityKeys(
+  refs: EntityRef[],
+  isTest: boolean,
+  depth = 0
+) {
+  const ids = (type: string) => [
+    ...new Set(
+      refs.flatMap((ref) =>
+        ref.entityType === type && ref.entityId ? [ref.entityId] : []
+      )
+    ),
+  ]
+  const [
+    users,
+    payments,
+    subscriptions,
+    payouts,
+    conversations,
+    messages,
+    broadcasts,
+    challenges,
+    wallets,
+  ] = await Promise.all([
+    findIds(ids("User"), (values) =>
+      db.user.findMany({
+        where: { id: { in: values }, role: "USER", isTest },
+        select: { id: true },
+      })
+    ),
+    findIds(ids("Payment"), (values) =>
+      db.payment.findMany({
+        where: {
+          id: { in: values },
+          isTest,
+          user: { is: { role: "USER", isTest } },
+        },
+        select: { id: true },
+      })
+    ),
+    findIds(ids("Subscription"), (values) =>
+      db.subscription.findMany({
+        where: {
+          id: { in: values },
+          user: { is: { role: "USER", isTest } },
+        },
+        select: { id: true },
+      })
+    ),
+    findIds(ids("PayoutRequest"), (values) =>
+      db.payoutRequest.findMany({
+        where: {
+          id: { in: values },
+          user: { is: { role: "USER", isTest } },
+        },
+        select: { id: true },
+      })
+    ),
+    findIds(ids("SupportConversation"), (values) =>
+      db.supportConversation.findMany({
+        where: {
+          id: { in: values },
+          user: { is: { role: "USER", isTest } },
+        },
+        select: { id: true },
+      })
+    ),
+    findIds(ids("SupportMessage"), (values) =>
+      db.supportMessage.findMany({
+        where: {
+          id: { in: values },
+          conversation: {
+            is: { user: { is: { role: "USER", isTest } } },
+          },
+        },
+        select: { id: true },
+      })
+    ),
+    findIds(ids("TelegramBroadcast"), (values) =>
+      db.telegramBroadcast.findMany({
+        where: {
+          id: { in: values },
+          createdBy: { is: { role: "ADMIN", isTest } },
+        },
+        select: { id: true },
+      })
+    ),
+    findIds(ids("LoginChallenge"), (values) =>
+      db.loginChallenge.findMany({
+        where: {
+          id: { in: values },
+          requestedByUser: {
+            is: { role: { in: ["USER", "ADMIN"] }, isTest },
+          },
+        },
+        select: { id: true },
+      })
+    ),
+    findIds(ids("WalletAccount"), (values) =>
+      db.walletAccount.findMany({
+        where: {
+          id: { in: values },
+          user: { is: { role: "USER", isTest } },
+        },
+        select: { id: true },
+      })
+    ),
+  ])
+
+  const keys = new Set<string>()
+  for (const [type, rows] of [
+    ["User", users],
+    ["Payment", payments],
+    ["Subscription", subscriptions],
+    ["PayoutRequest", payouts],
+    ["SupportConversation", conversations],
+    ["SupportMessage", messages],
+    ["TelegramBroadcast", broadcasts],
+    ["LoginChallenge", challenges],
+    ["WalletAccount", wallets],
+  ] as const)
+    for (const row of rows) keys.add(entityKey(type, row.id))
+
+  const outboxIds = ids("OutboxJob")
+  if (depth < 2 && outboxIds.length) {
+    const jobs = await db.outboxJob.findMany({
+      where: { id: { in: outboxIds } },
+      select: {
+        id: true,
+        aggregateType: true,
+        aggregateId: true,
+      },
+    })
+    const aggregateKeys = await resolveEnvironmentEntityKeys(
+      jobs.map((job) => ({
+        entityType: job.aggregateType,
+        entityId: job.aggregateId,
+      })),
+      isTest,
+      depth + 1
+    )
+    for (const job of jobs)
+      if (aggregateKeys.has(entityKey(job.aggregateType, job.aggregateId)))
+        keys.add(entityKey("OutboxJob", job.id))
+  }
+
+  return keys
+}
+
+async function findIds(
+  values: string[],
+  query: (values: string[]) => Promise<Array<{ id: string }>>
+) {
+  return values.length ? query(values) : []
+}
+
+function entityKey(type: string, id: string) {
+  return `${type}:${id}`
 }

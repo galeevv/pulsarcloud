@@ -165,28 +165,28 @@ export default async function AdminDashboardPage() {
       label: "Обращения поддержки",
       description: "Открытые диалоги ждут ответа",
       value: dashboard.attention.openSupport,
-      href: "/admin/legacy?tab=support",
+      href: "/admin/support",
       icon: HeadphonesIcon,
     },
     {
       label: "Выплаты",
       description: "Заявки ожидают решения",
       value: dashboard.attention.pendingPayouts,
-      href: "/admin/legacy?tab=payouts",
+      href: "/admin/payouts",
       icon: WalletCardsIcon,
     },
     {
       label: "Синхронизация подписок",
       description: "Активные подписки с ошибкой",
       value: dashboard.attention.failedSubscriptionSyncs,
-      href: "/admin/legacy?tab=jobs",
+      href: "/admin/operations?tab=sync",
       icon: ServerCogIcon,
     },
     {
       label: "Задания worker",
       description: "FAILED или DEAD",
       value: dashboard.attention.failedJobs,
-      href: "/admin/legacy?tab=jobs",
+      href: "/admin/operations?tab=queue",
       icon: TriangleAlertIcon,
     },
   ]
@@ -385,7 +385,7 @@ export default async function AdminDashboardPage() {
             variant="outline"
             nativeButton={false}
             className="w-full rounded-2xl"
-            render={<Link href="/admin/legacy?tab=logs" />}
+            render={<Link href="/admin/operations?tab=audit" />}
           >
             Посмотреть все активности
             <ArrowRightIcon data-icon="inline-end" />

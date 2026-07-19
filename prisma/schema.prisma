@@ -128,8 +128,23 @@ enum SupportAuthorRole {
 
 enum SupportSource {
   WEB
+  TELEGRAM
+  EMAIL
   ADMIN
   SYSTEM
+}
+
+enum SupportChannel {
+  WEB
+  TELEGRAM
+  EMAIL
+}
+
+enum SupportWorkflowState {
+  NEW
+  WAITING
+  ANSWERED
+  CLOSED
 }
 
 enum BroadcastStatus {
@@ -271,6 +286,8 @@ model PricingSettings {
   deviceLimitUpgradePriceMinor Int      @default(5000)
   lteMonthlyPriceMinor         Int
   durationDiscountsJson        String
+  planNamesJson                String   @default("{\"1\":\"1 месяц\",\"3\":\"3 месяца\",\"6\":\"6 месяцев\",\"12\":\"12 месяцев\"}")
+  availableDurationsJson       String   @default("[1,3,6,12]")
   minDeviceLimit               Int      @default(1)
   maxDeviceLimit               Int      @default(5)
   referralRewardMinor          Int      @default(7500)
@@ -344,6 +361,7 @@ model Subscription {
   expiresAt             DateTime
   deviceLimit           Int
   lteEnabled            Boolean             @default(false)
+  planDurationMonths    Int?
   nextDeviceLimit       Int?
   nextLteEnabled        Boolean?
   nextParametersAt      DateTime?
@@ -360,6 +378,7 @@ model Subscription {
   events                SubscriptionEvent[]
 
   @@index([status, expiresAt])
+  @@index([planDurationMonths, status, expiresAt])
   @@index([syncStatus, updatedAt])
 }
 
@@ -489,16 +508,20 @@ model PayoutRequest {
 }
 
 model SupportConversation {
-  id            String           @id @default(cuid())
-  userId        String           @unique
-  status        SupportStatus    @default(OPEN)
-  lastMessageAt DateTime         @default(now())
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
-  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id            String               @id @default(cuid())
+  userId        String               @unique
+  status        SupportStatus        @default(OPEN)
+  workflowState SupportWorkflowState @default(NEW)
+  channel       SupportChannel       @default(WEB)
+  topic         String               @default("Обращение в поддержку")
+  lastMessageAt DateTime             @default(now())
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  user          User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages      SupportMessage[]
 
   @@index([status, lastMessageAt])
+  @@index([workflowState, lastMessageAt])
 }
 
 model SupportMessage {
@@ -508,6 +531,7 @@ model SupportMessage {
   senderUserId   String?
   source         SupportSource
   body           String
+  isInternal     Boolean             @default(false)
   createdAt      DateTime            @default(now())
   conversation   SupportConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender         User?               @relation(fields: [senderUserId], references: [id], onDelete: SetNull)

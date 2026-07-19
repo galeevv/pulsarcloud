@@ -1,5 +1,7 @@
 "use client"
 import { useState } from "react"
+import { toast } from "sonner"
+
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -20,14 +22,25 @@ export function PayoutDetailsReveal({
   const [details, setDetails] = useState<string>()
   const [pending, setPending] = useState(false)
   async function reveal() {
-    if (details) return
+    if (details || pending) return
     setPending(true)
-    const response = await fetch(`/api/admin/payouts/${payoutId}/details`, {
-      method: "POST",
-    })
-    if (response.ok)
-      setDetails(((await response.json()) as { details: string }).details)
-    setPending(false)
+    try {
+      const response = await fetch(`/api/admin/payouts/${payoutId}/details`, {
+        method: "POST",
+      })
+      if (!response.ok) {
+        toast.error("Не удалось загрузить реквизиты.")
+        return
+      }
+      const payload = (await response.json()) as { details?: unknown }
+      if (typeof payload.details !== "string")
+        throw new Error("Invalid payout details response")
+      setDetails(payload.details)
+    } catch {
+      toast.error("Не удалось загрузить реквизиты.")
+    } finally {
+      setPending(false)
+    }
   }
   return (
     <Dialog>

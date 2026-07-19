@@ -4,6 +4,7 @@ import { db, initializeDatabase } from "@/src/server/infrastructure/db/client"
 import { getConfig } from "@/src/server/config"
 import { handleJob } from "@/src/jobs/handlers"
 import { logger } from "@/src/server/infrastructure/logging/logger"
+import { TelegramGatewayError } from "@/src/server/infrastructure/telegram/gateway"
 
 const workerId = `worker-${process.pid}-${randomUUID().slice(0, 8)}`
 let stopping = false
@@ -136,10 +137,15 @@ async function finishFailure(
   error: unknown
 ) {
   const dead = job.attempts >= job.maxAttempts
-  const backoff = Math.min(
+  const exponentialBackoff = Math.min(
     60 * 60_000,
     2 ** Math.min(job.attempts, 12) * 1000 + Math.floor(Math.random() * 1000)
   )
+  const providerBackoff =
+    error instanceof TelegramGatewayError && error.retryAfterSeconds
+      ? error.retryAfterSeconds * 1000
+      : 0
+  const backoff = Math.max(exponentialBackoff, providerBackoff)
   await db.outboxJob.updateMany({
     where: { id: job.id, status: "PROCESSING", lockedBy: workerId },
     data: {

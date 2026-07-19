@@ -17,8 +17,9 @@ import {
   WalletIcon,
 } from "lucide-react"
 import Link from "next/link"
-import { notFound, redirect } from "next/navigation"
+import { notFound } from "next/navigation"
 
+import { AdminSubscriptionDialog } from "@/components/admin/admin-subscription-dialog"
 import { WalletAdjustmentDialog } from "@/components/admin/wallet-adjustment-dialog"
 import { PulsarIconContainer } from "@/components/app/pulsar-primitives"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -49,8 +50,9 @@ import {
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { formatPreviewRub } from "@/src/frontend-preview/format"
+import { getConfig } from "@/src/server/config"
 import { db } from "@/src/server/infrastructure/db/client"
-import { getSession } from "@/src/server/transport/web/session"
+import { requireWebSession } from "@/src/server/transport/web/session"
 
 const cardClass =
   "gap-0 rounded-3xl border border-border/70 bg-card/40 py-0 shadow-none! ring-0!"
@@ -60,12 +62,11 @@ export default async function AdminUserDetailsPage({
 }: {
   params: Promise<{ id: string }>
 }) {
-  const session = await getSession("ADMIN")
-  if (!session || session.user.role !== "ADMIN") redirect("/admin")
+  await requireWebSession("ADMIN")
 
   const { id } = await params
-  const user = await db.user.findUnique({
-    where: { id },
+  const user = await db.user.findFirst({
+    where: { id, role: "USER", isTest: getConfig().testMode },
     include: {
       identities: true,
       sessions: { orderBy: { createdAt: "desc" }, take: 20 },
@@ -88,13 +89,19 @@ export default async function AdminUserDetailsPage({
         },
       },
       supportConversation: {
-        include: { messages: { orderBy: { createdAt: "asc" }, take: 100 } },
+        include: {
+          messages: {
+            where: { isInternal: false },
+            orderBy: { createdAt: "asc" },
+            take: 100,
+          },
+        },
       },
       telegramProfile: true,
     },
   })
 
-  if (!user || user.role !== "USER") notFound()
+  if (!user) notFound()
 
   const [auditLogs, referralCount, paidReferralCount] = await Promise.all([
     db.auditLog.findMany({
@@ -240,7 +247,24 @@ export default async function AdminUserDetailsPage({
             />
           </SectionCard>
 
-          <SectionCard title="Подписка">
+          <SectionCard
+            title="Подписка"
+            action={
+              <AdminSubscriptionDialog
+                userId={user.id}
+                initialIdempotencyKey={randomUUID()}
+                subscription={
+                  user.subscription
+                    ? {
+                        expiresAt: user.subscription.expiresAt,
+                        deviceLimit: user.subscription.deviceLimit,
+                        lteEnabled: user.subscription.lteEnabled,
+                      }
+                    : null
+                }
+              />
+            }
+          >
             {user.subscription ? (
               <>
                 <DetailRow

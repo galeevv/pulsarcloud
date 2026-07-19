@@ -246,10 +246,26 @@ export async function transitionPayout(input: {
     throw new BusinessError("INVALID_INPUT")
   return withBusyRetry(() =>
     db.$transaction(async (tx) => {
-      const payout = await tx.payoutRequest.findUniqueOrThrow({
-        where: { id: input.payoutId },
+      const testMode = getConfig().testMode
+      const admin = await tx.user.findUnique({
+        where: { id: input.adminUserId },
+      })
+      if (
+        !admin ||
+        admin.role !== "ADMIN" ||
+        admin.status !== "ACTIVE" ||
+        admin.isTest !== testMode
+      )
+        throw new BusinessError("ADMIN_FORBIDDEN", 403)
+
+      const payout = await tx.payoutRequest.findFirst({
+        where: {
+          id: input.payoutId,
+          user: { is: { role: "USER", isTest: testMode } },
+        },
         include: { user: { include: { wallet: true } } },
       })
+      if (!payout) throw new BusinessError("NOT_FOUND", 404)
       if (input.action === "APPROVE" && payout.status !== "PENDING")
         throw new BusinessError("CONFLICT")
       if (input.action === "PAID" && payout.status !== "APPROVED")
@@ -259,7 +275,8 @@ export async function transitionPayout(input: {
         !["PENDING", "APPROVED"].includes(payout.status)
       )
         throw new BusinessError("CONFLICT")
-      const wallet = payout.user.wallet!
+      const wallet = payout.user.wallet
+      if (!wallet) throw new BusinessError("CONFLICT")
       if (input.action === "APPROVE")
         await tx.payoutRequest.update({
           where: { id: payout.id },
