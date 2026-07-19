@@ -2,7 +2,28 @@
 
 Living report. Updated as steps complete. No secrets are recorded here.
 
-_Last updated: 2026-07-19 (repo-side preparation phase)._
+_Last updated: 2026-07-19 (live build — nodes online)._
+
+## 0. Live build status (2026-07-19)
+
+- **3 traffic nodes ONLINE** in the panel and `healthy`: PL (`185.126.64.64`),
+  DE (`2.26.230.109`), NL (`31.77.157.232`) — all VLESS RAW TCP Reality, 443/tcp
+  listening. NL is Reality for now; Hysteria2 deferred.
+- Each node: bootstrap + Docker + UFW (22 limit, 443/tcp, node port 2222 only
+  from panel `31.76.27.41`) + remnanode (`NODE_PORT`/`SECRET_KEY`).
+- Panel (via API): 3 Reality Config Profiles (unique keypair/shortIds; SNI
+  PL=intel, DE=amd, NL=microsoft), 3 Nodes, squads `PULSAR_STANDARD` (all 3
+  inbounds) + `PULSAR_LTE` (empty, for the future CDN node), 6 Hosts
+  (PL/DE/NL × edge/firefox). Reality private keys live only in the panel.
+- Pulsar `/etc/pulsar/pulsar.env` repointed to the new squad UUIDs; `pulsar-web`
+  + `pulsar-worker` restarted, `/health/ready` OK.
+- Non-secret build state recorded on pulsar2: `/opt/pulsar/rw-build.json`.
+- User DB cleaned to admin-only; backup `pulsar-precleanup-*.db`.
+
+**Still pending:** real-client VPN test (subscription → actual connect), deploy
+latest Pulsar code to pulsar2 (currently stale `9b9e9a6`), then the billing
+go-live flip (`BILLING_ENABLED=true`, `TEST_MODE=false`, `platega`). LTE/Yandex
+CDN node prepared but disabled.
 
 ## 1. Findings (audit)
 
