@@ -18,7 +18,7 @@ services:
         max-size: "10m"
         max-file: "3"
     healthcheck:
-      test: ["CMD", "sh", "-c", "ss -H -ltn 'sport = :${APP_PORT:-2222}' | grep -q LISTEN || exit 1"]
+      test: ["CMD", "sh", "-c", "ss -H -ltn 'sport = :${NODE_PORT:-2222}' | grep -q LISTEN || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
