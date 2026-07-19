@@ -1,0 +1,56 @@
+{
+  "_comment": "Xray xHTTP GET-uplink inbound for the Yandex CDN LTE node. Paste into a Remnawave Config Profile named YANDEX-CDN-XHTTP. The client Host `extra` block MUST match this exactly (minus the `path`, which the Host sets separately). Requires a recent Xray core on BOTH server and client (>= 26.3.27) or the GET-uplink fields are ignored and the client falls back to POST. Project rule: client fingerprint must be edge or firefox, NOT chrome.",
+  "tag": "YANDEX-CDN-XHTTP",
+  "port": 11443,
+  "listen": "127.0.0.1",
+  "protocol": "vless",
+  "settings": {
+    "clients": [],
+    "decryption": "none"
+  },
+  "sniffing": {
+    "enabled": true,
+    "destOverride": ["http", "tls", "quic"],
+    "routeOnly": true
+  },
+  "streamSettings": {
+    "network": "xhttp",
+    "security": "none",
+    "xhttpSettings": {
+      "mode": "packet-up",
+      "path": "/poll",
+      "extra": {
+        "xmux": {
+          "cMaxReuseTimes": "0",
+          "maxConcurrency": "4-8",
+          "hKeepAlivePeriod": 0,
+          "hMaxRequestTimes": "0",
+          "hMaxReusableSecs": "0"
+        },
+        "seqKey": "offset",
+        "headers": {
+          "Accept": "application/vnd.api+json, application/json, text/plain, */*",
+          "Pragma": "no-cache",
+          "Cache-Control": "no-cache",
+          "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7"
+        },
+        "sessionKey": "media_sid",
+        "xPaddingKey": "q",
+        "seqPlacement": "query",
+        "uplinkDataKey": "X-Playback-Token",
+        "xPaddingBytes": "48-320",
+        "xPaddingHeader": "X-Rewrite-URL",
+        "xPaddingMethod": "tokenish",
+        "sessionPlacement": "cookie",
+        "uplinkHTTPMethod": "GET",
+        "xPaddingObfsMode": true,
+        "xPaddingPlacement": "queryInHeader",
+        "scMaxBufferedPosts": 32,
+        "scMaxEachPostBytes": "1536-6144",
+        "uplinkDataPlacement": "header",
+        "scMinPostsIntervalMs": "4-18",
+        "serverMaxHeaderBytes": 32768
+      }
+    }
+  }
+}

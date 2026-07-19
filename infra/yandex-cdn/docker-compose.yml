@@ -1,0 +1,28 @@
+# Remnawave Node for the Yandex CDN LTE origin.
+# Same image as a normal traffic node, but its assigned Config Profile is the
+# xHTTP inbound that listens on 127.0.0.1:11443 (see xhttp-inbound-profile.json).
+# nginx runs on the HOST (not in this compose) and terminates TLS on the origin
+# domain, proxying to that loopback inbound. host networking lets Xray bind the
+# loopback port directly.
+#
+# The xHTTP port is NEVER published to the internet — only nginx (443) is public,
+# and only the CDN edge should reach it once the CDN resource exists.
+services:
+  remnanode:
+    image: remnawave/node:latest
+    container_name: remnanode
+    hostname: remnanode-lte-origin
+    restart: always
+    network_mode: host
+    env_file:
+      - .env
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "sh", "-c", "ss -H -ltn 'sport = :11443' | grep -q LISTEN || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

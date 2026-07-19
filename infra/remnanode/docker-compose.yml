@@ -1,0 +1,24 @@
+# Remnawave Node (remnanode) — runs Xray-core, driven by the Remnawave panel.
+# host networking so Xray can bind the public inbound (443/tcp Reality,
+# 443/udp Hysteria2) or the loopback xHTTP inbound (127.0.0.1:11443) directly.
+# The node exposes only its admin/data port (APP_PORT) to the panel; the
+# firewall (configure-firewall.sh) restricts that port to the panel IP.
+services:
+  remnanode:
+    image: remnawave/node:latest
+    container_name: remnanode
+    hostname: remnanode
+    restart: always
+    network_mode: host
+    env_file:
+      - .env
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "sh", "-c", "ss -H -ltn 'sport = :${APP_PORT:-2222}' | grep -q LISTEN || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

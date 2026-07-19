@@ -1,0 +1,62 @@
+# nginx origin template for the Yandex CDN LTE (xHTTP) node.
+# Rendered by infra/scripts/render-yandex-origin-config.sh (replaces
+# __ORIGIN_DOMAIN__ from $YANDEX_ORIGIN_DOMAIN and __XHTTP_PORT__ from
+# $XRAY_XHTTP_PORT). nginx terminates TLS on the origin domain and proxies
+# EVERYTHING to the loopback Xray xHTTP inbound. `location /` catches all,
+# so changing the Xray path never requires editing nginx.
+#
+# Streaming correctness: proxy_buffering/request_buffering OFF are mandatory.
+
+log_format xhttp_min '$remote_addr $time_local host="$host" '
+                     'proto="$server_protocol" "$request" '
+                     'st=$status bytes=$body_bytes_sent '
+                     'rt=$request_time urt="$upstream_response_time"';
+
+upstream xray_xhttp_get {
+    server 127.0.0.1:__XHTTP_PORT__;
+    keepalive 256;
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name __ORIGIN_DOMAIN__;
+
+    ssl_certificate     /etc/letsencrypt/live/__ORIGIN_DOMAIN__/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/__ORIGIN_DOMAIN__/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    client_max_body_size 0;
+    client_body_timeout 900s;
+    client_header_timeout 900s;
+
+    # Cheap origin health probe (does not touch Xray).
+    location = /health {
+        default_type application/json;
+        return 200 '{"status":"ok","service":"pulsar-xhttp-origin"}';
+    }
+
+    location / {
+        access_log /var/log/nginx/xhttp_access.log xhttp_min;
+
+        proxy_pass http://xray_xhttp_get;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Connection "";
+
+        proxy_buffering off;          # critical for the streamed downlink
+        proxy_request_buffering off;  # critical for the streamed uplink
+        proxy_cache off;
+        gzip off;
+
+        add_header X-Accel-Buffering "no" always;
+
+        proxy_connect_timeout 30s;
+        proxy_read_timeout 900s;
+        proxy_send_timeout 900s;
+    }
+}
