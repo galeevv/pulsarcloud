@@ -113,7 +113,7 @@ export function PricingDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form ref={formRef} action={formAction}>
+        <form key={pricing.version} ref={formRef} action={formAction}>
           <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
           <input
             type="hidden"

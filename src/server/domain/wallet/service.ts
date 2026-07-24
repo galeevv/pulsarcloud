@@ -347,7 +347,11 @@ export async function transitionPayout(input: {
           },
         })
       }
-      if (input.action === "APPROVE" || input.action === "PAID") {
+      if (
+        input.action === "APPROVE" ||
+        input.action === "PAID" ||
+        input.action === "REJECT"
+      ) {
         await tx.outboxJob.create({
           data: {
             type: "SEND_TELEGRAM_NOTIFICATION",
@@ -356,7 +360,11 @@ export async function transitionPayout(input: {
             payloadJson: JSON.stringify({
               userId: payout.userId,
               template:
-                input.action === "APPROVE" ? "PAYOUT_APPROVED" : "PAYOUT_PAID",
+                input.action === "APPROVE"
+                  ? "PAYOUT_APPROVED"
+                  : input.action === "PAID"
+                    ? "PAYOUT_PAID"
+                    : "PAYOUT_REJECTED",
             }),
             dedupeKey: `telegram:payout:${payout.id}:${input.action.toLowerCase()}`,
             maxAttempts: 5,

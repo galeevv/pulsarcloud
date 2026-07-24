@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="ApexDrive — сверхбыстрый и безопасный файлообменник. Проект находится в стадии бета-тестирования.">
+    <title>ApexDrive | Beta — Облачное хранилище в разработке</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --dark: #0f172a;
+            --gray-light: #f8fafc;
+            --text-main: #334155;
+            --border: #e2e8f0;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        body {
+            color: var(--text-main);
+            background-color: #ffffff;
+            line-height: 1.6;
+        }
+
+        /* Баннер о разработке */
+        .dev-banner {
+            background-color: #fef3c7;
+            color: #92400e;
+            text-align: center;
+            padding: 0.75rem 1rem;
+            font-size: 0.9rem;
+            font-weight: 600;
+            border-bottom: 1px solid #fde68a;
+        }
+
+        /* Навигация */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.25rem 5%;
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            z-index: 100;
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: 800;
+            color: var(--primary);
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .beta-tag {
+            font-size: 0.7rem;
+            background-color: var(--primary);
+            color: white;
+            padding: 0.15rem 0.4rem;
+            border-radius: 4px;
+            text-transform: uppercase;
+            margin-left: 0.5rem;
+        }
+
+        nav {
+            display: flex;
+            align-items: center;
+            gap: 2rem;
+        }
+
+        nav a {
+            text-decoration: none;
+            color: #475569;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+
+        nav a:hover {
+            color: var(--primary);
+        }
+
+        .btn {
+            padding: 0.6rem 1.25rem;
+            border-radius: 0.5rem;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+
+        .btn-outline {
+            border: 1px solid var(--border);
+            color: var(--dark);
+        }
+
+        .btn-outline:hover {
+            background-color: var(--gray-light);
+        }
+
+        /* Главный экран */
+        .hero-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            align-items: center;
+            gap: 4rem;
+            padding: 5rem 5%;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .hero-text h1 {
+            font-size: 3.5rem;
+            font-weight: 800;
+            color: var(--dark);
+            line-height: 1.15;
+            margin-bottom: 1.5rem;
+        }
+
+        .hero-text p {
+            font-size: 1.25rem;
+            color: #64748b;
+            margin-bottom: 2.5rem;
+        }
+
+        /* Зона загрузки файлов */
+        .upload-box {
+            border: 3px dashed #cbd5e1;
+            border-radius: 1rem;
+            padding: 4rem 2rem;
+            text-align: center;
+            background-color: var(--gray-light);
+            transition: border-color 0.2s, background-color 0.2s;
+            position: relative;
+            cursor: pointer;
+        }
+
+        .upload-box:hover {
+            border-color: var(--primary);
+            background-color: #eff6ff;
+        }
+
+        .upload-icon {
+            width: 64px;
+            height: 64px;
+            color: var(--primary);
+            margin-bottom: 1.5rem;
+        }
+
+        .upload-box h3 {
+            font-size: 1.25rem;
+            color: var(--dark);
+            margin-bottom: 0.5rem;
+        }
+
+        .upload-box p {
+            font-size: 0.875rem;
+            color: #94a3b8;
+        }
+
+        /* Секция реалистичной статистики */
+        .stats-section {
+            background-color: var(--dark);
+            color: white;
+            padding: 4rem 5%;
+            display: flex;
+            justify-content: space-around;
+            text-align: center;
+            flex-wrap: wrap;
+            gap: 2rem;
+        }
+
+        .stat-item h2 {
+            font-size: 3rem;
+            font-weight: 800;
+            color: #38bdf8;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-item p {
+            color: #94a3b8;
+            font-size: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        /* Секция с большим изображением */
+        .promo-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            align-items: center;
+            gap: 4rem;
+            padding: 6rem 5%;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .promo-image img {
+            width: 100%;
+            border-radius: 1rem;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            object-fit: cover;
+            height: 400px;
+        }
+
+        .promo-text h2 {
+            font-size: 2.5rem;
+            color: var(--dark);
+            font-weight: 800;
+            margin-bottom: 1.5rem;
+        }
+
+        /* Подвал */
+        footer {
+            border-top: 1px solid var(--border);
+            padding: 4rem 5% 2rem;
+            background: #ffffff;
+        }
+
+        .footer-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 3rem;
+            max-width: 1400px;
+            margin: 0 auto 3rem;
+        }
+
+        .footer-col h4 {
+            color: var(--dark);
+            margin-bottom: 1.25rem;
+            font-weight: 700;
+        }
+
+        .footer-col ul {
+            list-style: none;
+        }
+
+        .footer-col ul li {
+            margin-bottom: 0.75rem;
+        }
+
+        .footer-col ul li a {
+            color: #64748b;
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        .footer-col ul li a:hover {
+            color: var(--primary);
+        }
+
+        .copy {
+            text-align: center;
+            color: #94a3b8;
+            font-size: 0.875rem;
+            border-top: 1px solid var(--border);
+            padding-top: 2rem;
+        }
+
+        @media (max-width: 968px) {
+            .hero-section, .promo-section {
+                grid-template-columns: 1fr;
+                text-align: center;
+                gap: 3rem;
+            }
+            header nav {
+                display: none;
+            }
+            .hero-text h1 {
+                font-size: 2.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="dev-banner">
+        🚧 Проект находится в стадии активной разработки и закрытого тестирования. Публичная регистрация временно отключена.
+    </div>
+
+    <header>
+        <a href="#" class="logo">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.2 15c.7-1.2 1-2.5.7-3.9-.3-2-1.9-3.6-3.9-3.9C16.7 5.1 14 3 11 3 7.5 3 4.5 5.5 4 9c-2.4.5-4 2.6-4 5 0 2.8 2.2 5 5 5h14c2.2 0 4-1.8 4-4 0-.6-.1-1.1-.3-1.5z"></path></svg>
+            ApexDrive <span class="beta-tag">Beta</span>
+        </a>
+        <nav>
+            <a href="#features">О проекте</a>
+            <a href="#github">Dev Blog</a>
+            <a href="#" class="btn btn-outline" onclick="alert('Авторизация пока доступна только для разработчиков.')">Войти</a>
+        </nav>
+    </header>
+
+    <main>
+        <section class="hero-section">
+            <div class="hero-text">
+                <h1>Экспериментальная сеть обмена файлами</h1>
+                <p>Мы создаем новый, быстрый и безопасный файлообменник на базе распределенных CDN. Сейчас проект находится на стадии закрытого тестирования сетевой инфраструктуры.</p>
+            </div>
+            
+            <div class="upload-box" onclick="alert('Сервис находится в стадии закрытого бета-тестирования. Публичная загрузка файлов временно недоступна.')">
+                <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                <h3>Зона загрузки (Отключена)</h3>
+                <p>Доступно только авторизованным тестерам</p>
+                <p style="margin-top: 1rem; font-size: 0.75rem; color: #64748b;">API Endpoint: dev.upload.node_01</p>
+            </div>
+        </section>
+
+        <section class="stats-section">
+            <div class="stat-item">
+                <h2>1 420</h2>
+                <p>Тестовых файлов</p>
+            </div>
+            <div class="stat-item">
+                <h2>42</h2>
+                <p>Бета-тестера</p>
+            </div>
+            <div class="stat-item">
+                <h2>850 ГБ</h2>
+                <p>Объем хранилища</p>
+            </div>
+            <div class="stat-item">
+                <h2>Beta</h2>
+                <p>Статус сети</p>
+            </div>
+        </section>
+
+        <section class="promo-section" id="features">
+            <div class="promo-image">
+                <img src="https://images.unsplash.com/photo-1558494949-ef010cbdcc31?auto=format&fit=crop&w=800&q=80" alt="ApexDrive Beta Infrastructure">
+            </div>
+            <div class="promo-text">
+                <h2>Тестируем нагрузки в реальном времени</h2>
+                <p>В данный момент мы обкатываем протоколы маршрутизации и прогоняем зашифрованный тестовый трафик через наши узлы. Это необходимо для калибровки оборудования перед публичным запуском.</p>
+                <p style="margin-top: 1rem; color: #64748b;">Если вы заметили высокую сетевую активность с этого домена — не переживайте, это наши инженеры проводят стресс-тесты подсистем.</p>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="footer-grid">
+            <div class="footer-col">
+                <h4>Статус проекта</h4>
+                <ul>
+                    <li><a href="#">Дорожная карта</a></li>
+                    <li><a href="#">Отчеты о тестах</a></li>
+                    <li><a href="#">Баги и исправления</a></li>
+                </ul>
+            </div>
+            <div class="footer-col">
+                <h4>Связаться</h4>
+                <ul>
+                    <li><a href="#">GitHub Issues</a></li>
+                    <li><a href="#">Почта разработчиков</a></li>
+                </ul>
+            </div>
+        </div>
+        <div class="copy">
+            &copy; 2026 ApexDrive Dev Team. Сайт работает в режиме отладки.
+        </div>
+    </footer>
+
+</body>
+</html>

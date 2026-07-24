@@ -1,18 +1,12 @@
 import { getConfig } from "@/src/server/config"
 import { db } from "@/src/server/infrastructure/db/client"
-import {
-  getReferralSummaryView,
-  getSubscriptionView,
-  getWalletBalanceView,
-} from "@/src/server/queries/user-dashboard"
+import { getReferralSummaryView } from "@/src/server/queries/user-dashboard"
 
 export const telegramCallbackActions = [
   "menu:home",
-  "menu:subscription",
-  "menu:balance",
   "menu:referrals",
-  "menu:support",
-  "subscription:refresh",
+  "menu:site-login",
+  "menu:payout-login",
 ] as const
 
 export type TelegramCallbackAction = (typeof telegramCallbackActions)[number]
@@ -28,8 +22,14 @@ export function isTelegramCallbackAction(
 
 export type TelegramScreen = {
   text: string
+  parseMode: "HTML"
   replyMarkup: {
-    inline_keyboard: Array<Array<Record<string, unknown>>>
+    inline_keyboard: Array<
+      Array<
+        | { text: string; callback_data: TelegramCallbackAction }
+        | { text: string; url: string }
+      >
+    >
   }
 }
 
@@ -40,34 +40,44 @@ const dateFormatter = new Intl.DateTimeFormat("ru-RU", {
   timeZone: "Asia/Yekaterinburg",
 })
 
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+}
+
+function plural(value: number, one: string, few: string, many: string) {
+  const mod100 = value % 100
+  const mod10 = value % 10
+  if (mod100 >= 11 && mod100 <= 19) return many
+  if (mod10 === 1) return one
+  if (mod10 >= 2 && mod10 <= 4) return few
+  return many
+}
+
+function remainingDaysText(expiresAt: Date) {
+  const milliseconds = expiresAt.getTime() - Date.now()
+  if (milliseconds <= 86_400_000) return "заканчивается сегодня"
+  const days = Math.ceil(milliseconds / 86_400_000)
+  return `${days === 1 ? "остался" : "осталось"} ${days} ${plural(days, "день", "дня", "дней")}`
+}
+
+function planText(months: number | null) {
+  return months
+    ? `${months} ${plural(months, "месяц", "месяца", "месяцев")}`
+    : null
+}
+
 function rublesFromMinor(value: number) {
   return new Intl.NumberFormat("ru-RU", {
     maximumFractionDigits: 0,
   }).format(Math.floor(value / 100))
 }
 
-function mainKeyboard(): TelegramScreen["replyMarkup"] {
-  return {
-    inline_keyboard: [
-      [
-        { text: "Подписка", callback_data: "menu:subscription" },
-        { text: "Баланс", callback_data: "menu:balance" },
-      ],
-      [
-        {
-          text: "Реферальная программа",
-          callback_data: "menu:referrals",
-        },
-      ],
-      [{ text: "Поддержка", callback_data: "menu:support" }],
-      [
-        {
-          text: "Открыть сайт",
-          url: `${getConfig().appUrl}/home`,
-        },
-      ],
-    ],
-  }
+export function telegramMainPhotoUrl() {
+  return `${getConfig().appUrl}/tg/lk.png`
 }
 
 export async function getTelegramUserId(telegramId: string) {
@@ -81,160 +91,148 @@ export async function getTelegramUserId(telegramId: string) {
 export async function getTelegramMainScreen(
   userId: string
 ): Promise<TelegramScreen> {
-  const profile = await db.telegramProfile.findUnique({
-    where: { userId },
-    select: { firstName: true },
-  })
-  const greeting = profile?.firstName ? `, ${profile.firstName}` : ""
-  return {
-    text: `Добро пожаловать${greeting} в PULSAR.\n\nПодписка, баланс и реферальная программа синхронизированы с вашим аккаунтом на pulsar-cloud.space.`,
-    replyMarkup: mainKeyboard(),
-  }
-}
-
-async function getSubscriptionScreen(userId: string): Promise<TelegramScreen> {
-  const subscription = await getSubscriptionView(userId)
-  const appUrl = getConfig().appUrl
-  if (!subscription)
-    return {
-      text: [
-        "Подписка",
-        "",
-        "Статус: не оформлена",
-        "Дата окончания: —",
-        "Осталось дней: 0",
-        "Устройств: —",
-        "LTE-доступ: нет",
-        "Remnawave: синхронизация не требуется",
-      ].join("\n"),
-      replyMarkup: {
-        inline_keyboard: [
-          [{ text: "Подключить VPN", url: `${appUrl}/subscription` }],
-          [
-            {
-              text: "Управление устройствами",
-              url: `${appUrl}/subscription`,
-            },
-          ],
-          [{ text: "Продлить подписку", url: `${appUrl}/home` }],
-          [
-            { text: "Обновить", callback_data: "subscription:refresh" },
-            { text: "Назад", callback_data: "menu:home" },
-          ],
-        ],
+  const user = await db.user.findUniqueOrThrow({
+    where: { id: userId },
+    select: {
+      telegramProfile: {
+        select: { firstName: true, username: true },
       },
-    }
+      subscription: true,
+    },
+  })
+  const profile = user.telegramProfile
+  const name = escapeHtml(
+    (profile?.firstName?.trim() || "ПОЛЬЗОВАТЕЛЬ").toLocaleUpperCase("ru-RU")
+  )
+  const username = profile?.username?.trim()
+    ? ` · @${escapeHtml(profile.username.trim())}`
+    : ""
+  const subscription = user.subscription
+  const now = new Date()
+  const expired = Boolean(subscription && subscription.expiresAt <= now)
+  const suspended = subscription?.status === "SUSPENDED"
+  const active =
+    Boolean(subscription) &&
+    !expired &&
+    !suspended &&
+    (subscription?.status === "ACTIVE" || subscription?.status === "TRIAL")
 
-  const statuses: Record<string, string> = {
-    ACTIVE: "активна",
-    TRIAL: "пробная",
-    EXPIRED: "истекла",
-    CANCELED: "приостановлена",
-  }
-  const syncStatuses: Record<string, string> = {
-    SYNCED: "синхронизирована",
-    PENDING: "ожидает синхронизации",
-    FAILED: "ошибка синхронизации",
-    NOT_REQUIRED: "синхронизация не требуется",
-  }
-  const remainingDays = subscription.expiresAt
-    ? Math.max(
-        0,
-        Math.ceil((subscription.expiresAt.getTime() - Date.now()) / 86_400_000)
-      )
-    : 0
-  return {
-    text: [
-      "Подписка",
+  const lines = [
+    "🪐 <b>PulsarVPN — Личный кабинет</b>",
+    "",
+    `👤 <b>${name}</b>${username}`,
+    "",
+  ]
+  let purchaseLabel = "💎 Купить подписку"
+
+  if (!subscription) {
+    lines.push(
+      "⚪ <b>Подписка не оформлена</b>",
+      "Выберите тариф, чтобы подключить защищённый доступ."
+    )
+  } else if (expired) {
+    purchaseLabel = "💎 Возобновить подписку"
+    lines.push(
+      "🔴 <b>Подписка закончилась</b>",
+      `Доступ был активен до <b>${dateFormatter.format(subscription.expiresAt)}</b>.`,
       "",
-      `Статус: ${statuses[subscription.status] ?? subscription.status}`,
-      `Дата окончания: ${subscription.expiresAt ? dateFormatter.format(subscription.expiresAt) : "—"}`,
-      `Осталось дней: ${remainingDays}`,
-      `Устройств: ${subscription.deviceLimit}`,
-      `LTE-доступ: ${subscription.lteEnabled ? "есть" : "нет"}`,
-      `Remnawave: ${syncStatuses[subscription.syncStatus] ?? subscription.syncStatus}`,
-    ].join("\n"),
-    replyMarkup: {
-      inline_keyboard: [
-        [
-          {
-            text: "Подключить VPN",
-            url: subscription.subscriptionUrl ?? `${appUrl}/subscription`,
-          },
-        ],
-        [
-          {
-            text: "Управление устройствами",
-            url: `${appUrl}/subscription`,
-          },
-        ],
-        [{ text: "Продлить подписку", url: `${appUrl}/home` }],
-        [
-          { text: "Обновить", callback_data: "subscription:refresh" },
-          { text: "Назад", callback_data: "menu:home" },
-        ],
-      ],
-    },
+      `📱 Лимит устройств: <b>${subscription.deviceLimit}</b>`,
+      `⚡ LTE-доступ: <b>${subscription.lteEnabled ? "был подключён" : "не был подключён"}</b>`
+    )
+  } else if (suspended) {
+    purchaseLabel = "💎 Возобновить подписку"
+    lines.push(
+      "🔴 <b>Доступ приостановлен</b>",
+      `Доступ оплачен до <b>${dateFormatter.format(subscription.expiresAt)}</b>.`,
+      "",
+      `📱 Доступно устройств: <b>до ${subscription.deviceLimit}</b>`,
+      `⚡ LTE-доступ: <b>${subscription.lteEnabled ? "есть" : "нет"}</b>`
+    )
+  } else {
+    purchaseLabel =
+      subscription.status === "TRIAL"
+        ? "💎 Купить подписку"
+        : "💎 Продлить подписку"
+    const period = planText(subscription.planDurationMonths)
+    lines.push(
+      `🟢 <b>${period ? `${period} · ` : "Доступ активен · "}${remainingDaysText(subscription.expiresAt)}</b>`,
+      `Подписка активна до <b>${dateFormatter.format(subscription.expiresAt)}</b>.`,
+      "",
+      `📱 Доступно устройств: <b>до ${subscription.deviceLimit}</b>`,
+      `⚡ LTE-доступ: <b>${subscription.lteEnabled ? "есть" : "нет"}</b>`
+    )
   }
-}
 
-async function getBalanceScreen(userId: string): Promise<TelegramScreen> {
-  const balanceRub = await getWalletBalanceView(userId)
+  const keyboard: TelegramScreen["replyMarkup"]["inline_keyboard"] = []
+  if (
+    active &&
+    subscription?.syncStatus === "SYNCED" &&
+    subscription.subscriptionUrl
+  )
+    keyboard.push([
+      { text: "🔗 Подключиться", url: subscription.subscriptionUrl },
+    ])
+  keyboard.push([
+    { text: purchaseLabel, callback_data: "menu:site-login" },
+  ])
+  keyboard.push([
+    { text: "🎁 Рефералы", callback_data: "menu:referrals" },
+    { text: "🌐 Сайт", callback_data: "menu:site-login" },
+  ])
+
   return {
-    text: `Баланс\n\nДоступно: ${Math.floor(balanceRub).toLocaleString("ru-RU")} ₽`,
-    replyMarkup: {
-      inline_keyboard: [
-        [
-          {
-            text: "Использовать баланс",
-            url: `${getConfig().appUrl}/home`,
-          },
-        ],
-        [{ text: "Назад", callback_data: "menu:home" }],
-      ],
-    },
+    text: lines.join("\n"),
+    parseMode: "HTML",
+    replyMarkup: { inline_keyboard: keyboard },
   }
 }
 
 async function getReferralsScreen(userId: string): Promise<TelegramScreen> {
   const summary = await getReferralSummaryView(userId)
-  const link =
-    summary.inviteUrl ?? "Ссылка станет доступна после первой оплаты."
-  const keyboard: TelegramScreen["replyMarkup"]["inline_keyboard"] = []
-  if (summary.inviteUrl)
-    keyboard.push([
-      {
-        text: "Скопировать ссылку",
-        copy_text: { text: summary.inviteUrl },
-      },
-    ])
-  keyboard.push([{ text: "Назад", callback_data: "menu:home" }])
-  return {
-    text: [
-      "Реферальная программа",
+  const lines = [
+    "🎁 <b>PulsarVPN — Рефералы</b>",
+    "",
+    `👥 Приглашено: <b>${summary.invitedUsers}</b>`,
+    `🟢 Активных: <b>${summary.activeUsers}</b>`,
+    `💰 Баланс: <b>${rublesFromMinor(summary.availableMinor)} ₽</b>`,
+  ]
+  if (summary.inviteUrl && summary.telegramInviteUrl)
+    lines.push(
       "",
-      `Реферальная ссылка: ${link}`,
-      `Приглашено пользователей: ${summary.invitedUsers}`,
-      `Активных пользователей: ${summary.activeUsers}`,
-      `Начислено вознаграждений: ${rublesFromMinor(summary.rewardMinor)} ₽`,
-      `Доступный баланс: ${rublesFromMinor(summary.availableMinor)} ₽`,
-    ].join("\n"),
-    replyMarkup: { inline_keyboard: keyboard },
+      "Ваша ссылка:",
+      escapeHtml(summary.inviteUrl),
+      "",
+      "Ссылка для Telegram:",
+      escapeHtml(summary.telegramInviteUrl)
+    )
+  else
+    lines.push("", "Ссылки станут доступны после первой оплаты.")
+
+  return {
+    text: lines.join("\n"),
+    parseMode: "HTML",
+    replyMarkup: {
+      inline_keyboard: [
+        [{ text: "💸 Вывести", callback_data: "menu:payout-login" }],
+        [{ text: "‹ Назад", callback_data: "menu:home" }],
+      ],
+    },
   }
 }
 
-function getSupportScreen(): TelegramScreen {
+export function getTelegramWebsiteScreen(url: string): TelegramScreen {
   return {
-    text: "Поддержка PULSAR поможет с подключением, подпиской и оплатой.",
+    text: [
+      "🪐 <b>PulsarVPN — Сайт</b>",
+      "",
+      "🔐 Вход подготовлен.",
+      "⏳ Ссылка действует 5 минут.",
+    ].join("\n"),
+    parseMode: "HTML",
     replyMarkup: {
       inline_keyboard: [
-        [
-          {
-            text: "Написать в поддержку",
-            url: `${getConfig().appUrl}/support`,
-          },
-        ],
-        [{ text: "Назад", callback_data: "menu:home" }],
+        [{ text: "🌐 Открыть личный кабинет ↗", url }],
+        [{ text: "‹ Назад", callback_data: "menu:home" }],
       ],
     },
   }
@@ -244,11 +242,7 @@ export async function getTelegramScreen(
   userId: string,
   action: TelegramCallbackAction
 ) {
-  if (action === "menu:subscription" || action === "subscription:refresh")
-    return getSubscriptionScreen(userId)
-  if (action === "menu:balance") return getBalanceScreen(userId)
   if (action === "menu:referrals") return getReferralsScreen(userId)
-  if (action === "menu:support") return getSupportScreen()
   return getTelegramMainScreen(userId)
 }
 

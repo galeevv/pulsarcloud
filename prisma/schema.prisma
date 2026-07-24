@@ -181,6 +181,12 @@ enum AuditActorType {
   SYSTEM
 }
 
+enum PromoCampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+}
+
 model User {
   id                      String                      @id @default(cuid())
   role                    UserRole                    @default(USER)
@@ -209,6 +215,8 @@ model User {
   telegramProfile         TelegramProfile?
   broadcasts              TelegramBroadcast[]
   broadcastDeliveries     TelegramBroadcastDelivery[]
+  createdPromoCampaigns   PromoCampaign[]             @relation("PromoCampaignCreator")
+  promoClaims             PromoClaim[]
 
   @@index([createdAt])
   @@index([status, role])
@@ -409,6 +417,50 @@ model TrialGrant {
   grantedAt        DateTime        @default(now())
   user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   referralInvite   ReferralInvite? @relation(fields: [referralInviteId], references: [id], onDelete: SetNull)
+}
+
+model PromoCampaign {
+  id                     String              @id @default(cuid())
+  slug                   String
+  name                   String
+  status                 PromoCampaignStatus @default(DRAFT)
+  claimLimit             Int
+  claimedCount           Int                 @default(0)
+  registrationWindowDays Int
+  durationDays           Int
+  deviceLimit            Int
+  lteEnabled             Boolean             @default(true)
+  startsAt               DateTime?
+  endsAt                 DateTime?
+  isTest                 Boolean             @default(false)
+  createdByAdminId       String
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+  createdBy              User                @relation("PromoCampaignCreator", fields: [createdByAdminId], references: [id], onDelete: Restrict)
+  claims                 PromoClaim[]
+
+  @@unique([slug, isTest])
+  @@index([isTest, status, startsAt, endsAt])
+  @@index([createdAt])
+}
+
+model PromoClaim {
+  id                   String        @id @default(cuid())
+  campaignId           String
+  userId               String
+  claimNumber          Int
+  durationDays         Int
+  deviceLimit          Int
+  lteEnabled           Boolean
+  entitlementExpiresAt DateTime
+  grantedAt            DateTime      @default(now())
+  campaign             PromoCampaign @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  user                 User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, userId])
+  @@unique([campaignId, claimNumber])
+  @@index([campaignId, grantedAt])
+  @@index([userId])
 }
 
 model ReferralProfile {

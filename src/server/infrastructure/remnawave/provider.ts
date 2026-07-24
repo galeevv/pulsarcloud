@@ -67,6 +67,18 @@ export type RemoteSubscriberState = {
   subscriptionUrl: string
 }
 
+/**
+ * Human-readable identity used only to label the subscriber inside the Panel
+ * (Remnawave `description`). It never affects the deterministic `username`,
+ * which stays a stable hash of the local user id so provisioning retries remain
+ * idempotent.
+ */
+export type SubscriberIdentity = {
+  email?: string | null
+  telegramUsername?: string | null
+  telegramId?: string | null
+}
+
 export type SubscriberDevice = z.infer<typeof remoteDeviceSchema>
 
 export class SubscriberDeviceNotFoundError extends Error {
@@ -82,6 +94,7 @@ export interface ProvisioningProvider {
     expiresAt: Date
     deviceLimit: number
     lteEnabled: boolean
+    identity?: SubscriberIdentity
   }): Promise<{ remoteUserId: string; subscriptionUrl: string }>
   updateSubscriber(input: RemoteSubscriberState): Promise<void>
   regenerateSubscriptionUrl(input: {
@@ -165,6 +178,7 @@ export class RemnawaveHttpProvider implements ProvisioningProvider {
     expiresAt: Date
     deviceLimit: number
     lteEnabled: boolean
+    identity?: SubscriberIdentity
   }) {
     const username = this.usernameFor(input.localUserId)
     const existing = await this.findByUsername(username)
@@ -185,7 +199,10 @@ export class RemnawaveHttpProvider implements ProvisioningProvider {
           trafficLimitStrategy: "NO_RESET",
           hwidDeviceLimit: input.deviceLimit,
           activeInternalSquads: this.squadsFor(input.lteEnabled),
-          description: `Pulsar user ${input.localUserId}`,
+          description: this.describeSubscriber(
+            input.localUserId,
+            input.identity
+          ),
         },
         "create user"
       )
@@ -274,7 +291,7 @@ export class RemnawaveHttpProvider implements ProvisioningProvider {
     input: Pick<
       RemoteSubscriberState,
       "expiresAt" | "deviceLimit" | "lteEnabled"
-    >
+    > & { localUserId?: string; identity?: SubscriberIdentity }
   ) {
     return this.requestUser(
       "/api/users",
@@ -287,6 +304,16 @@ export class RemnawaveHttpProvider implements ProvisioningProvider {
         trafficLimitStrategy: "NO_RESET",
         hwidDeviceLimit: input.deviceLimit,
         activeInternalSquads: this.squadsFor(input.lteEnabled),
+        // Only refresh the Panel label on the upsert path (where the local id
+        // is known). Pure state syncs omit it to preserve the existing value.
+        ...(input.localUserId
+          ? {
+              description: this.describeSubscriber(
+                input.localUserId,
+                input.identity
+              ),
+            }
+          : {}),
       },
       "update user"
     )
@@ -440,6 +467,31 @@ export class RemnawaveHttpProvider implements ProvisioningProvider {
       .digest("hex")
       .slice(0, 24)
     return `pulsar_${digest}`
+  }
+
+  /**
+   * Panel-facing label for the subscriber: the Telegram @username when linked,
+   * otherwise the email, otherwise a Telegram id, falling back to the opaque
+   * local id. Written to Remnawave `description` only — never the `username`.
+   */
+  private describeSubscriber(
+    localUserId: string,
+    identity?: SubscriberIdentity
+  ) {
+    return this.identityLabel(identity) ?? `Pulsar user ${localUserId}`
+  }
+
+  private identityLabel(identity?: SubscriberIdentity): string | null {
+    if (!identity) return null
+    const telegramUsername = identity.telegramUsername
+      ?.trim()
+      .replace(/^@+/, "")
+    if (telegramUsername) return `@${telegramUsername}`
+    const email = identity.email?.trim()
+    if (email) return email
+    const telegramId = identity.telegramId?.trim()
+    if (telegramId) return `tg:${telegramId}`
+    return null
   }
 }
 

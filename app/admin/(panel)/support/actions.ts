@@ -132,6 +132,23 @@ export async function replyToSupport(
             dedupeKey: `support-reply:${parsed.data.idempotencyKey}`,
           },
         })
+      if (
+        conversation.user.telegramProfile?.chatId &&
+        conversation.user.telegramProfile.canReceiveMessages
+      )
+        await tx.outboxJob.create({
+          data: {
+            type: "SEND_TELEGRAM_NOTIFICATION",
+            aggregateType: "SupportMessage",
+            aggregateId: parsed.data.idempotencyKey,
+            payloadJson: JSON.stringify({
+              userId: conversation.userId,
+              template: "SUPPORT_REPLY",
+            }),
+            dedupeKey: `telegram:support-reply:${parsed.data.idempotencyKey}`,
+            maxAttempts: 5,
+          },
+        })
       await tx.auditLog.create({
         data: {
           actorType: "ADMIN",

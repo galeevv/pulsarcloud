@@ -150,9 +150,7 @@ export async function getAdminPaymentsView(input: {
     take: PAGE_SIZE,
     select: {
       id: true,
-      externalPaymentId: true,
       amountMinor: true,
-      provider: true,
       purpose: true,
       status: true,
       createdAt: true,

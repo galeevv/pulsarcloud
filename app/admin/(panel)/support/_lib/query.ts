@@ -109,22 +109,7 @@ export async function getAdminSupportView(input: {
     ],
   }
 
-  const [newCount, waitingCount, answeredCount, closedCount, total] =
-    await Promise.all([
-      db.supportConversation.count({
-        where: { AND: [environmentWhere, { workflowState: "NEW" }] },
-      }),
-      db.supportConversation.count({
-        where: { AND: [environmentWhere, { workflowState: "WAITING" }] },
-      }),
-      db.supportConversation.count({
-        where: { AND: [environmentWhere, { workflowState: "ANSWERED" }] },
-      }),
-      db.supportConversation.count({
-        where: { AND: [environmentWhere, { workflowState: "CLOSED" }] },
-      }),
-      db.supportConversation.count({ where }),
-    ])
+  const total = await db.supportConversation.count({ where })
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const page = Math.min(Math.max(1, input.page), totalPages)
@@ -173,12 +158,6 @@ export async function getAdminSupportView(input: {
     pageSize: PAGE_SIZE,
     total,
     totalPages,
-    metrics: {
-      new: newCount,
-      waiting: waitingCount,
-      answered: answeredCount,
-      closed: closedCount,
-    },
   }
 }
 
