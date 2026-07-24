@@ -213,10 +213,14 @@ function getSubscriptionStatusLabel(status: PreviewSubscriptionStatus) {
 }
 
 function formatSubscriptionDate(date: Date) {
+  // Render in Moscow time so the date matches the days-left counter and the
+  // Remnawave panel. Without a fixed timeZone this formats in the server's UTC,
+  // which shows the previous calendar day for late-evening-UTC expiries.
   return new Intl.DateTimeFormat("ru-RU", {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
+    timeZone: "Europe/Moscow",
   }).format(date)
 }
 
