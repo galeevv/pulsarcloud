@@ -8,12 +8,14 @@ import {
 import { getConfig } from "@/src/server/config"
 
 const challengeIdPattern = /^[A-Za-z0-9_-]{8,128}$/
+const userReturnPaths = new Set(["/home", "/referrals", "/support"])
 
 export async function GET(request: Request) {
   try {
     const searchParams = new URL(request.url).searchParams
     const token = searchParams.get("token") ?? ""
     const challengeId = searchParams.get("challenge") ?? ""
+    const requestedReturnTo = searchParams.get("returnTo") ?? "/home"
     if (!challengeIdPattern.test(challengeId))
       throw new BusinessError("AUTH_CHALLENGE_EXPIRED")
     const fingerprint = await requestFingerprint()
@@ -24,8 +26,14 @@ export async function GET(request: Request) {
       ipPrefixHash: fingerprint.ipPrefixHash,
     })
     await setSessionCookie(result.rawSession, result.kind)
+    const returnTo =
+      result.kind === "ADMIN"
+        ? "/admin/dashboard"
+        : userReturnPaths.has(requestedReturnTo)
+          ? requestedReturnTo
+          : "/home"
     return NextResponse.redirect(
-      `${getConfig().appUrl}${result.kind === "ADMIN" ? "/admin/dashboard" : "/home"}`
+      `${getConfig().appUrl}${returnTo}`
     )
   } catch {
     return NextResponse.redirect(

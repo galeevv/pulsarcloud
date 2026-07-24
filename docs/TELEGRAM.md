@@ -12,21 +12,30 @@ The BotFather command list contains exactly one command:
 
 A private `/start` without a parameter looks up `AuthIdentity.telegramId` using only the verified Telegram `from.id`. If the identity does not exist, one short transaction creates the same `User`, `AuthIdentity`, `TelegramProfile`, `WalletAccount`, and `ReferralProfile` used by the website. No bot-specific user or database exists. Username and display names are profile metadata and are never authorization inputs.
 
-The inline main menu contains:
+The main menu is a photo message using `/public/tg/lk.png`. Its HTML caption
+shows the user's first name and the current shared `Subscription`: product
+status, plan duration, expiry, honest local device limit, and LTE access. A
+ready active subscription gets an ordinary URL button containing its
+`subscriptionUrl`. Purchase, renewal, and website buttons use
+`menu:site-login`; `menu:referrals` opens the referral screen.
 
-- `menu:subscription` — current canonical `Subscription`, expiry, remaining days, devices, LTE, and Remnawave sync state;
-- `menu:balance` — the shared `WalletAccount` balance without kopecks;
-- `menu:referrals` — the shared referral link, invite metrics, rewards, and available balance;
-- `menu:support` — an ordinary URL to `/support`;
-- an ordinary URL button to `/home`.
-
-The referral screen uses the Bot API `copy_text` inline button and also prints the full link as a separate line. Every callback is answered with `answerCallbackQuery`; callbacks are accepted only from a private chat whose `chat.id` equals the verified `from.id`.
+The referral screen shows invited users, active users, and the shared
+`WalletAccount.availableMinor` balance. It prints both the website invite URL
+and `https://t.me/<bot>?start=ref_<inviteCode>`. The withdrawal button uses
+`menu:payout-login`; both website callbacks create a fresh five-minute
+one-time website login. Every callback is answered with
+`answerCallbackQuery`; callbacks are accepted only from a private chat whose
+`chat.id` equals the verified `from.id`.
 
 ## Website login and Telegram linking
 
 The site creates a five-minute opaque start token and stores only its HMAC. `/start <token>` arrives through the same webhook. The worker matches the token hash, takes the Telegram ID exclusively from the verified update, and either uses the existing identity, creates the shared user graph, or links the identity to the authenticated requesting user. A Telegram identity already owned by another user is rejected and accounts are never merged automatically.
 
-After confirmation the bot sends an ordinary URL button **«Вернуться в PULSAR»**. Its completion URL contains a matching challenge ID and a different one-use token, can be opened in any browser for five minutes, creates the website session, and redirects to `/home`. Browser-state cookies are not required before the completion URL is opened. Raw start/completion tokens are never stored in the database or webhook log.
+After confirmation the bot sends an ordinary URL button **«Вернуться в PULSAR»**. Its completion URL contains a matching challenge ID and a different one-use token, can be opened in any browser for five minutes, creates the website session, and redirects to `/home`. The same HMAC-only completion mechanism is used by `menu:site-login`, `menu:payout-login`, and support reply notifications, with safe redirects to `/home`, `/referrals`, or `/support`. Browser-state cookies are not required before the completion URL is opened. Raw start/completion tokens are never stored in the database or webhook log.
+
+`/start ref_<inviteCode>` registers a new bot user in the shared user graph and
+applies the existing referral domain logic atomically. Existing users are not
+reassigned and retries do not create duplicate invites.
 
 ## Webhook and safety
 
@@ -46,7 +55,16 @@ Telegram retries non-2xx webhook responses, while duplicate `update_id` values d
 
 ## Notifications and news
 
-Service notifications are enabled by default and are sent through the existing outbox for payment confirmation, subscription readiness, terminal provisioning failure, approaching expiry, expiry, and referral payout state. News use `TelegramBroadcast` and small `SEND_TELEGRAM_BROADCAST_BATCH` jobs. `NEWS_OPTED_IN` respects `newsNotificationsEnabled`; transactional delivery separately respects `transactionalNotificationsEnabled`. Blocking the bot always stops both.
+Service notifications are enabled by default and are sent through the existing
+outbox for approaching expiry, expiry, referral payout state, and support
+replies. Payment confirmation and provisioning success/failure are
+intentionally silent. A support notification never copies the private reply
+text into Telegram; it provides a fresh authenticated URL button to
+`/support`. News use `TelegramBroadcast` and small
+`SEND_TELEGRAM_BROADCAST_BATCH` jobs and send the admin-entered body as plain
+text. News respects `newsNotificationsEnabled`; transactional delivery
+separately respects `transactionalNotificationsEnabled`. Blocking the bot
+always stops both.
 
 ## Deployment
 

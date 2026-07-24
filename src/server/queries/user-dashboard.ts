@@ -163,10 +163,17 @@ export async function getReferralSummaryView(userId: string) {
       }),
     ])
 
+  const inviteCode =
+    profile?.isEnabled && profile.inviteCode ? profile.inviteCode : null
+  const botUsername = getConfig().telegram.botUsername
   return {
     inviteUrl:
-      profile?.isEnabled && profile.inviteCode
-        ? `${getConfig().appUrl}/?invite=${profile.inviteCode}`
+      inviteCode
+        ? `${getConfig().appUrl}/?invite=${inviteCode}`
+        : null,
+    telegramInviteUrl:
+      inviteCode && botUsername
+        ? `https://t.me/${botUsername}?start=ref_${inviteCode}`
         : null,
     invitedUsers,
     activeUsers,

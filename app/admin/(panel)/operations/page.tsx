@@ -19,6 +19,7 @@ import {
   Card,
   CardAction,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
@@ -39,6 +40,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { cn } from "@/lib/utils"
 
 import { getAdminOperationsView, type SystemTone } from "./_lib/query"
 import { JobActions } from "./job-actions"
@@ -352,18 +354,27 @@ function MetricCard({
   attention?: boolean
 }) {
   return (
-    <Card className={cardClass}>
+    <Card className={cn("h-full", cardClass)}>
       <CardHeader className="gap-0 p-4 pb-0">
-        <p className="text-sm font-medium text-muted-foreground">{label}</p>
+        <CardDescription className="text-sm font-medium">
+          {label}
+        </CardDescription>
         <CardAction>
           <PulsarIconContainer icon={Icon} />
         </CardAction>
       </CardHeader>
-      <CardContent className="flex flex-col gap-1 p-4 pt-2">
-        <CardTitle className={attention ? "text-destructive" : undefined}>
+      <CardContent className="flex items-end justify-between gap-3 p-4 pt-2">
+        <CardTitle className="text-3xl leading-none font-semibold tracking-tight tabular-nums">
           {value}
         </CardTitle>
-        <p className="text-xs text-muted-foreground">{note}</p>
+        <p
+          className={cn(
+            "text-right text-xs font-medium text-muted-foreground",
+            attention && "text-destructive"
+          )}
+        >
+          {note}
+        </p>
       </CardContent>
     </Card>
   )
@@ -383,7 +394,7 @@ function SectionCard({
       <CardHeader className="gap-0 p-4">
         <CardTitle>{title}</CardTitle>
         {count !== undefined ? (
-          <CardAction>
+          <CardAction className="self-center">
             <Badge variant="secondary">{count}</Badge>
           </CardAction>
         ) : null}

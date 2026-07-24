@@ -7,6 +7,7 @@ import {
   ChevronsUpDownIcon,
   CreditCardIcon,
   FlaskConicalIcon,
+  GiftIcon,
   HeadphonesIcon,
   LayoutDashboardIcon,
   LogOutIcon,
@@ -93,6 +94,12 @@ const navigation: Array<{ label: string; items: NavigationItem[] }> = [
         icon: PackageIcon,
         activePath: "/admin/plans",
       },
+      {
+        label: "Промо",
+        href: "/admin/promos",
+        icon: GiftIcon,
+        activePath: "/admin/promos",
+      },
     ],
   },
   {
@@ -131,6 +138,7 @@ function pageTitle(pathname: string) {
   if (pathname.startsWith("/admin/payments")) return "Платежи"
   if (pathname.startsWith("/admin/payouts")) return "Выплаты"
   if (pathname.startsWith("/admin/plans")) return "Тарифы"
+  if (pathname.startsWith("/admin/promos")) return "Промокампании"
   if (pathname.startsWith("/admin/support")) return "Поддержка"
   if (pathname.startsWith("/admin/telegram")) return "Telegram"
   if (pathname.startsWith("/admin/operations")) return "Операции"
@@ -192,7 +200,7 @@ function AdminAccountMenu({
         }
       >
         <Avatar className="size-9">
-          <AvatarFallback className="bg-background text-foreground [&_svg]:size-4">
+          <AvatarFallback className="bg-primary text-primary-foreground [&_svg]:size-5">
             <AtomIcon />
           </AvatarFallback>
         </Avatar>

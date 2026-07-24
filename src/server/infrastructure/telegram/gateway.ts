@@ -6,6 +6,15 @@ export type TelegramGatewayEvent =
       chatId: string
       text: string
       replyMarkup?: unknown
+      parseMode?: "HTML"
+    }
+  | {
+      type: "sendPhoto"
+      chatId: string
+      photo: string
+      caption: string
+      replyMarkup?: unknown
+      parseMode?: "HTML"
     }
   | {
       type: "editMessageText"
@@ -13,6 +22,15 @@ export type TelegramGatewayEvent =
       messageId: string
       text: string
       replyMarkup?: unknown
+      parseMode?: "HTML"
+    }
+  | {
+      type: "editMessageCaption"
+      chatId: string
+      messageId: string
+      caption: string
+      replyMarkup?: unknown
+      parseMode?: "HTML"
     }
   | {
       type: "answerCallbackQuery"
@@ -26,12 +44,28 @@ export interface TelegramGateway {
     chatId: string
     text: string
     replyMarkup?: unknown
+    parseMode?: "HTML"
+  }): Promise<{ messageId: string }>
+  sendPhoto(input: {
+    chatId: string
+    photo: string
+    caption: string
+    replyMarkup?: unknown
+    parseMode?: "HTML"
   }): Promise<{ messageId: string }>
   editMessageText(input: {
     chatId: string
     messageId: string
     text: string
     replyMarkup?: unknown
+    parseMode?: "HTML"
+  }): Promise<{ messageId: string }>
+  editMessageCaption(input: {
+    chatId: string
+    messageId: string
+    caption: string
+    replyMarkup?: unknown
+    parseMode?: "HTML"
   }): Promise<{ messageId: string }>
   answerCallbackQuery(input: {
     callbackQueryId: string
@@ -142,12 +176,31 @@ class BotApiGateway implements TelegramGateway {
     chatId: string
     text: string
     replyMarkup?: unknown
+    parseMode?: "HTML"
   }) {
     const result = await this.call<{ message_id: number }>("sendMessage", {
       chat_id: input.chatId,
       text: input.text,
       reply_markup: input.replyMarkup,
+      parse_mode: input.parseMode,
       link_preview_options: { is_disabled: true },
+    })
+    return { messageId: String(result.message_id) }
+  }
+
+  async sendPhoto(input: {
+    chatId: string
+    photo: string
+    caption: string
+    replyMarkup?: unknown
+    parseMode?: "HTML"
+  }) {
+    const result = await this.call<{ message_id: number }>("sendPhoto", {
+      chat_id: input.chatId,
+      photo: input.photo,
+      caption: input.caption,
+      reply_markup: input.replyMarkup,
+      parse_mode: input.parseMode,
     })
     return { messageId: String(result.message_id) }
   }
@@ -157,6 +210,7 @@ class BotApiGateway implements TelegramGateway {
     messageId: string
     text: string
     replyMarkup?: unknown
+    parseMode?: "HTML"
   }) {
     try {
       const result = await this.call<{ message_id: number }>(
@@ -166,7 +220,37 @@ class BotApiGateway implements TelegramGateway {
           message_id: input.messageId,
           text: input.text,
           reply_markup: input.replyMarkup,
+          parse_mode: input.parseMode,
           link_preview_options: { is_disabled: true },
+        }
+      )
+      return { messageId: String(result.message_id) }
+    } catch (error) {
+      if (
+        error instanceof TelegramGatewayError &&
+        error.reason === "MESSAGE_NOT_MODIFIED"
+      )
+        return { messageId: input.messageId }
+      throw error
+    }
+  }
+
+  async editMessageCaption(input: {
+    chatId: string
+    messageId: string
+    caption: string
+    replyMarkup?: unknown
+    parseMode?: "HTML"
+  }) {
+    try {
+      const result = await this.call<{ message_id: number }>(
+        "editMessageCaption",
+        {
+          chat_id: input.chatId,
+          message_id: input.messageId,
+          caption: input.caption,
+          reply_markup: input.replyMarkup,
+          parse_mode: input.parseMode,
         }
       )
       return { messageId: String(result.message_id) }
@@ -211,8 +295,20 @@ class TestTelegramGateway implements TelegramGateway {
     chatId: string
     text: string
     replyMarkup?: unknown
+    parseMode?: "HTML"
   }) {
     testEvents.push({ type: "sendMessage", ...input })
+    return { messageId: `test_${Date.now()}` }
+  }
+
+  async sendPhoto(input: {
+    chatId: string
+    photo: string
+    caption: string
+    replyMarkup?: unknown
+    parseMode?: "HTML"
+  }) {
+    testEvents.push({ type: "sendPhoto", ...input })
     return { messageId: `test_${Date.now()}` }
   }
 
@@ -221,8 +317,20 @@ class TestTelegramGateway implements TelegramGateway {
     messageId: string
     text: string
     replyMarkup?: unknown
+    parseMode?: "HTML"
   }) {
     testEvents.push({ type: "editMessageText", ...input })
+    return { messageId: input.messageId }
+  }
+
+  async editMessageCaption(input: {
+    chatId: string
+    messageId: string
+    caption: string
+    replyMarkup?: unknown
+    parseMode?: "HTML"
+  }) {
+    testEvents.push({ type: "editMessageCaption", ...input })
     return { messageId: input.messageId }
   }
 

@@ -156,7 +156,7 @@ export default async function AdminTelegramPage() {
             <CardDescription>
               Отправка выполняется worker небольшими пакетами.
             </CardDescription>
-            <CardAction>
+            <CardAction className="self-center">
               <CreateBroadcastDialog initialIdempotencyKey={randomUUID()} />
             </CardAction>
           </CardHeader>
@@ -182,7 +182,7 @@ export default async function AdminTelegramPage() {
       <Card className="gap-0 rounded-3xl border border-border/70 bg-card/40 py-0 shadow-none! ring-0!">
         <CardHeader className="gap-0 p-4">
           <CardTitle>История рассылок</CardTitle>
-          <CardAction>
+          <CardAction className="self-center">
             <Badge variant="secondary">{view.broadcasts.length}</Badge>
           </CardAction>
         </CardHeader>
@@ -294,13 +294,13 @@ function MetricCard({
           <PulsarIconContainer icon={Icon} />
         </CardAction>
       </CardHeader>
-      <CardContent className="flex flex-col gap-2 p-4 pt-2">
+      <CardContent className="flex items-end justify-between gap-3 p-4 pt-2">
         <CardTitle className="text-3xl leading-none font-semibold tracking-tight tabular-nums">
           {value}
         </CardTitle>
         <p
           className={cn(
-            "text-xs text-muted-foreground",
+            "text-right text-xs font-medium text-muted-foreground",
             attention && "text-destructive"
           )}
         >

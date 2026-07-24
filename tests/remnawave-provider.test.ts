@@ -138,6 +138,87 @@ test("Remnawave provider creates a deterministic standard subscriber", async () 
   assert.equal(body.trafficLimitStrategy, "NO_RESET")
 })
 
+async function captureCreatedBody(
+  identity?: {
+    email?: string | null
+    telegramUsername?: string | null
+    telegramId?: string | null
+  }
+) {
+  let callNumber = 0
+  let createdBody: Record<string, unknown> = {}
+  const fetchImplementation = (async (
+    _input: URL | RequestInfo,
+    init?: RequestInit
+  ) => {
+    callNumber += 1
+    if (callNumber === 1) return jsonResponse({ message: "not found" }, 404)
+    createdBody = JSON.parse(String(init?.body)) as Record<string, unknown>
+    return jsonResponse(remoteUser(), 201)
+  }) as typeof fetch
+  const provider = createProvider(fetchImplementation)
+  await provider.upsertSubscriber({
+    localUserId: "local-user-id",
+    expiresAt: new Date("2027-07-13T12:00:00.000Z"),
+    deviceLimit: 1,
+    lteEnabled: false,
+    identity,
+  })
+  return createdBody
+}
+
+test("Remnawave provider labels the subscriber by Telegram handle, then email", async () => {
+  const withTelegram = await captureCreatedBody({
+    email: "user@example.test",
+    telegramUsername: "@johndoe",
+  })
+  assert.equal(withTelegram.description, "@johndoe")
+
+  const withEmailOnly = await captureCreatedBody({
+    email: "user@example.test",
+    telegramUsername: null,
+  })
+  assert.equal(withEmailOnly.description, "user@example.test")
+
+  const withTelegramIdOnly = await captureCreatedBody({ telegramId: "12345" })
+  assert.equal(withTelegramIdOnly.description, "tg:12345")
+
+  const withoutIdentity = await captureCreatedBody(undefined)
+  assert.equal(withoutIdentity.description, "Pulsar user local-user-id")
+
+  // The identity never leaks into the deterministic username.
+  assert.match(String(withTelegram.username), /^pulsar_[a-f0-9]{24}$/)
+  assert.doesNotMatch(String(withTelegram.username), /johndoe|example/)
+})
+
+test("Remnawave provider refreshes the Panel label when updating an existing user", async () => {
+  const calls: Array<{ init?: RequestInit }> = []
+  const fetchImplementation = (async (
+    _input: URL | RequestInfo,
+    init?: RequestInit
+  ) => {
+    calls.push({ init })
+    if (calls.length === 1) return jsonResponse(remoteUser())
+    return jsonResponse(remoteUser())
+  }) as typeof fetch
+  const provider = createProvider(fetchImplementation)
+
+  await provider.upsertSubscriber({
+    localUserId: "local-user-id",
+    expiresAt: new Date("2027-07-13T12:00:00.000Z"),
+    deviceLimit: 1,
+    lteEnabled: false,
+    identity: { telegramUsername: "renamed" },
+  })
+
+  assert.equal(calls[1]?.init?.method, "PATCH")
+  const body = JSON.parse(String(calls[1]?.init?.body)) as Record<
+    string,
+    unknown
+  >
+  assert.equal(body.description, "@renamed")
+})
+
 test("Remnawave provider namespaces deterministic usernames", async () => {
   const productionUsername = await captureCreatedUsername("pulsar")
   const repeatedProductionUsername = await captureCreatedUsername("pulsar")

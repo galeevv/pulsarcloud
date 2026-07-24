@@ -12,6 +12,7 @@ import {
   normalizeEmail,
 } from "@/src/server/domain/users/service"
 import { applyReferralOnRegistration } from "@/src/server/domain/referrals/service"
+import { applyPromoOnRegistration } from "@/src/server/domain/promos/service"
 import { createSession } from "@/src/server/domain/auth/session"
 import {
   correlationId,
@@ -244,6 +245,7 @@ async function completeEmailChallenge(
       invitedUserId: userId,
       inviteCode: challenge.inviteCodeSnapshot,
     })
+    await applyPromoOnRegistration(tx, { userId })
   }
   const user = await tx.user.findUniqueOrThrow({ where: { id: userId } })
   if (user.isTest !== getConfig().testMode)
@@ -505,6 +507,7 @@ async function resolveTelegramUser(
       invitedUserId: userId,
       inviteCode: input.inviteCode,
     })
+    await applyPromoOnRegistration(tx, { userId })
   }
 
   const user = await tx.user.findUniqueOrThrow({ where: { id: userId } })
@@ -552,10 +555,55 @@ async function resolveTelegramUser(
   return { userId, created }
 }
 
-export async function ensureTelegramBotUser(input: VerifiedTelegramUser) {
+export async function ensureTelegramBotUser(
+  input: VerifiedTelegramUser & { inviteCode?: string }
+) {
   if (input.chatId !== input.telegramId)
     throw new BusinessError("AUTH_FORBIDDEN", 403)
   return authTransaction((tx) => resolveTelegramUser(tx, input))
+}
+
+export async function issueTelegramWebsiteLogin(input: {
+  telegramId: string
+  chatId: string
+  returnTo: "/home" | "/referrals" | "/support"
+}) {
+  if (input.chatId !== input.telegramId)
+    throw new BusinessError("AUTH_FORBIDDEN", 403)
+  const token = randomToken(32)
+  const challenge = await authTransaction(async (tx) => {
+    const identity = await tx.authIdentity.findUnique({
+      where: { telegramId: input.telegramId },
+      include: { user: true },
+    })
+    if (
+      !identity ||
+      identity.user.status !== "ACTIVE" ||
+      identity.user.isTest !== getConfig().testMode
+    )
+      throw new BusinessError("AUTH_FORBIDDEN", 403)
+    const now = new Date()
+    return tx.loginChallenge.create({
+      data: {
+        channel: "TELEGRAM",
+        purpose: "USER_LOGIN",
+        status: "COMPLETED",
+        telegramId: input.telegramId,
+        completionTokenHash: hashToken(token),
+        consumedAt: now,
+        expiresAt: new Date(now.getTime() + 5 * MINUTE),
+      },
+    })
+  })
+  const params = new URLSearchParams({
+    challenge: challenge.id,
+    token,
+    returnTo: input.returnTo,
+  })
+  return {
+    challengeId: challenge.id,
+    url: `${getConfig().appUrl}/api/auth/telegram/complete?${params.toString()}`,
+  }
 }
 
 export async function completeTelegramStart(

@@ -871,19 +871,6 @@ export async function applyPaymentEvent(
             dedupeKey: `subscription:${subscription.id}:sync:${syncVersion}`,
           },
         })
-        await tx.outboxJob.create({
-          data: {
-            type: "SEND_TELEGRAM_NOTIFICATION",
-            aggregateType: "Payment",
-            aggregateId: payment.id,
-            payloadJson: JSON.stringify({
-              userId: payment.userId,
-              template: "PAYMENT_CONFIRMED",
-            }),
-            dedupeKey: `telegram:payment-confirmed:${payment.id}`,
-            maxAttempts: 5,
-          },
-        })
         await tx.paymentWebhookLog.update({
           where: { id: log.id },
           data: { processedAt: now },
@@ -964,19 +951,6 @@ export async function applyPaymentEvent(
             syncVersion,
           }),
           dedupeKey: `subscription:${subscription.id}:sync:${syncVersion}`,
-        },
-      })
-      await tx.outboxJob.create({
-        data: {
-          type: "SEND_TELEGRAM_NOTIFICATION",
-          aggregateType: "Payment",
-          aggregateId: payment.id,
-          payloadJson: JSON.stringify({
-            userId: payment.userId,
-            template: "PAYMENT_CONFIRMED",
-          }),
-          dedupeKey: `telegram:payment-confirmed:${payment.id}`,
-          maxAttempts: 5,
         },
       })
       await grantReferralReward(tx, {

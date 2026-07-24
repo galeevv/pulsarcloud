@@ -18,6 +18,7 @@ import {
   Card,
   CardAction,
   CardContent,
+  CardDescription,
   CardFooter,
   CardHeader,
   CardTitle,
@@ -38,6 +39,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { cn } from "@/lib/utils"
 import { formatPreviewRub } from "@/src/frontend-preview/format"
 
 import { PaymentsToolbar } from "./_components/payments-toolbar"
@@ -79,23 +81,34 @@ function MetricCard({
 }: {
   label: string
   value: string | number
-  note: string
+  note?: string
   icon: LucideIcon
   attention?: boolean
 }) {
   return (
-    <Card className={cardClass}>
+    <Card className={cn("h-full", cardClass)}>
       <CardHeader className="gap-0 p-4 pb-0">
-        <p className="text-sm font-medium text-muted-foreground">{label}</p>
+        <CardDescription className="text-sm font-medium">
+          {label}
+        </CardDescription>
         <CardAction>
           <PulsarIconContainer icon={Icon} />
         </CardAction>
       </CardHeader>
-      <CardContent className="flex flex-col gap-1 p-4 pt-2">
-        <CardTitle className={attention ? "text-destructive" : undefined}>
+      <CardContent className="flex items-end justify-between gap-3 p-4 pt-2">
+        <CardTitle className="text-3xl leading-none font-semibold tracking-tight tabular-nums">
           {value}
         </CardTitle>
-        <p className="text-xs text-muted-foreground">{note}</p>
+        {note ? (
+          <p
+            className={cn(
+              "text-right text-xs font-medium text-muted-foreground",
+              attention && "text-destructive"
+            )}
+          >
+            {note}
+          </p>
+        ) : null}
       </CardContent>
     </Card>
   )
@@ -176,7 +189,6 @@ export default async function AdminPaymentsPage({
         <MetricCard
           label="Оборот за месяц"
           value={formatPreviewRub(view.metrics.revenueThisMonthMinor / 100)}
-          note="Только подтверждённые платежи"
           icon={CreditCardIcon}
         />
         <MetricCard
@@ -215,7 +227,7 @@ export default async function AdminPaymentsPage({
       <Card className={cardClass}>
         <CardHeader className="gap-0 p-4">
           <CardTitle>Платежи</CardTitle>
-          <CardAction>
+          <CardAction className="self-center">
             <Badge variant="secondary">{view.total}</Badge>
           </CardAction>
         </CardHeader>
@@ -228,10 +240,8 @@ export default async function AdminPaymentsPage({
                   <TableHead>Пользователь</TableHead>
                   <TableHead className="text-right">Сумма</TableHead>
                   <TableHead>Назначение</TableHead>
-                  <TableHead>Провайдер</TableHead>
                   <TableHead>Статус</TableHead>
                   <TableHead>Дата</TableHead>
-                  <TableHead>Внешний ID</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -262,15 +272,11 @@ export default async function AdminPaymentsPage({
                         {formatPreviewRub(payment.amountMinor / 100)}
                       </TableCell>
                       <TableCell>{purposeLabel(payment.purpose)}</TableCell>
-                      <TableCell>{payment.provider}</TableCell>
                       <TableCell>
                         {paymentStatusBadge(payment.status)}
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
                         {dateTime(payment.createdAt)}
-                      </TableCell>
-                      <TableCell className="max-w-48 truncate font-mono text-xs">
-                        {payment.externalPaymentId ?? "Не назначен"}
                       </TableCell>
                     </TableRow>
                   )

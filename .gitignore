@@ -71,3 +71,12 @@ infra/**/*.local.env
 infra/**/secrets/
 infra/**/rendered/
 !infra/**/.env.example
+
+# Local infra handoff (server IPs, SSH map, secret locations) — never publish
+docs/infrastructure/handoff-access.md
+
+# Decoy page for NL node — must not be publicly linkable to this repo
+docs/plug/nl-decoy.html
+
+# Remnawave operations doc (IPs, node details) — local only
+docs/infrastructure/remnawave-operations.md

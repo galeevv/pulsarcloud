@@ -26,6 +26,7 @@ type StoredTelegramFrom = {
 type StoredTelegramMessage = {
   command: "start" | "account" | "notifications" | "help" | "other"
   startTokenHash?: string
+  referralInviteCode?: string
   chat?: { id: string; type?: string }
   from?: StoredTelegramFrom
 }
@@ -36,6 +37,7 @@ type StoredTelegramCallback = {
   from?: StoredTelegramFrom
   message?: {
     messageId?: string
+    presentation?: "caption" | "text"
     chat?: { id: string; type?: string }
   }
 }
@@ -89,15 +91,25 @@ function normalizeChat(value: unknown) {
 
 function commandFromText(
   text: unknown
-): Pick<StoredTelegramMessage, "command" | "startTokenHash"> {
+): Pick<
+  StoredTelegramMessage,
+  "command" | "startTokenHash" | "referralInviteCode"
+> {
   if (typeof text !== "string") return { command: "other" }
   const [rawCommand = "", startToken] = text.trim().split(/\s+/, 2)
   const command = rawCommand.toLowerCase().split("@", 1)[0]
-  if (command === "/start")
+  if (command === "/start") {
+    const referralMatch = startToken?.match(/^ref_([A-Za-z0-9_-]{8,64})$/)
+    const referralInviteCode = referralMatch?.[1]
     return {
       command: "start",
-      ...(startToken ? { startTokenHash: hashToken(startToken) } : {}),
+      ...(referralInviteCode
+        ? { referralInviteCode }
+        : startToken
+          ? { startTokenHash: hashToken(startToken) }
+          : {}),
     }
+  }
   if (command === "/account") return { command: "account" }
   if (command === "/notifications") return { command: "notifications" }
   if (command === "/help") return { command: "help" }
@@ -126,6 +138,11 @@ export function normalizeTelegramUpdate(update: TelegramUpdate) {
       ? callback.data
       : "other"
     const messageId = telegramId(callbackMessage?.message_id)
+    const presentation =
+      Array.isArray(callbackMessage?.photo) ||
+      typeof callbackMessage?.caption === "string"
+        ? "caption"
+        : "text"
     return {
       callbackQuery: {
         ...(shortString(callback.id, 256)
@@ -139,6 +156,7 @@ export function normalizeTelegramUpdate(update: TelegramUpdate) {
           ? {
               message: {
                 ...(messageId ? { messageId } : {}),
+                presentation,
                 ...(normalizeChat(callbackMessage.chat)
                   ? { chat: normalizeChat(callbackMessage.chat) }
                   : {}),

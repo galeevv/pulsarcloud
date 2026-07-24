@@ -4,7 +4,10 @@ import {
   correlationId,
 } from "@/src/server/infrastructure/security/crypto"
 import { getEmailSender } from "@/src/server/infrastructure/email"
-import { getProvisioningProvider } from "@/src/server/infrastructure/remnawave/provider"
+import {
+  getProvisioningProvider,
+  type SubscriberIdentity,
+} from "@/src/server/infrastructure/remnawave/provider"
 import {
   getTelegramGateway,
   isPermanentTelegramDeliveryError,
@@ -13,12 +16,15 @@ import {
 import {
   completeTelegramStart,
   ensureTelegramBotUser,
+  issueTelegramWebsiteLogin,
 } from "@/src/server/domain/auth/service"
 import {
   getTelegramMainScreen,
   getTelegramScreen,
+  getTelegramWebsiteScreen,
   getTelegramUserId,
   isTelegramCallbackAction,
+  telegramMainPhotoUrl,
   updateTelegramReachability,
 } from "@/src/server/domain/telegram/service"
 import { getConfig } from "@/src/server/config"
@@ -34,6 +40,44 @@ type Job = {
   attempts: number
   maxAttempts?: number
   aggregateId: string
+}
+
+/**
+ * Resolve a human-readable identity for the Panel subscriber label. Prefers the
+ * linked Telegram profile, then any auth identity carrying an email / Telegram
+ * handle. Returns undefined only when the user row is missing.
+ */
+async function resolveSubscriberIdentity(
+  userId: string
+): Promise<SubscriberIdentity | undefined> {
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: {
+      telegramProfile: { select: { username: true, telegramId: true } },
+      identities: {
+        select: {
+          emailNormalized: true,
+          telegramUsername: true,
+          telegramId: true,
+        },
+      },
+    },
+  })
+  if (!user) return undefined
+  return {
+    email:
+      user.identities.find((identity) => identity.emailNormalized)
+        ?.emailNormalized ?? null,
+    telegramUsername:
+      user.telegramProfile?.username ??
+      user.identities.find((identity) => identity.telegramUsername)
+        ?.telegramUsername ??
+      null,
+    telegramId:
+      user.telegramProfile?.telegramId ??
+      user.identities.find((identity) => identity.telegramId)?.telegramId ??
+      null,
+  }
 }
 
 const PAYMENT_POLL_DELAYS_MS = [
@@ -473,13 +517,8 @@ export async function handleJob(job: Job) {
     if (channel === "WEB") return
 
     if (channel === "TELEGRAM") {
-      const profile = message.conversation.user.telegramProfile
-      if (!profile?.chatId || !profile.canReceiveMessages)
-        throw new Error("Support reply Telegram channel is unavailable")
-      await getTelegramGateway().sendMessage({
-        chatId: profile.chatId,
-        text: `${message.body}\n\nПродолжить диалог: ${getConfig().appUrl}/support`,
-      })
+      // Telegram receives a privacy-safe notification via the shared
+      // SEND_TELEGRAM_NOTIFICATION outbox job. The support text stays on site.
       return
     }
 
@@ -521,6 +560,7 @@ export async function handleJob(job: Job) {
         expiresAt: subscription.expiresAt,
         deviceLimit: subscription.deviceLimit,
         lteEnabled: subscription.lteEnabled,
+        identity: await resolveSubscriberIdentity(subscription.userId),
       })
       await db.$transaction(async (tx) => {
         const updated = await tx.subscription.updateMany({
@@ -550,22 +590,6 @@ export async function handleJob(job: Job) {
             correlationId: correlationId(),
           },
         })
-        const dedupeKey = `telegram:subscription:${subscription.id}:provisioned:${syncVersion}`
-        await tx.outboxJob.upsert({
-          where: { dedupeKey },
-          create: {
-            type: "SEND_TELEGRAM_NOTIFICATION",
-            aggregateType: "Subscription",
-            aggregateId: subscription.id,
-            payloadJson: JSON.stringify({
-              userId: subscription.userId,
-              template: "PROVISIONING_COMPLETED",
-            }),
-            dedupeKey,
-            maxAttempts: 5,
-          },
-          update: {},
-        })
       })
     } catch (error) {
       const technical =
@@ -591,24 +615,6 @@ export async function handleJob(job: Job) {
           correlationId: correlationId(),
         },
       })
-      if (job.attempts >= (job.maxAttempts ?? 8)) {
-        const dedupeKey = `telegram:subscription:${subscription.id}:provisioning-failed:${syncVersion}`
-        await db.outboxJob.upsert({
-          where: { dedupeKey },
-          create: {
-            type: "SEND_TELEGRAM_NOTIFICATION",
-            aggregateType: "Subscription",
-            aggregateId: subscription.id,
-            payloadJson: JSON.stringify({
-              userId: subscription.userId,
-              template: "PROVISIONING_FAILED",
-            }),
-            dedupeKey,
-            maxAttempts: 5,
-          },
-          update: {},
-        })
-      }
       throw error
     }
     return
@@ -621,6 +627,7 @@ export async function handleJob(job: Job) {
       message?: {
         command?: "start" | "account" | "notifications" | "help" | "other"
         startTokenHash?: string
+        referralInviteCode?: string
         chat?: { id?: string; type?: string }
         from?: {
           id?: string
@@ -635,6 +642,7 @@ export async function handleJob(job: Job) {
         from?: { id?: string }
         message?: {
           messageId?: string
+          presentation?: "caption" | "text"
           chat?: { id?: string; type?: string }
         }
       }
@@ -694,13 +702,38 @@ export async function handleJob(job: Job) {
             answerText = "Сначала отправьте /start."
             showAlert = true
           } else {
-            const screen = await getTelegramScreen(userId, callback.action)
-            await gateway.editMessageText({
-              chatId: chat.id,
-              messageId: callback.message.messageId,
-              text: screen.text,
-              replyMarkup: screen.replyMarkup,
-            })
+            const screen =
+              callback.action === "menu:site-login" ||
+              callback.action === "menu:payout-login"
+                ? getTelegramWebsiteScreen(
+                    (
+                      await issueTelegramWebsiteLogin({
+                        telegramId: fromId,
+                        chatId: chat.id,
+                        returnTo:
+                          callback.action === "menu:payout-login"
+                            ? "/referrals"
+                            : "/home",
+                      })
+                    ).url
+                  )
+                : await getTelegramScreen(userId, callback.action)
+            if (callback.message.presentation === "caption")
+              await gateway.editMessageCaption({
+                chatId: chat.id,
+                messageId: callback.message.messageId,
+                caption: screen.text,
+                replyMarkup: screen.replyMarkup,
+                parseMode: screen.parseMode,
+              })
+            else
+              await gateway.editMessageText({
+                chatId: chat.id,
+                messageId: callback.message.messageId,
+                text: screen.text,
+                replyMarkup: screen.replyMarkup,
+                parseMode: screen.parseMode,
+              })
           }
         }
       } catch (error) {
@@ -745,12 +778,15 @@ export async function handleJob(job: Job) {
         firstName: message.from.firstName,
         lastName: message.from.lastName,
         chatId,
+        inviteCode: message.referralInviteCode,
       })
       const screen = await getTelegramMainScreen(account.userId)
-      await getTelegramGateway().sendMessage({
+      await getTelegramGateway().sendPhoto({
         chatId,
-        text: screen.text,
+        photo: telegramMainPhotoUrl(),
+        caption: screen.text,
         replyMarkup: screen.replyMarkup,
+        parseMode: screen.parseMode,
       })
     }
     await markProcessed()
@@ -807,6 +843,15 @@ export async function handleJob(job: Job) {
     return
   }
   if (job.type === "SEND_TELEGRAM_NOTIFICATION") {
+    const template = String(payload.template)
+    if (
+      [
+        "PAYMENT_CONFIRMED",
+        "PROVISIONING_COMPLETED",
+        "PROVISIONING_FAILED",
+      ].includes(template)
+    )
+      return
     const profile = await db.telegramProfile.findUnique({
       where: { userId: String(payload.userId) },
     })
@@ -817,12 +862,6 @@ export async function handleJob(job: Job) {
     )
       return
     const messages: Record<string, string> = {
-      PAYMENT_CONFIRMED:
-        "Платёж подтверждён. Pulsar настраивает подписку; отдельное сообщение придёт, когда ссылка будет готова.",
-      PROVISIONING_COMPLETED:
-        "Настройка подписки Pulsar завершена. Ссылка для подключения доступна в личном кабинете.",
-      PROVISIONING_FAILED:
-        "Не удалось автоматически завершить настройку Pulsar. Мы сохранили оплату; обратитесь в поддержку через личный кабинет.",
       SUBSCRIPTION_EXPIRING_3D:
         "Подписка Pulsar закончится примерно через 3 дня. Продлить её можно в личном кабинете.",
       SUBSCRIPTION_EXPIRING_1D:
@@ -831,12 +870,33 @@ export async function handleJob(job: Job) {
         "Срок подписки Pulsar закончился. Возобновить доступ можно в личном кабинете.",
       PAYOUT_APPROVED: "Заявка на выплату одобрена.",
       PAYOUT_PAID: "Выплата выполнена.",
+      PAYOUT_REJECTED: "Заявка на выплату отклонена. Подробности доступны в личном кабинете.",
+      SUPPORT_REPLY:
+        "💬 <b>PulsarVPN — Поддержка</b>\n\nВам ответила поддержка PULSAR.\nОткройте сайт, чтобы прочитать сообщение.",
     }
+    const supportUrl =
+      template === "SUPPORT_REPLY"
+        ? (
+            await issueTelegramWebsiteLogin({
+              telegramId: profile.telegramId,
+              chatId: profile.chatId,
+              returnTo: "/support",
+            })
+          ).url
+        : null
     try {
       await getTelegramGateway().sendMessage({
         chatId: profile.chatId,
         text:
-          messages[String(payload.template)] ?? "Важное уведомление Pulsar.",
+          messages[template] ?? "Важное уведомление Pulsar.",
+        parseMode: template === "SUPPORT_REPLY" ? "HTML" : undefined,
+        replyMarkup: supportUrl
+          ? {
+              inline_keyboard: [
+                [{ text: "💬 Прочитать ответ ↗", url: supportUrl }],
+              ],
+            }
+          : undefined,
       })
     } catch (error) {
       if (
@@ -897,7 +957,7 @@ export async function handleJob(job: Job) {
         try {
           const sent = await getTelegramGateway().sendMessage({
             chatId: profile.chatId,
-            text: `${broadcast.title}\n\n${broadcast.body}`,
+            text: broadcast.body,
           })
           await db.telegramBroadcastDelivery.update({
             where: { id: delivery.id },

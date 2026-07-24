@@ -1,17 +1,11 @@
 import type { Metadata } from "next"
-import type { LucideIcon } from "lucide-react"
 import {
-  CheckCheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  Clock3Icon,
   HeadphonesIcon,
-  InboxIcon,
-  LockIcon,
 } from "lucide-react"
 import Link from "next/link"
 
-import { PulsarIconContainer } from "@/components/app/pulsar-primitives"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -90,37 +84,6 @@ export default async function AdminSupportPage({
 
   return (
     <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-4 px-4 pt-8 pb-4 md:px-6 md:pb-6">
-      <section
-        aria-label="Сводка по поддержке"
-        className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"
-      >
-        <MetricCard
-          label="Новые"
-          value={view.metrics.new}
-          note="Первое сообщение пользователя"
-          icon={InboxIcon}
-        />
-        <MetricCard
-          label="Ожидают ответа"
-          value={view.metrics.waiting}
-          note="Пользователь написал последним"
-          icon={Clock3Icon}
-          attention={view.metrics.waiting > 0}
-        />
-        <MetricCard
-          label="Отвечены"
-          value={view.metrics.answered}
-          note="Последний ответ администратора"
-          icon={CheckCheckIcon}
-        />
-        <MetricCard
-          label="Закрыты"
-          value={view.metrics.closed}
-          note="Завершённые диалоги"
-          icon={LockIcon}
-        />
-      </section>
-
       <Card className={cardClass}>
         <CardContent className="p-4">
           <SupportToolbar
@@ -134,7 +97,7 @@ export default async function AdminSupportPage({
       <Card className={cardClass}>
         <CardHeader className="gap-0 p-4">
           <CardTitle>Обращения</CardTitle>
-          <CardAction>
+          <CardAction className="self-center">
             <Badge variant="secondary">{view.total}</Badge>
           </CardAction>
         </CardHeader>
@@ -258,37 +221,6 @@ export default async function AdminSupportPage({
         </CardFooter>
       </Card>
     </div>
-  )
-}
-
-function MetricCard({
-  label,
-  value,
-  note,
-  icon: Icon,
-  attention = false,
-}: {
-  label: string
-  value: number
-  note: string
-  icon: LucideIcon
-  attention?: boolean
-}) {
-  return (
-    <Card className={cardClass}>
-      <CardHeader className="gap-0 p-4 pb-0">
-        <p className="text-sm font-medium text-muted-foreground">{label}</p>
-        <CardAction>
-          <PulsarIconContainer icon={Icon} />
-        </CardAction>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-1 p-4 pt-2">
-        <CardTitle className={attention ? "text-destructive" : undefined}>
-          {value}
-        </CardTitle>
-        <p className="text-xs text-muted-foreground">{note}</p>
-      </CardContent>
-    </Card>
   )
 }
 
