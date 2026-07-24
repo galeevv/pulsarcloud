@@ -2265,6 +2265,23 @@ test("test mode requires test payments and explicit isolated live Remnawave opt-
     "pulsar_local_test"
   )
 
+  // Regression (go-live outage): real production must NOT crash when the
+  // test-mode-only PULSAR_ALLOW_LIVE_REMNAWAVE_IN_TEST_MODE flag is left set,
+  // and that flag must be inert (allowLiveInTestMode=false) outside test mode.
+  process.env.PULSAR_TEST_MODE = "false"
+  process.env.PAYMENT_PROVIDER = "platega"
+  process.env.PLATEGA_MERCHANT_ID = "merchant-regression"
+  process.env.PLATEGA_API_KEY = "platega-key-regression"
+  process.env.PULSAR_ALLOW_LIVE_REMNAWAVE_IN_TEST_MODE = "true"
+  config.resetConfigForTests()
+  const realProductionConfig = config.getConfig()
+  assert.equal(realProductionConfig.testMode, false)
+  assert.equal(realProductionConfig.remnawave.allowLiveInTestMode, false)
+  process.env.PULSAR_TEST_MODE = "true"
+  process.env.PAYMENT_PROVIDER = "test"
+  delete process.env.PLATEGA_MERCHANT_ID
+  delete process.env.PLATEGA_API_KEY
+
   process.env.APP_ENV = "test"
   process.env.PULSAR_ALLOW_TEST_MODE_IN_PRODUCTION = "false"
   process.env.PULSAR_ALLOW_LIVE_REMNAWAVE_IN_TEST_MODE = "false"
