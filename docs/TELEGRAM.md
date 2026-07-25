@@ -12,12 +12,14 @@ The BotFather command list contains exactly one command:
 
 A private `/start` without a parameter looks up `AuthIdentity.telegramId` using only the verified Telegram `from.id`. If the identity does not exist, one short transaction creates the same `User`, `AuthIdentity`, `TelegramProfile`, `WalletAccount`, and `ReferralProfile` used by the website. No bot-specific user or database exists. Username and display names are profile metadata and are never authorization inputs.
 
-The main menu is a photo message using `/public/tg/lk.png`. Its HTML caption
+The main menu is a photo message using `/public/tg/tg3.png`. Its HTML caption
 shows the user's first name and the current shared `Subscription`: product
 status, plan duration, expiry, honest local device limit, and LTE access. A
 ready active subscription gets an ordinary URL button containing its
 `subscriptionUrl`. Purchase, renewal, and website buttons use
-`menu:site-login`; `menu:referrals` opens the referral screen.
+`menu:site-login`; `menu:referrals` opens the referral screen. The ordinary
+URL button `Pulsar VPN News` opens the public news channel
+`https://t.me/pulsarvpn_news`.
 
 The referral screen shows invited users, active users, and the shared
 `WalletAccount.availableMinor` balance. It prints both the website invite URL

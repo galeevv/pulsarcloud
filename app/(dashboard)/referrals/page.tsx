@@ -235,6 +235,7 @@ function formatDate(date: Date) {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
+    timeZone: "Europe/Moscow",
   }).format(date)
 }
 function formatStatus(status: string) {

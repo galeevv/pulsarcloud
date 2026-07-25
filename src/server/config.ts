@@ -167,11 +167,10 @@ function buildConfig() {
   if (env.PULSAR_TEST_MODE && env.PAYMENT_PROVIDER !== "test") {
     throw new Error("PULSAR_TEST_MODE=true requires PAYMENT_PROVIDER=test")
   }
-  if (env.PULSAR_ALLOW_LIVE_REMNAWAVE_IN_TEST_MODE && !env.PULSAR_TEST_MODE) {
-    throw new Error(
-      "PULSAR_ALLOW_LIVE_REMNAWAVE_IN_TEST_MODE requires PULSAR_TEST_MODE=true"
-    )
-  }
+  // PULSAR_ALLOW_LIVE_REMNAWAVE_IN_TEST_MODE only has meaning in test mode. A
+  // leftover `true` when going to production is harmless (it is ignored below
+  // and coerced to false in the exported config), so it must NOT crash startup
+  // — that footgun took the site down during the first go-live.
   if (
     env.PULSAR_TEST_MODE &&
     env.REMNAWAVE_PROVIDER === "http" &&
@@ -270,7 +269,8 @@ function buildConfig() {
       standardSquadUuid: env.REMNAWAVE_STANDARD_SQUAD_UUID,
       lteSquadUuid: env.REMNAWAVE_LTE_SQUAD_UUID,
       timeoutMs: env.REMNAWAVE_TIMEOUT_MS,
-      allowLiveInTestMode: env.PULSAR_ALLOW_LIVE_REMNAWAVE_IN_TEST_MODE,
+      allowLiveInTestMode:
+        env.PULSAR_ALLOW_LIVE_REMNAWAVE_IN_TEST_MODE && env.PULSAR_TEST_MODE,
     },
     testMode: env.PULSAR_TEST_MODE,
     localAuthAdaptersEnabled: usesLocalTestAdapters,

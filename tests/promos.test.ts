@@ -98,6 +98,17 @@ test("launch promo grants immutable terms once and stops at the limit", async ()
   })
   assert.ok(first.claim)
   assert.equal(first.claim.claimNumber, 1)
+  const firstReferralProfile =
+    await modules.db.referralProfile.findUniqueOrThrow({
+      where: { userId: first.user.id },
+    })
+  assert.equal(firstReferralProfile.isEnabled, true)
+  assert.equal(firstReferralProfile.enabledAt?.getTime(), now.getTime())
+
+  await modules.db.referralProfile.update({
+    where: { userId: first.user.id },
+    data: { isEnabled: false, enabledAt: null },
+  })
 
   const duplicate = await modules.db.$transaction((tx) =>
     modules.promos.applyPromoOnRegistration(tx, {
@@ -106,6 +117,14 @@ test("launch promo grants immutable terms once and stops at the limit", async ()
     })
   )
   assert.equal(duplicate?.id, first.claim.id)
+  assert.equal(
+    (
+      await modules.db.referralProfile.findUniqueOrThrow({
+        where: { userId: first.user.id },
+      })
+    ).isEnabled,
+    true
+  )
 
   const second = await modules.db.$transaction(async (tx) => {
     const user = await modules.users.createUserGraph(tx, { isTest: true })
@@ -140,7 +159,13 @@ test("launch promo grants immutable terms once and stops at the limit", async ()
   })
   assert.equal(third.claim, null)
 
-  const [updatedCampaign, firstSubscription, secondSubscription] =
+  const [
+    updatedCampaign,
+    firstSubscription,
+    secondSubscription,
+    secondReferralProfile,
+    thirdReferralProfile,
+  ] =
     await Promise.all([
       modules.db.promoCampaign.findUniqueOrThrow({
         where: { id: campaign.id },
@@ -151,6 +176,12 @@ test("launch promo grants immutable terms once and stops at the limit", async ()
       modules.db.subscription.findUniqueOrThrow({
         where: { userId: second.user.id },
       }),
+      modules.db.referralProfile.findUniqueOrThrow({
+        where: { userId: second.user.id },
+      }),
+      modules.db.referralProfile.findUniqueOrThrow({
+        where: { userId: third.user.id },
+      }),
     ])
   assert.equal(updatedCampaign.claimedCount, 2)
   assert.equal(firstSubscription.status, "TRIAL")
@@ -160,6 +191,8 @@ test("launch promo grants immutable terms once and stops at the limit", async ()
   assert.equal(secondSubscription.deviceLimit, 3)
   assert.equal(secondSubscription.lteEnabled, true)
   assert.equal(secondSubscription.syncVersion, 2)
+  assert.equal(secondReferralProfile.isEnabled, true)
+  assert.equal(thirdReferralProfile.isEnabled, false)
   assert.equal(
     secondSubscription.expiresAt.getTime(),
     now.getTime() + 30 * 86_400_000
