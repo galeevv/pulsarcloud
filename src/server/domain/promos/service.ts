@@ -3,6 +3,17 @@ import { correlationId } from "@/src/server/infrastructure/security/crypto"
 
 const DAY_MS = 86_400_000
 
+async function enableReferralProgram(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  now: Date
+) {
+  await tx.referralProfile.updateMany({
+    where: { userId, isEnabled: false },
+    data: { isEnabled: true, enabledAt: now },
+  })
+}
+
 export async function applyPromoOnRegistration(
   tx: Prisma.TransactionClient,
   input: { userId: string; now?: Date }
@@ -45,7 +56,10 @@ export async function applyPromoOnRegistration(
       },
     },
   })
-  if (existingClaim) return existingClaim
+  if (existingClaim) {
+    await enableReferralProgram(tx, user.id, now)
+    return existingClaim
+  }
 
   const current = await tx.subscription.findUnique({
     where: { userId: user.id },
@@ -112,6 +126,7 @@ export async function applyPromoOnRegistration(
       grantedAt: now,
     },
   })
+  await enableReferralProgram(tx, user.id, now)
   await tx.subscriptionEvent.create({
     data: {
       subscriptionId: subscription.id,

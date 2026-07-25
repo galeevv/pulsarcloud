@@ -77,7 +77,7 @@ function rublesFromMinor(value: number) {
 }
 
 export function telegramMainPhotoUrl() {
-  return `${getConfig().appUrl}/tg/lk.png`
+  return `${getConfig().appUrl}/tg/tg3.png`
 }
 
 export async function getTelegramUserId(telegramId: string) {
@@ -178,6 +178,9 @@ export async function getTelegramMainScreen(
   keyboard.push([
     { text: "🎁 Рефералы", callback_data: "menu:referrals" },
     { text: "🌐 Сайт", callback_data: "menu:site-login" },
+  ])
+  keyboard.push([
+    { text: "Pulsar VPN News", url: "https://t.me/pulsarvpn_news" },
   ])
 
   return {
