@@ -30,7 +30,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { formatPreviewRub } from "@/src/frontend-preview/format"
 import {
   getAdminUsersView,
   parseAdminUserFilter,
@@ -134,7 +133,6 @@ export default async function AdminUsersPage({
                   <TableHead>Email</TableHead>
                   <TableHead>Подписка</TableHead>
                   <TableHead>Действует до</TableHead>
-                  <TableHead className="text-right">Баланс</TableHead>
                   <TableHead className="text-right">Рефералы</TableHead>
                 </TableRow>
               </TableHeader>
@@ -162,9 +160,6 @@ export default async function AdminUsersPage({
                             user.subscription.expiresAt
                           )
                         : "—"}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {formatPreviewRub(user.balanceMinor / 100)}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {user.referrals}

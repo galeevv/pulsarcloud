@@ -10,7 +10,6 @@ export async function createUserGraph(
   input: { isTest?: boolean }
 ) {
   const user = await tx.user.create({ data: { isTest: input.isTest ?? false } })
-  await tx.walletAccount.create({ data: { userId: user.id } })
   await tx.referralProfile.create({
     data: { userId: user.id, inviteCode: randomToken(12) },
   })

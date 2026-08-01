@@ -10,7 +10,6 @@ import {
   TriangleAlertIcon,
   UserPlusIcon,
   UsersIcon,
-  WalletCardsIcon,
 } from "lucide-react"
 import Link from "next/link"
 import { redirect } from "next/navigation"
@@ -167,13 +166,6 @@ export default async function AdminDashboardPage() {
       value: dashboard.attention.openSupport,
       href: "/admin/support",
       icon: HeadphonesIcon,
-    },
-    {
-      label: "Выплаты",
-      description: "Заявки ожидают решения",
-      value: dashboard.attention.pendingPayouts,
-      href: "/admin/payouts",
-      icon: WalletCardsIcon,
     },
     {
       label: "Синхронизация подписок",

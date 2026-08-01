@@ -15,7 +15,6 @@ import {
   getCheckoutExpectation,
 } from "@/src/server/domain/billing/service"
 import { createUserGraph } from "@/src/server/domain/users/service"
-import { createPayout } from "@/src/server/domain/wallet/service"
 import { getConfig } from "@/src/server/config"
 import { db } from "@/src/server/infrastructure/db/client"
 import { correlationId } from "@/src/server/infrastructure/security/crypto"
@@ -248,46 +247,6 @@ export async function simulateReferralFirstPayment(formData: FormData) {
   revalidatePath("/admin/test")
 }
 
-export async function createTestPayout(formData: FormData) {
-  const session = await guard()
-  const userId = String(formData.get("userId"))
-  await getTestUser(userId)
-  const pricing = await db.pricingSettings.findUniqueOrThrow({
-    where: { key: "default" },
-  })
-  const creditKey = `admin-test-payout-credit:${randomUUID()}`
-  await db.$transaction(async (tx) => {
-    const wallet = await tx.walletAccount.update({
-      where: { userId },
-      data: {
-        availableMinor: { increment: pricing.minimalPayoutMinor },
-        version: { increment: 1 },
-      },
-    })
-    await tx.walletLedgerEntry.create({
-      data: {
-        walletAccountId: wallet.id,
-        userId,
-        type: "ADMIN_ADJUSTMENT",
-        deltaAvailableMinor: pricing.minimalPayoutMinor,
-        deltaReservedMinor: 0,
-        referenceType: "TestMode",
-        referenceId: creditKey,
-        idempotencyKey: creditKey,
-        description: "Test payout fixture",
-      },
-    })
-  })
-  const payout = await createPayout({
-    userId,
-    amountMinor: pricing.minimalPayoutMinor,
-    details: "TEST BANK 0000000000000000",
-    idempotencyKey: `admin-test-payout:${randomUUID()}`,
-  })
-  await audit(session.userId, "TEST_PAYOUT_CREATED", "PayoutRequest", payout.id)
-  revalidatePath("/admin/test")
-}
-
 export async function setProvisioningFailure(formData: FormData) {
   const session = await guard()
   const enabled = formData.get("enabled") === "true"
@@ -403,6 +362,14 @@ export async function deleteTestData(formData: FormData) {
     await tx.payoutRequest.deleteMany({ where: { userId: { in: userIds } } })
     await tx.walletLedgerEntry.deleteMany({
       where: { userId: { in: userIds } },
+    })
+    await tx.referralSubscriptionReward.deleteMany({
+      where: {
+        OR: [
+          { inviterUserId: { in: userIds } },
+          { invitedUserId: { in: userIds } },
+        ],
+      },
     })
     await tx.referralReward.deleteMany({
       where: {

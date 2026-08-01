@@ -13,7 +13,7 @@ import {
   type VerifiedPaymentEvent,
 } from "@/src/server/infrastructure/payments/provider"
 import { BusinessError } from "@/src/server/application/errors"
-import { grantReferralReward } from "@/src/server/domain/referrals/service"
+import { grantReferralSubscriptionReward } from "@/src/server/domain/referrals/service"
 import {
   correlationId,
   stableEventId,
@@ -27,7 +27,7 @@ function planDurationMonthsFromDays(value: number) {
   return null
 }
 
-export type CheckoutPaymentMethod = "SBP" | "WALLET"
+export type CheckoutPaymentMethod = "SBP"
 export type CheckoutSelection = {
   userId: string
   durationMonths: number
@@ -120,38 +120,6 @@ export async function expireOverduePendingPayments(input?: {
   )
 }
 
-async function confirmWalletPayment(payment: Payment) {
-  if (payment.provider !== "wallet" || !payment.externalPaymentId)
-    throw new Error("Wallet payment is incomplete")
-  try {
-    await applyPaymentEvent(
-      {
-        eventId: `wallet:${payment.id}:confirmed`,
-        eventType: "CONFIRMED",
-        externalPaymentId: payment.externalPaymentId,
-        status: "CONFIRMED",
-        amountMinor: payment.amountMinor,
-        currency: payment.currency,
-        payload: { payload: payment.id, paymentMethod: "WALLET" },
-      },
-      { providerName: "wallet", debitWallet: true }
-    )
-  } catch (error) {
-    if (
-      error instanceof BusinessError &&
-      error.code === "WALLET_INSUFFICIENT_BALANCE"
-    )
-      await withBusyRetry(() =>
-        db.payment.updateMany({
-          where: { id: payment.id, status: "PENDING" },
-          data: { status: "FAILED" },
-        })
-      )
-    throw error
-  }
-  return db.payment.findUniqueOrThrow({ where: { id: payment.id } })
-}
-
 async function createProviderCheckout(
   payment: Payment,
   provider: PaymentProvider,
@@ -163,7 +131,7 @@ async function createProviderCheckout(
       amountMinor: payment.amountMinor,
       currency: payment.currency,
       description,
-      returnUrl: `${getConfig().appUrl}/subscription?payment=success`,
+      returnUrl: `${getConfig().appUrl}/instructions?payment=success`,
       failedUrl: `${getConfig().appUrl}/subscription?payment=failed`,
       payload: payment.id,
       userId: payment.userId,
@@ -264,8 +232,9 @@ export async function createCheckout(
   if (!user || user.status !== "ACTIVE" || user.isTest !== config.testMode)
     throw new BusinessError("AUTH_FORBIDDEN", 403)
   const paymentMethod = input.paymentMethod ?? "SBP"
-  const providerName =
-    paymentMethod === "WALLET" ? "wallet" : config.payments.provider
+  if (paymentMethod !== "SBP")
+    throw new BusinessError("PAYMENT_INVALID_PARAMETERS", 400)
+  const providerName = config.payments.provider
   const now = new Date()
   await expireOverduePendingPayments({ now, userId: input.userId })
   const key = input.idempotencyKey ?? randomUUID()
@@ -290,12 +259,6 @@ export async function createCheckout(
       "Payment idempotency key belongs to a different order"
     )
   }
-  if (
-    existing?.provider === "wallet" &&
-    existing.status === "PENDING" &&
-    existing.checkoutUrl
-  )
-    return confirmWalletPayment(existing)
   if (existing?.checkoutUrl) return existing
   if (existing)
     throw new BusinessError(
@@ -320,9 +283,7 @@ export async function createCheckout(
       openPayment.pricingVersion === input.pricingVersion &&
       openPayment.provider === providerName
     )
-      return openPayment.provider === "wallet"
-        ? confirmWalletPayment(openPayment)
-        : openPayment
+      return openPayment
     throw new BusinessError(
       "CONFLICT",
       409,
@@ -341,7 +302,7 @@ export async function createCheckout(
     input.expectedAmountMinor !== quote.amountMinor
   )
     throw new BusinessError("PAYMENT_PRICE_CHANGED", 409)
-  const provider = paymentMethod === "SBP" ? getPaymentProvider() : null
+  const provider = getPaymentProvider()
   const currentSubscription = await db.subscription.findUnique({
     where: { userId: input.userId },
   })
@@ -384,26 +345,6 @@ export async function createCheckout(
       )
     throw error
   }
-  if (paymentMethod === "WALLET") {
-    const externalPaymentId = `wallet_${payment.id}`
-    const checkoutUrl = `${config.appUrl}/subscription?payment=success`
-    await withBusyRetry(() =>
-      db.payment.update({
-        where: { id: payment.id },
-        data: {
-          status: "PENDING",
-          externalPaymentId,
-          checkoutUrl,
-          providerCreatedAt: new Date(),
-          expiresAt: new Date(Date.now() + 5 * 60_000),
-        },
-      })
-    )
-    return confirmWalletPayment(
-      await db.payment.findUniqueOrThrow({ where: { id: payment.id } })
-    )
-  }
-  if (!provider) throw new Error("SBP payment provider is unavailable")
   return createProviderCheckout(
     payment,
     provider,
@@ -543,7 +484,7 @@ export async function createDeviceLimitUpgradeCheckout(
 
 export async function applyPaymentEvent(
   event: VerifiedPaymentEvent,
-  options?: { providerName?: string; debitWallet?: boolean }
+  options?: { providerName?: string }
 ) {
   const providerName = options?.providerName ?? getPaymentProvider().name
   const outcome = await withBusyRetry(() =>
@@ -650,56 +591,6 @@ export async function applyPaymentEvent(
                 ? "FAILED"
                 : "PENDING"
         if (mapped === "REFUNDED" && payment.status === "CONFIRMED") {
-          const reward = await tx.referralReward.findUnique({
-            where: { paymentId: payment.id },
-          })
-          if (reward?.status === "AVAILABLE") {
-            const wallet = await tx.walletAccount.findUniqueOrThrow({
-              where: { userId: reward.inviterUserId },
-            })
-            if (wallet.availableMinor >= reward.amountMinor) {
-              await tx.walletAccount.update({
-                where: { id: wallet.id },
-                data: {
-                  availableMinor: { decrement: reward.amountMinor },
-                  version: { increment: 1 },
-                },
-              })
-              await tx.walletLedgerEntry.create({
-                data: {
-                  walletAccountId: wallet.id,
-                  userId: reward.inviterUserId,
-                  type: "REFERRAL_REWARD_REVERSAL",
-                  deltaAvailableMinor: -reward.amountMinor,
-                  deltaReservedMinor: 0,
-                  referenceType: "ReferralReward",
-                  referenceId: reward.id,
-                  idempotencyKey: `referral-reward:${reward.id}:reversal`,
-                },
-              })
-              await tx.referralReward.update({
-                where: { id: reward.id },
-                data: { status: "REVERSED", reversedAt: new Date() },
-              })
-              await tx.referralInvite.update({
-                where: { id: reward.inviteId },
-                data: { status: "REWARD_REVERSED" },
-              })
-            } else {
-              await tx.referralReward.update({
-                where: { id: reward.id },
-                data: { status: "MANUAL_REVIEW" },
-              })
-            }
-          } else if (
-            reward &&
-            !["REVERSED", "MANUAL_REVIEW"].includes(reward.status)
-          ) {
-            await tx.referralReward.update({
-              where: { id: reward.id },
-              data: { status: "MANUAL_REVIEW" },
-            })
-          }
           const subscription = await tx.subscription.findUnique({
             where: { userId: payment.userId },
           })
@@ -760,36 +651,6 @@ export async function applyPaymentEvent(
           paymentId: payment.id,
           status: payment.status,
         }
-      }
-      if (options?.debitWallet) {
-        const debited = await tx.walletAccount.updateMany({
-          where: {
-            userId: payment.userId,
-            availableMinor: { gte: payment.amountMinor },
-          },
-          data: {
-            availableMinor: { decrement: payment.amountMinor },
-            version: { increment: 1 },
-          },
-        })
-        if (debited.count !== 1)
-          throw new BusinessError("WALLET_INSUFFICIENT_BALANCE", 409)
-        const wallet = await tx.walletAccount.findUniqueOrThrow({
-          where: { userId: payment.userId },
-        })
-        await tx.walletLedgerEntry.create({
-          data: {
-            walletAccountId: wallet.id,
-            userId: payment.userId,
-            type: "SUBSCRIPTION_PAYMENT",
-            deltaAvailableMinor: -payment.amountMinor,
-            deltaReservedMinor: 0,
-            referenceType: "Payment",
-            referenceId: payment.id,
-            idempotencyKey: `wallet-subscription:${payment.id}`,
-            description: "Оплата подписки Pulsar",
-          },
-        })
       }
       const now = new Date()
       await tx.payment.update({
@@ -953,9 +814,10 @@ export async function applyPaymentEvent(
           dedupeKey: `subscription:${subscription.id}:sync:${syncVersion}`,
         },
       })
-      await grantReferralReward(tx, {
+      await grantReferralSubscriptionReward(tx, {
         invitedUserId: payment.userId,
         paymentId: payment.id,
+        now,
       })
       await tx.referralProfile.update({
         where: { userId: payment.userId },

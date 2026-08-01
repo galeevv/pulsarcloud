@@ -80,15 +80,20 @@ export async function applyReferralOnRegistration(
   return invite
 }
 
-export async function grantReferralReward(
+export async function grantReferralSubscriptionReward(
   tx: Prisma.TransactionClient,
-  input: { invitedUserId: string; paymentId: string }
+  input: { invitedUserId: string; paymentId: string; now?: Date }
 ) {
   const invite = await tx.referralInvite.findUnique({
     where: { invitedUserId: input.invitedUserId },
-    include: { reward: true, inviter: true, invited: true },
+    include: {
+      reward: true,
+      subscriptionReward: true,
+      inviter: { include: { subscription: true } },
+      invited: true,
+    },
   })
-  if (!invite || invite.reward) return null
+  if (!invite || invite.reward || invite.subscriptionReward) return null
   const payment = await tx.payment.findUnique({
     where: { id: input.paymentId },
   })
@@ -111,39 +116,80 @@ export async function grantReferralReward(
   const pricing = await tx.pricingSettings.findUniqueOrThrow({
     where: { key: "default" },
   })
-  const reward = await tx.referralReward.create({
+  const now = input.now ?? new Date()
+  const current = invite.inviter.subscription
+  const previousExpiresAt = current?.expiresAt ?? null
+  const base =
+    current && current.expiresAt > now ? current.expiresAt : now
+  const expiresAt = new Date(
+    base.getTime() + pricing.referralRewardDays * DAY
+  )
+  const syncVersion = (current?.syncVersion ?? 0) + 1
+  const subscription = current
+    ? await tx.subscription.update({
+        where: { id: current.id },
+        data: {
+          status: "ACTIVE",
+          expiresAt,
+          syncStatus: "PENDING",
+          syncVersion,
+          lastTechnicalError: null,
+          lastUserFriendlyError: null,
+        },
+      })
+    : await tx.subscription.create({
+        data: {
+          userId: invite.inviterUserId,
+          status: "ACTIVE",
+          startedAt: now,
+          expiresAt,
+          deviceLimit: pricing.minDeviceLimit,
+          lteEnabled: false,
+          syncStatus: "PENDING",
+          syncVersion,
+        },
+      })
+  const reward = await tx.referralSubscriptionReward.create({
     data: {
       inviteId: invite.id,
       inviterUserId: invite.inviterUserId,
       invitedUserId: input.invitedUserId,
       paymentId: input.paymentId,
-      amountMinor: pricing.referralRewardMinor,
+      days: pricing.referralRewardDays,
     },
   })
-  const wallet = await tx.walletAccount.update({
-    where: { userId: invite.inviterUserId },
+  await tx.subscriptionEvent.create({
     data: {
-      availableMinor: { increment: pricing.referralRewardMinor },
-      version: { increment: 1 },
+      subscriptionId: subscription.id,
+      type: "REFERRAL_DAYS_GRANTED",
+      paymentId: input.paymentId,
+      actorUserId: input.invitedUserId,
+      previousStateJson: current ? JSON.stringify(current) : null,
+      newStateJson: JSON.stringify({
+        ...subscription,
+        referralRewardDays: pricing.referralRewardDays,
+        previousExpiresAt,
+      }),
+      idempotencyKey: `referral-days:${invite.id}`,
     },
   })
-  await tx.walletLedgerEntry.create({
+  await tx.outboxJob.create({
     data: {
-      walletAccountId: wallet.id,
-      userId: invite.inviterUserId,
-      type: "REFERRAL_REWARD",
-      deltaAvailableMinor: pricing.referralRewardMinor,
-      deltaReservedMinor: 0,
-      referenceType: "ReferralReward",
-      referenceId: reward.id,
-      idempotencyKey: `referral-reward:${invite.id}`,
+      type: "PROVISION_SUBSCRIPTION",
+      aggregateType: "Subscription",
+      aggregateId: subscription.id,
+      payloadJson: JSON.stringify({
+        subscriptionId: subscription.id,
+        syncVersion,
+      }),
+      dedupeKey: `subscription:${subscription.id}:sync:${syncVersion}`,
     },
   })
   await tx.referralInvite.update({
     where: { id: invite.id },
     data: {
       status: "PAID",
-      convertedAt: new Date(),
+      convertedAt: now,
       firstConfirmedPaymentId: input.paymentId,
     },
   })

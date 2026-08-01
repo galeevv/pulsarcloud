@@ -99,7 +99,6 @@ export async function getAdminUsersView(input: {
           expiresAt: true,
         },
       },
-      wallet: { select: { availableMinor: true } },
       _count: { select: { sentInvites: true } },
     },
   })
@@ -122,7 +121,6 @@ export async function getAdminUsersView(input: {
         user.identities.find((identity) => identity.emailNormalized)
           ?.emailNormalized ?? null,
       subscription: user.subscription,
-      balanceMinor: user.wallet?.availableMinor ?? 0,
       referrals: user._count.sentInvites,
     })),
   }

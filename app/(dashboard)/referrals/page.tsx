@@ -1,21 +1,12 @@
 import type { Metadata } from "next"
-import { GiftIcon, Link2Icon, UsersIcon, WalletIcon } from "lucide-react"
+import { GiftIcon, Link2Icon } from "lucide-react"
 import { CopyButton } from "@/components/app/copy-button"
-import { PayoutDialog } from "@/components/app/payout-dialog"
 import {
-  PulsarActionRow,
   PulsarAssetCard,
-  PulsarIconContainer,
+  PulsarActionRow,
 } from "@/components/app/pulsar-primitives"
 import { ReferralsMetrics } from "@/components/app/referrals-metrics"
 import { SubscriptionPaymentAction } from "@/components/app/subscription-payment-action"
-import {
-  Carousel,
-  CarouselContent,
-  CarouselItem,
-  CarouselNext,
-  CarouselPrevious,
-} from "@/components/ui/carousel"
 import {
   Empty,
   EmptyContent,
@@ -24,7 +15,6 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty"
-import { formatPreviewRub } from "@/src/frontend-preview/format"
 import {
   getPricingView,
   getLastPurchasePreferencesView,
@@ -46,7 +36,6 @@ export default async function ReferralsPage() {
       getSubscriptionView(session.userId),
       getLastPurchasePreferencesView(session.userId),
     ])
-  const balanceRub = (user.wallet?.availableMinor ?? 0) / 100
   if (!user.referralProfile?.isEnabled)
     return (
       <main className="pulsar-container">
@@ -70,7 +59,6 @@ export default async function ReferralsPage() {
             <EmptyContent>
               <SubscriptionPaymentAction
                 settings={settings}
-                walletBalanceRub={balanceRub}
                 triggerLabel={
                   subscription ? "Продлить подписку" : "Оплатить подписку"
                 }
@@ -99,15 +87,24 @@ export default async function ReferralsPage() {
   const activeInviteItems = inviteItems.filter(
     (_, index) => user.sentInvites[index]?.status === "PAID"
   )
-  const payoutItems = user.payouts.map((payout) => ({
-    id: payout.id,
-    amountLabel: formatPreviewRub(payout.amountMinor / 100),
-    createdAtLabel: formatDate(payout.createdAt),
-    statusLabel: formatStatus(payout.status),
-  }))
-  const paidOutRub = user.payouts
-    .filter((payout) => payout.status === "PAID")
-    .reduce((sum, payout) => sum + payout.amountMinor / 100, 0)
+  const rewardItems = user.sentInvites.flatMap((invite) => {
+    if (!invite.subscriptionReward) return []
+    return [
+      {
+        id: invite.subscriptionReward.id,
+        daysLabel: `+${formatDaysLabel(invite.subscriptionReward.days)}`,
+        createdAtLabel: formatDate(invite.subscriptionReward.createdAt),
+        userLabel:
+          invite.invited.identities.find(
+            (identity) => identity.provider === "EMAIL"
+          )?.providerSubject ?? "Пользователь Pulsar",
+      },
+    ]
+  })
+  const earnedDays = user.sentInvites.reduce(
+    (sum, invite) => sum + (invite.subscriptionReward?.days ?? 0),
+    0
+  )
   return (
     <main className="pulsar-container">
       <PulsarAssetCard
@@ -120,116 +117,49 @@ export default async function ReferralsPage() {
             Реферальная программа
           </h1>
         </div>
-        <PulsarActionRow
-          icon={WalletIcon}
-          title="Баланс"
-          titleClassName="text-xs font-normal text-muted-foreground"
-          description={
-            <span className="text-base font-semibold text-foreground">
-              {formatPreviewRub(balanceRub)}
-            </span>
-          }
-          action={
-            <PayoutDialog
-              buttonIcon={false}
-              canRequestPayout={balanceRub >= settings.minimalPayoutRub}
-              defaultAmountRub={Math.max(settings.minimalPayoutRub, balanceRub)}
-              minimalPayoutRub={settings.minimalPayoutRub}
-              triggerClassName="h-9 w-auto rounded-[14px] px-3"
-            />
-          }
-        />
         {inviteUrl ? (
-          <PulsarActionRow
-            icon={Link2Icon}
-            title="Ваша ссылка"
-            titleClassName="text-xs font-normal text-muted-foreground"
-            description={
-              <span className="font-mono text-sm text-foreground">
-                {compactUrl(inviteUrl)}
-              </span>
-            }
-            action={
-              <CopyButton
-                value={inviteUrl}
-                label="Скопировать ссылку"
-                iconOnly
-                className="size-9"
-              />
-            }
-          />
+          <section
+            className="flex flex-col gap-2"
+            aria-labelledby="invite-title"
+          >
+            <h2 id="invite-title" className="text-[16px] font-semibold">
+              Пригласите друга по вашей ссылке
+            </h2>
+            <PulsarActionRow
+              icon={Link2Icon}
+              title="Ваша ссылка"
+              titleClassName="text-xs font-normal text-muted-foreground"
+              description={
+                <span className="font-mono text-sm text-foreground">
+                  {compactUrl(inviteUrl)}
+                </span>
+              }
+              action={
+                <CopyButton
+                  value={inviteUrl}
+                  label="Скопировать ссылку"
+                  iconOnly
+                  className="size-9"
+                />
+              }
+            />
+          </section>
         ) : null}
         <ReferralsMetrics
           activeInvites={activeInviteItems}
           activeValue={String(activeInviteItems.length)}
+          friendTrialLabel={formatDaysLabel(settings.referralTrialDays)}
           invitedValue={String(inviteItems.length)}
           invites={inviteItems}
-          paidOutValue={formatPreviewRub(paidOutRub)}
-          payouts={payoutItems}
-        />
-        <ReferralSteps
-          minimalPayoutRub={settings.minimalPayoutRub}
-          referralRewardRub={settings.referralRewardRub}
-          referralTrialDays={settings.referralTrialDays}
+          ownerRewardDays={settings.referralRewardDays}
+          earnedDays={earnedDays}
+          rewards={rewardItems}
         />
       </PulsarAssetCard>
     </main>
   )
 }
 
-function ReferralSteps({
-  minimalPayoutRub,
-  referralRewardRub,
-  referralTrialDays,
-}: {
-  minimalPayoutRub: number
-  referralRewardRub: number
-  referralTrialDays: number
-}) {
-  const steps = [
-    {
-      title: `Пригласите друга и получите ${formatPreviewRub(referralRewardRub)}`,
-      description: "Бонус начислим после его первой оплаты.",
-      icon: GiftIcon,
-    },
-    {
-      title: `Друг получит ${formatDaysLabel(referralTrialDays)} бесплатно`,
-      description: "Пробный период выдаётся один раз при регистрации.",
-      icon: UsersIcon,
-    },
-    {
-      title: `Накопили ${formatPreviewRub(minimalPayoutRub)} — выводите`,
-      description: "Создайте заявку прямо из личного кабинета.",
-      icon: WalletIcon,
-    },
-  ]
-  return (
-    <Carousel className="w-full" opts={{ align: "start" }}>
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm font-semibold">Как это работает</p>
-        <div className="flex gap-2">
-          <CarouselPrevious className="static inset-auto m-0 translate-x-0 translate-y-0" />
-          <CarouselNext className="static inset-auto m-0 translate-x-0 translate-y-0" />
-        </div>
-      </div>
-      <CarouselContent className="-ml-3 pt-3">
-        {steps.map((step) => (
-          <CarouselItem key={step.title} className="basis-full pl-3">
-            <div className="soft-panel flex flex-col gap-3 p-4">
-              <PulsarIconContainer icon={step.icon} />
-              <div>
-                <p className="text-sm font-semibold">{step.title}</p>
-                <p className="text-sm text-muted-foreground">
-                  {step.description}
-                </p>
-              </div>
-            </div>
-          </CarouselItem>
-        ))}
-      </CarouselContent>
-    </Carousel>
-  )
-}
 function formatDate(date: Date) {
   return new Intl.DateTimeFormat("ru-RU", {
     day: "2-digit",

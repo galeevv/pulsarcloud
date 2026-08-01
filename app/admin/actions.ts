@@ -5,22 +5,9 @@ import { z } from "zod"
 
 import { BusinessError, toFriendlyError } from "@/src/server/application/errors"
 import { getConfig } from "@/src/server/config"
-import { adjustWalletBalanceByAdmin } from "@/src/server/domain/wallet/service"
 import { db } from "@/src/server/infrastructure/db/client"
 import { correlationId } from "@/src/server/infrastructure/security/crypto"
 import { requireWebSession } from "@/src/server/transport/web/session"
-
-const walletAdjustmentSchema = z.object({
-  userId: z.string().min(8).max(100),
-  deltaRub: z.coerce
-    .number()
-    .int()
-    .min(-1_000_000)
-    .max(1_000_000)
-    .refine((value) => value !== 0),
-  comment: z.string().trim().min(5).max(500),
-  idempotencyKey: z.uuid(),
-})
 
 const subscriptionManagementSchema = z.object({
   userId: z.string().min(8).max(100),
@@ -30,16 +17,6 @@ const subscriptionManagementSchema = z.object({
   comment: z.string().trim().min(5).max(500),
   idempotencyKey: z.uuid(),
 })
-
-export type WalletAdjustmentActionState = {
-  status: "idle" | "success" | "error"
-  message: string
-  availableMinor?: number
-  fieldErrors?: {
-    deltaRub?: string
-    comment?: string
-  }
-}
 
 export type SubscriptionManagementActionState = {
   status: "idle" | "success" | "error"
@@ -223,56 +200,6 @@ export async function manageUserSubscription(
         status: "error",
         message: "Параметры не изменились. Выберите новые значения.",
       }
-    return { status: "error", message: toFriendlyError(error).message }
-  }
-}
-
-export async function adjustWallet(
-  _previousState: WalletAdjustmentActionState,
-  formData: FormData
-): Promise<WalletAdjustmentActionState> {
-  const session = await requireWebSession("ADMIN")
-  const parsed = walletAdjustmentSchema.safeParse({
-    userId: formData.get("userId"),
-    deltaRub: formData.get("deltaRub"),
-    comment: formData.get("comment"),
-    idempotencyKey: formData.get("idempotencyKey"),
-  })
-  if (!parsed.success) {
-    const errors = parsed.error.flatten().fieldErrors
-    return {
-      status: "error",
-      message: "Проверьте сумму и обязательный комментарий.",
-      fieldErrors: {
-        deltaRub: errors.deltaRub?.length
-          ? "Укажите целую ненулевую сумму от −1 000 000 до 1 000 000 ₽."
-          : undefined,
-        comment: errors.comment?.length
-          ? "Комментарий должен содержать от 5 до 500 символов."
-          : undefined,
-      },
-    }
-  }
-
-  try {
-    const result = await adjustWalletBalanceByAdmin({
-      adminUserId: session.userId,
-      userId: parsed.data.userId,
-      deltaMinor: parsed.data.deltaRub * 100,
-      comment: parsed.data.comment,
-      idempotencyKey: parsed.data.idempotencyKey,
-      correlationId: correlationId(),
-    })
-    revalidatePath("/admin", "layout")
-    revalidatePath(`/admin/users/${parsed.data.userId}`)
-    return {
-      status: "success",
-      message: result.applied
-        ? "Баланс пользователя обновлён."
-        : "Эта корректировка уже была применена.",
-      availableMinor: result.availableMinor,
-    }
-  } catch (error) {
     return { status: "error", message: toFriendlyError(error).message }
   }
 }

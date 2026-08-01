@@ -2,6 +2,7 @@ import Link from "next/link"
 import type { Metadata } from "next"
 import {
   AlertCircleIcon,
+  BookOpenIcon,
   ChevronRightIcon,
   GiftIcon,
   InfoIcon,
@@ -11,18 +12,17 @@ import {
   PulsarAssetCard,
   PulsarIconContainer,
 } from "@/components/app/pulsar-primitives"
-import { SetupVpnAction } from "@/components/app/setup-vpn-action"
 import { SubscriptionPaymentAction } from "@/components/app/subscription-payment-action"
 import { SubscriptionStatusPoller } from "@/components/app/subscription-status-poller"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
+import { buttonVariants } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { formatPreviewRub } from "@/src/frontend-preview/format"
+import { cn } from "@/lib/utils"
 import {
   getPricingView,
   getLastPurchasePreferencesView,
   getSubscriptionView,
-  getWalletBalanceView,
 } from "@/src/server/queries/user-dashboard"
 import { requireWebSession } from "@/src/server/transport/web/session"
 import type {
@@ -36,13 +36,11 @@ export const metadata: Metadata = {
 
 export default async function HomePage() {
   const session = await requireWebSession("USER")
-  const [subscription, settings, walletBalanceRub, lastPurchase] =
-    await Promise.all([
-      getSubscriptionView(session.userId),
-      getPricingView(session.userId),
-      getWalletBalanceView(session.userId),
-      getLastPurchasePreferencesView(session.userId),
-    ])
+  const [subscription, settings, lastPurchase] = await Promise.all([
+    getSubscriptionView(session.userId),
+    getPricingView(session.userId),
+    getLastPurchasePreferencesView(session.userId),
+  ])
   const status = subscription?.status ?? "NONE"
   const renewalLabel =
     status === "NONE" ? "Оплатить подписку" : "Продлить подписку"
@@ -122,12 +120,20 @@ export default async function HomePage() {
             <>
               <SubscriptionPaymentAction
                 settings={settings}
-                walletBalanceRub={walletBalanceRub}
                 triggerLabel={renewalLabel}
                 initialDeviceLimit={lastPurchase?.deviceLimit}
                 initialLteEnabled={lastPurchase?.lteEnabled}
               />
-              <SetupVpnAction subscriptionUrl={subscription?.subscriptionUrl} />
+              <Link
+                href="/instructions"
+                className={cn(
+                  buttonVariants({ size: "lg", variant: "outline" }),
+                  "h-11 w-full rounded-[18px]"
+                )}
+              >
+                <BookOpenIcon data-icon="inline-start" />
+                Инструкция
+              </Link>
             </>
           )}
         </div>
@@ -147,13 +153,9 @@ export default async function HomePage() {
             />
             <div className="relative z-10 min-w-0">
               <p className="text-sm leading-5 text-muted-foreground transition-colors group-hover:text-foreground">
+                <span className="block">Приглашайте друзей</span>
                 <span className="block">
-                  Друг получает {formatDaysLabel(settings.referralTrialDays)}{" "}
-                  бесплатно.
-                </span>
-                <span className="block">
-                  Вам {formatPreviewRub(settings.referralRewardRub)} после
-                  оплаты друга.
+                  Получайте {formatBonusDaysLabel(settings.referralRewardDays)}
                 </span>
               </p>
             </div>
@@ -236,6 +238,14 @@ function formatDaysLeftLabel(days: number) {
 
 function formatDaysLabel(days: number) {
   return `${days} ${pluralizeRu(days, ["день", "дня", "дней"])}`
+}
+
+function formatBonusDaysLabel(days: number) {
+  return `${days} ${pluralizeRu(days, [
+    "бонусный день",
+    "бонусных дня",
+    "бонусных дней",
+  ])}`
 }
 
 function formatDeviceLimit(deviceLimit: number) {

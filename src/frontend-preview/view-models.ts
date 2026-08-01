@@ -38,8 +38,7 @@ export type PreviewPricing = {
   lteMonthlyPriceRub: number
   maxDeviceLimit: number
   minDeviceLimit: number
-  minimalPayoutRub: number
   referralFriendDiscountPct: number
-  referralRewardRub: number
+  referralRewardDays: number
   referralTrialDays: number
 }

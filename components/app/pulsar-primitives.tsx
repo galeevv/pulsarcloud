@@ -82,6 +82,7 @@ export function PulsarActionRow({
   action,
   className,
   description,
+  descriptionClassName,
   icon,
   title,
   titleClassName,
@@ -90,6 +91,7 @@ export function PulsarActionRow({
   action?: ReactNode
   className?: string
   description?: ReactNode
+  descriptionClassName?: string
   icon: IconComponent
   title: ReactNode
   titleClassName?: string
@@ -111,7 +113,12 @@ export function PulsarActionRow({
             {title}
           </p>
           {description ? (
-            <p className="truncate text-xs text-muted-foreground">
+            <p
+              className={cn(
+                "truncate",
+                descriptionClassName ?? "text-xs text-muted-foreground"
+              )}
+            >
               {description}
             </p>
           ) : null}

@@ -174,7 +174,6 @@ export async function getAdminSupportConversation(id: string) {
           identities: true,
           telegramProfile: true,
           subscription: true,
-          wallet: true,
           referralProfile: true,
           _count: { select: { sentInvites: true } },
         },

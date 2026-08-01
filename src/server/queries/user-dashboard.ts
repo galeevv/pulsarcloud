@@ -35,9 +35,8 @@ export async function getPricingView(userId: string): Promise<PreviewPricing> {
     lteMonthlyPriceRub: settings.lteMonthlyPriceMinor / 100,
     minDeviceLimit: settings.minDeviceLimit,
     maxDeviceLimit: settings.maxDeviceLimit,
-    minimalPayoutRub: settings.minimalPayoutMinor / 100,
     referralFriendDiscountPct: 0,
-    referralRewardRub: settings.referralRewardMinor / 100,
+    referralRewardDays: settings.referralRewardDays,
     referralTrialDays: settings.referralTrialDays,
   }
 }
@@ -69,15 +68,6 @@ export async function getSubscriptionView(
     lastUserFriendlyError: item.lastUserFriendlyError,
     lastTechnicalError: null,
   }
-}
-
-export async function getWalletBalanceView(userId: string) {
-  const wallet = await db.walletAccount.findUnique({
-    where: { userId },
-    select: { availableMinor: true },
-  })
-
-  return (wallet?.availableMinor ?? 0) / 100
 }
 
 export async function getLastPurchasePreferencesView(userId: string) {
@@ -116,14 +106,15 @@ export async function getReferralsView(userId: string) {
   const user = await db.user.findUniqueOrThrow({
     where: { id: userId },
     select: {
-      wallet: true,
       referralProfile: true,
       sentInvites: {
-        include: { invited: { include: { identities: true } }, reward: true },
+        include: {
+          invited: { include: { identities: true } },
+          subscriptionReward: true,
+        },
         orderBy: { createdAt: "desc" },
         take: 100,
       },
-      payouts: { orderBy: { createdAt: "desc" }, take: 50 },
     },
   })
   return {
@@ -135,31 +126,19 @@ export async function getReferralsView(userId: string) {
 }
 
 export async function getReferralSummaryView(userId: string) {
-  const now = new Date()
-  const [profile, invitedUsers, activeUsers, rewards, wallet] =
+  const [profile, invitedUsers, activeUsers, rewards] =
     await Promise.all([
       db.referralProfile.findUnique({ where: { userId } }),
       db.referralInvite.count({ where: { inviterUserId: userId } }),
       db.referralInvite.count({
         where: {
           inviterUserId: userId,
-          invited: {
-            subscription: {
-              is: {
-                status: { in: ["ACTIVE", "TRIAL"] },
-                expiresAt: { gt: now },
-              },
-            },
-          },
+          status: "PAID",
         },
       }),
-      db.referralReward.aggregate({
-        where: { inviterUserId: userId, status: { not: "REVERSED" } },
-        _sum: { amountMinor: true },
-      }),
-      db.walletAccount.findUnique({
-        where: { userId },
-        select: { availableMinor: true },
+      db.referralSubscriptionReward.aggregate({
+        where: { inviterUserId: userId },
+        _sum: { days: true },
       }),
     ])
 
@@ -177,7 +156,6 @@ export async function getReferralSummaryView(userId: string) {
         : null,
     invitedUsers,
     activeUsers,
-    rewardMinor: rewards._sum.amountMinor ?? 0,
-    availableMinor: wallet?.availableMinor ?? 0,
+    rewardDays: rewards._sum.days ?? 0,
   }
 }

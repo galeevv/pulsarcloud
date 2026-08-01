@@ -13,7 +13,6 @@ import { getSession } from "@/src/server/transport/web/session"
 import { db } from "@/src/server/infrastructure/db/client"
 import {
   createAndConfirmTestPayment,
-  createTestPayout,
   createTestUser,
   deleteTestData,
   expireTestSubscriptions,
@@ -181,12 +180,6 @@ export default async function AdminTestPage() {
                     <input type="hidden" name="userId" value={user.id} />
                     <Button size="sm" variant="outline">
                       Referral → first payment
-                    </Button>
-                  </form>
-                  <form action={createTestPayout}>
-                    <input type="hidden" name="userId" value={user.id} />
-                    <Button size="sm" variant="outline">
-                      Create payout
                     </Button>
                   </form>
                 </div>

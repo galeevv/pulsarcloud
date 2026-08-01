@@ -14,7 +14,6 @@ import {
   PackageIcon,
   SendIcon,
   UsersIcon,
-  WalletCardsIcon,
 } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
@@ -83,12 +82,6 @@ const navigation: Array<{ label: string; items: NavigationItem[] }> = [
         activePath: "/admin/payments",
       },
       {
-        label: "Выплаты",
-        href: "/admin/payouts",
-        icon: WalletCardsIcon,
-        activePath: "/admin/payouts",
-      },
-      {
         label: "Тарифы",
         href: "/admin/plans",
         icon: PackageIcon,
@@ -136,7 +129,6 @@ function pageTitle(pathname: string) {
   if (pathname.startsWith("/admin/dashboard")) return "Dashboard"
   if (pathname.startsWith("/admin/users")) return "Пользователи"
   if (pathname.startsWith("/admin/payments")) return "Платежи"
-  if (pathname.startsWith("/admin/payouts")) return "Выплаты"
   if (pathname.startsWith("/admin/plans")) return "Тарифы"
   if (pathname.startsWith("/admin/promos")) return "Промокампании"
   if (pathname.startsWith("/admin/support")) return "Поддержка"

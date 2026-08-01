@@ -14,6 +14,7 @@ const routeFiles = [
   "app/(dashboard)/profile/page.tsx",
   "app/(dashboard)/support/page.tsx",
   "app/(dashboard)/legal/page.tsx",
+  "app/(dashboard)/instructions/page.tsx",
 ]
 
 async function collectFiles(directory: string): Promise<string[]> {
@@ -56,6 +57,10 @@ test("navigation and primary preview interfaces remain wired", async () => {
   )
   assert.match(checkout, /<Drawer/)
   assert.match(checkout, /<Dialog/)
+  assert.match(checkout, /paymentMethod: "SBP"/)
+  assert.match(checkout, /type="submit"/)
+  assert.doesNotMatch(checkout, /<span>Оплатить<\/span>/)
+  assert.doesNotMatch(checkout, /CheckoutStep|setStep\("confirm"\)/)
 
   const profile = await readFile(
     path.join(root, "app/(dashboard)/profile/page.tsx"),
@@ -76,15 +81,131 @@ test("Happ connection actions use the subscription deeplink", async () => {
     path.join(root, "app/(dashboard)/subscription/page.tsx"),
     "utf8"
   )
-  const setup = await readFile(
-    path.join(root, "components/app/setup-vpn-action.tsx"),
+  const instructions = await readFile(
+    path.join(root, "components/app/instructions-flow.tsx"),
+    "utf8"
+  )
+  const home = await readFile(
+    path.join(root, "app/(dashboard)/home/page.tsx"),
     "utf8"
   )
 
   assert.ok(
     subscription.includes("href={`happ://add/${subscription.subscriptionUrl}`}")
   )
-  assert.ok(setup.includes("href={`happ://add/${effectiveSubscriptionUrl}`}"))
+  assert.ok(instructions.includes("href={`happ://add/${subscriptionUrl}`}"))
+  assert.match(instructions, /На этом устройстве/)
+  assert.match(instructions, /Настроить на \$\{detectedPlatform\}\?/)
+  assert.match(
+    instructions,
+    /Продолжите на этом устройстве или выберите другое/
+  )
+  assert.match(instructions, /size-18/)
+  assert.match(instructions, /size-7/)
+  assert.match(instructions, /Установите Happ/)
+  assert.match(instructions, /Установить HAPP/)
+  assert.match(instructions, /Добавьте подписку/)
+  assert.match(instructions, /InstructionStepHeading/)
+  assert.match(instructions, /border border-border\/70 bg-transparent/)
+  assert.match(instructions, /icon=\{DownloadIcon\}/)
+  assert.match(instructions, /icon=\{Link2Icon\}/)
+  assert.match(instructions, /icon=\{CheckCircle2Icon\}/)
+  assert.match(
+    instructions,
+    /После установки вернитесь сюда, чтобы добавить подписку/
+  )
+  assert.doesNotMatch(instructions, /SubscriptionUrlCard/)
+  assert.match(instructions, /Поменяйте регион App Store/)
+  assert.match(instructions, /useSyncExternalStore/)
+  for (const platform of ["Android", "iOS", "Windows", "macOS"]) {
+    assert.ok(instructions.includes(platform), `missing ${platform} flow`)
+  }
+  assert.ok(instructions.includes("disabled={!subscriptionUrl}"))
+  assert.doesNotMatch(instructions, /progressByStep|Прогресс настройки/)
+  assert.match(instructions, /className="mt-auto grid shrink-0/)
+  assert.match(home, /Приглашайте друзей/)
+  assert.match(home, /Получайте \{formatBonusDaysLabel/)
+
+  const instructionsPage = await readFile(
+    path.join(root, "app/(dashboard)/instructions/page.tsx"),
+    "utf8"
+  )
+  assert.doesNotMatch(instructionsPage, /PulsarAssetCard|\/hero\/pulsar\.gif/)
+  assert.match(instructionsPage, /<Card className=/)
+  assert.match(instructionsPage, /<SubscriptionStatusPoller/)
+  assert.match(instructionsPage, /paymentStatus === "success"/)
+
+  const referralMetrics = await readFile(
+    path.join(root, "components/app/referrals-metrics.tsx"),
+    "utf8"
+  )
+  const referrals = await readFile(
+    path.join(root, "app/(dashboard)/referrals/page.tsx"),
+    "utf8"
+  )
+  assert.match(referralMetrics, /label: "Награды"/)
+  assert.match(referralMetrics, /icon: GiftIcon/)
+  assert.doesNotMatch(referralMetrics, /CalendarPlusIcon/)
+  assert.doesNotMatch(referralMetrics, /<Card/)
+  assert.match(referralMetrics, /Другу \$\{friendTrialLabel\} бесплатно/)
+  assert.match(referralMetrics, /Вам \+\$\{formatBonusDaysLabel/)
+  assert.match(referralMetrics, /Вы получили \$\{formatBonusDaysLabel/)
+  assert.match(referralMetrics, /За \$\{formatInvitedFriendsLabel/)
+  assert.doesNotMatch(referralMetrics, /<Empty /)
+  assert.doesNotMatch(referralMetrics, /Пока нет наград/)
+  assert.doesNotMatch(referralMetrics, /hasRewards|return null/)
+  assert.match(referralMetrics, /<PulsarActionRow/)
+  assert.match(referralMetrics, /Условия и бонусы/)
+  assert.match(referralMetrics, /descriptionClassName="text-foreground"/)
+  assert.match(referrals, /Пригласите друга по вашей ссылке/)
+  assert.match(referralMetrics, /Детальная аналитика/)
+  assert.doesNotMatch(
+    referralMetrics,
+    /Приглашения, активные друзья и начисленные награды/
+  )
+  assert.match(referralMetrics, /<TabsList/)
+  assert.match(referralMetrics, /<TabsTrigger/)
+  assert.doesNotMatch(referrals, /<Carousel/)
+  assert.match(
+    instructions,
+    /\/instructions\/app-store\/apple-country-region\.png/
+  )
+  assert.match(
+    instructions,
+    /\/instructions\/app-store\/apple-account-information\.png/
+  )
+  assert.match(instructions, /https:\/\/support\.apple\.com\/ru-ru\/118283/)
+  assert.doesNotMatch(instructions, /region-account|region-country|журнал T2/)
+  for (const step of [
+    "Откройте приложение «Настройки».",
+    "Нажмите на свое имя, а затем — «Контент и покупки».",
+    "Нажмите «Просмотреть». Может потребоваться выполнить вход.",
+    "Нажмите «Страна/регион».",
+    "Выберите новую страну или регион.",
+    "Нажмите «Изменить страну или регион».",
+    "Выберите новую страну или регион, затем просмотрите положения и условия.",
+    "Нажмите «Принимаю» в верхнем правом углу, затем снова нажмите «Принимаю» для подтверждения.",
+  ]) {
+    assert.ok(instructions.includes(step))
+  }
+  for (const step of [
+    "Откройте приложение Apple Music или Apple TV.",
+    "Возможно, вам придется войти в Аккаунт Apple.",
+    "На странице «Информация об учетной записи» нажмите «Изменить страну или регион».",
+    "Введите новую платежную информацию* и адрес выставления счетов, затем нажмите «Продолжить».",
+  ]) {
+    assert.ok(instructions.includes(step))
+  }
+  assert.doesNotMatch(instructions, /Перед изменением региона/)
+  assert.equal(instructions.match(/<Card\b/g)?.length, 1)
+  assert.match(instructions, /<ol className="flex list-decimal/)
+  assert.match(instructions, /flex list-decimal flex-col gap-1/)
+  assert.doesNotMatch(instructions, /<CardTitle>Шаг/)
+  assert.match(instructions, /className="flex flex-1 items-center"/)
+  assert.match(instructions, /spacing=\{3\}/)
+  assert.match(instructions, /rounded-\[22px\]/)
+  assert.match(instructions, /border-border\/70/)
+  assert.match(instructions, /bg-transparent/)
 })
 
 test("authentication uses toast feedback and OTP auto-submit", async () => {
@@ -107,8 +228,10 @@ test("user routes keep accessible titles, headings, and navigation state", async
   )
   assert.match(navigation, /aria-current=/)
 
-  for (const route of routeFiles.filter((route) =>
-    route.startsWith("app/(dashboard)/")
+  for (const route of routeFiles.filter(
+    (route) =>
+      route.startsWith("app/(dashboard)/") &&
+      !route.endsWith("instructions/page.tsx")
   )) {
     const source = await readFile(path.join(root, route), "utf8")
     assert.match(source, /export const metadata/)
@@ -180,5 +303,15 @@ test("required backend route handlers are present", async () => {
       routes.some((file) => file.replaceAll("\\", "/").includes(required)),
       `missing route ${required}`
     )
+  }
+})
+
+test("wallet and payout runtime routes remain removed", async () => {
+  for (const removed of [
+    "app/api/wallet/payouts/route.ts",
+    "app/api/admin/payouts/[id]/details/route.ts",
+    "app/admin/(panel)/payouts/page.tsx",
+  ]) {
+    await assert.rejects(stat(path.join(root, removed)))
   }
 })

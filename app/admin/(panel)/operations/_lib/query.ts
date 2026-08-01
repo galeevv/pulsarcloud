@@ -27,12 +27,10 @@ const ENVIRONMENT_ENTITY_TYPES = new Set([
   "User",
   "Payment",
   "Subscription",
-  "PayoutRequest",
   "SupportConversation",
   "SupportMessage",
   "TelegramBroadcast",
   "LoginChallenge",
-  "WalletAccount",
   "OutboxJob",
 ])
 
@@ -345,12 +343,10 @@ async function resolveEnvironmentEntityKeys(
     users,
     payments,
     subscriptions,
-    payouts,
     conversations,
     messages,
     broadcasts,
     challenges,
-    wallets,
   ] = await Promise.all([
     findIds(ids("User"), (values) =>
       db.user.findMany({
@@ -370,15 +366,6 @@ async function resolveEnvironmentEntityKeys(
     ),
     findIds(ids("Subscription"), (values) =>
       db.subscription.findMany({
-        where: {
-          id: { in: values },
-          user: { is: { role: "USER", isTest } },
-        },
-        select: { id: true },
-      })
-    ),
-    findIds(ids("PayoutRequest"), (values) =>
-      db.payoutRequest.findMany({
         where: {
           id: { in: values },
           user: { is: { role: "USER", isTest } },
@@ -424,15 +411,6 @@ async function resolveEnvironmentEntityKeys(
         select: { id: true },
       })
     ),
-    findIds(ids("WalletAccount"), (values) =>
-      db.walletAccount.findMany({
-        where: {
-          id: { in: values },
-          user: { is: { role: "USER", isTest } },
-        },
-        select: { id: true },
-      })
-    ),
   ])
 
   const keys = new Set<string>()
@@ -440,12 +418,10 @@ async function resolveEnvironmentEntityKeys(
     ["User", users],
     ["Payment", payments],
     ["Subscription", subscriptions],
-    ["PayoutRequest", payouts],
     ["SupportConversation", conversations],
     ["SupportMessage", messages],
     ["TelegramBroadcast", broadcasts],
     ["LoginChallenge", challenges],
-    ["WalletAccount", wallets],
   ] as const)
     for (const row of rows) keys.add(entityKey(type, row.id))
 
@@ -503,8 +479,6 @@ function entityHref(input: {
   if (input.aggregateType === "User") return `/admin/users/${input.aggregateId}`
   if (input.aggregateType === "Payment")
     return `/admin/payments?q=${encodeURIComponent(input.aggregateId)}&period=all`
-  if (input.aggregateType === "PayoutRequest")
-    return `/admin/payouts/${input.aggregateId}`
   if (input.aggregateType === "SupportConversation")
     return `/admin/support/${input.aggregateId}`
   if (input.aggregateType === "SupportMessage" && input.supportConversationId)

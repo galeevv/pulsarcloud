@@ -14,13 +14,11 @@ import {
   ShieldCheckIcon,
   SmartphoneIcon,
   UserRoundIcon,
-  WalletIcon,
 } from "lucide-react"
 import Link from "next/link"
 import { notFound } from "next/navigation"
 
 import { AdminSubscriptionDialog } from "@/components/admin/admin-subscription-dialog"
-import { WalletAdjustmentDialog } from "@/components/admin/wallet-adjustment-dialog"
 import { PulsarIconContainer } from "@/components/app/pulsar-primitives"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -83,11 +81,6 @@ export default async function AdminUserDetailsPage({
           inviter: { include: { identities: true, telegramProfile: true } },
         },
       },
-      wallet: {
-        include: {
-          ledgerEntries: { orderBy: { createdAt: "desc" }, take: 100 },
-        },
-      },
       supportConversation: {
         include: {
           messages: {
@@ -109,9 +102,6 @@ export default async function AdminUserDetailsPage({
         OR: [
           { actorId: id },
           { entityType: "User", entityId: id },
-          ...(user.wallet
-            ? [{ entityType: "WalletAccount", entityId: user.wallet.id }]
-            : []),
         ],
       },
       orderBy: { createdAt: "desc" },
@@ -119,7 +109,7 @@ export default async function AdminUserDetailsPage({
     }),
     db.referralInvite.count({ where: { inviterUserId: id } }),
     db.referralInvite.count({
-      where: { inviterUserId: id, reward: { isNot: null } },
+      where: { inviterUserId: id, status: "PAID" },
     }),
   ])
 
@@ -131,7 +121,6 @@ export default async function AdminUserDetailsPage({
   const title = telegram ?? email ?? "Пользователь Pulsar"
   const subtitle = telegram && email ? email : "Контактные данные не привязаны"
   const subscription = subscriptionView(user.subscription)
-  const availableMinor = user.wallet?.availableMinor ?? 0
 
   return (
     <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-4 px-4 pt-8 pb-4 md:px-6 md:pb-6">
@@ -188,12 +177,6 @@ export default async function AdminUserDetailsPage({
           note={subscription.note}
           icon={RadioTowerIcon}
           attention={subscription.attention}
-        />
-        <SummaryCard
-          label="Баланс"
-          value={formatPreviewRub(availableMinor / 100)}
-          note={`В резерве ${formatPreviewRub((user.wallet?.reservedMinor ?? 0) / 100)}`}
-          icon={WalletIcon}
         />
         <SummaryCard
           label="Рефералы"
@@ -349,30 +332,6 @@ export default async function AdminUserDetailsPage({
         </TabsContent>
 
         <TabsContent value="finance" className="flex flex-col gap-4">
-          <SectionCard
-            title="Внутренний баланс"
-            action={
-              <WalletAdjustmentDialog
-                availableMinor={availableMinor}
-                initialIdempotencyKey={randomUUID()}
-                userId={user.id}
-              />
-            }
-          >
-            <div className="grid gap-3 sm:grid-cols-2">
-              <ValuePanel
-                label="Доступно"
-                value={formatPreviewRub(availableMinor / 100)}
-              />
-              <ValuePanel
-                label="В резерве"
-                value={formatPreviewRub(
-                  (user.wallet?.reservedMinor ?? 0) / 100
-                )}
-              />
-            </div>
-          </SectionCard>
-
           <SectionCard title="Платежи">
             <CompactTable
               headers={["Дата", "Статус", "Сумма", "Параметры"]}
@@ -386,18 +345,6 @@ export default async function AdminUserDetailsPage({
             />
           </SectionCard>
 
-          <SectionCard title="История баланса">
-            <CompactTable
-              headers={["Дата", "Операция", "Доступно", "Резерв"]}
-              rows={(user.wallet?.ledgerEntries ?? []).map((item) => [
-                dateTime(item.createdAt),
-                item.type,
-                signedRub(item.deltaAvailableMinor),
-                signedRub(item.deltaReservedMinor),
-              ])}
-              empty="Операций по балансу пока нет."
-            />
-          </SectionCard>
         </TabsContent>
 
         <TabsContent value="history" className="flex flex-col gap-4">
@@ -537,15 +484,6 @@ function DetailRow({
           {value}
         </span>
       </span>
-    </div>
-  )
-}
-
-function ValuePanel({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="soft-panel flex flex-col gap-1 px-4 py-3">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="text-xl font-semibold tabular-nums">{value}</span>
     </div>
   )
 }
@@ -722,12 +660,6 @@ function referralCountLabel(count: number) {
 
 function initials(value: string) {
   return value.replace(/^@/, "").slice(0, 2).toUpperCase()
-}
-
-function signedRub(valueMinor: number) {
-  const value = formatPreviewRub(Math.abs(valueMinor) / 100)
-  if (!valueMinor) return value
-  return `${valueMinor > 0 ? "+" : "−"}${value}`
 }
 
 function date(value: Date) {
