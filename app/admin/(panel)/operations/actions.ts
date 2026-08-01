@@ -76,17 +76,6 @@ async function jobBelongsToEnvironment(
       })
     )
 
-  if (job.aggregateType === "PayoutRequest")
-    return Boolean(
-      await tx.payoutRequest.findFirst({
-        where: {
-          id: job.aggregateId,
-          user: { is: { role: "USER", isTest } },
-        },
-        select: { id: true },
-      })
-    )
-
   if (job.aggregateType === "SupportConversation")
     return Boolean(
       await tx.supportConversation.findFirst({

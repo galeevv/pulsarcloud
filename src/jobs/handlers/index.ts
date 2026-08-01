@@ -703,17 +703,13 @@ export async function handleJob(job: Job) {
             showAlert = true
           } else {
             const screen =
-              callback.action === "menu:site-login" ||
-              callback.action === "menu:payout-login"
+              callback.action === "menu:site-login"
                 ? getTelegramWebsiteScreen(
                     (
                       await issueTelegramWebsiteLogin({
                         telegramId: fromId,
                         chatId: chat.id,
-                        returnTo:
-                          callback.action === "menu:payout-login"
-                            ? "/referrals"
-                            : "/home",
+                        returnTo: "/home",
                       })
                     ).url
                   )

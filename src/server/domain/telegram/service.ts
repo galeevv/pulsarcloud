@@ -6,7 +6,6 @@ export const telegramCallbackActions = [
   "menu:home",
   "menu:referrals",
   "menu:site-login",
-  "menu:payout-login",
 ] as const
 
 export type TelegramCallbackAction = (typeof telegramCallbackActions)[number]
@@ -68,12 +67,6 @@ function planText(months: number | null) {
   return months
     ? `${months} ${plural(months, "месяц", "месяца", "месяцев")}`
     : null
-}
-
-function rublesFromMinor(value: number) {
-  return new Intl.NumberFormat("ru-RU", {
-    maximumFractionDigits: 0,
-  }).format(Math.floor(value / 100))
 }
 
 export function telegramMainPhotoUrl() {
@@ -197,7 +190,7 @@ async function getReferralsScreen(userId: string): Promise<TelegramScreen> {
     "",
     `👥 Приглашено: <b>${summary.invitedUsers}</b>`,
     `🟢 Активных: <b>${summary.activeUsers}</b>`,
-    `💰 Баланс: <b>${rublesFromMinor(summary.availableMinor)} ₽</b>`,
+    `🎁 Получено дней: <b>${summary.rewardDays}</b>`,
   ]
   if (summary.inviteUrl && summary.telegramInviteUrl)
     lines.push(
@@ -216,7 +209,6 @@ async function getReferralsScreen(userId: string): Promise<TelegramScreen> {
     parseMode: "HTML",
     replyMarkup: {
       inline_keyboard: [
-        [{ text: "💸 Вывести", callback_data: "menu:payout-login" }],
         [{ text: "‹ Назад", callback_data: "menu:home" }],
       ],
     },

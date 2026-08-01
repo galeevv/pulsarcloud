@@ -9,12 +9,10 @@ const SCOPED_ENTITY_TYPES = new Set([
   "User",
   "Payment",
   "Subscription",
-  "PayoutRequest",
   "SupportConversation",
   "SupportMessage",
   "TelegramBroadcast",
   "LoginChallenge",
-  "WalletAccount",
   "OutboxJob",
 ])
 
@@ -95,13 +93,10 @@ function telegramLabel(identities: Identity[]) {
 
 function auditActionLabel(action: string) {
   const labels: Record<string, string> = {
-    ADMIN_WALLET_ADJUSTED: "Скорректирован баланс пользователя",
     BROADCAST_CANCELED: "Отменена Telegram-рассылка",
     BROADCAST_DRAFT_CREATED: "Создан черновик Telegram-рассылки",
     BROADCAST_QUEUED: "Telegram-рассылка поставлена в очередь",
     JOB_RETRIED: "Задание отправлено на повтор",
-    PAYOUT_PAID: "Выплата отмечена выполненной",
-    PAYOUT_REJECTED: "Выплата отклонена",
     SUBSCRIPTION_EXTENDED: "Подписка изменена администратором",
     USER_SESSIONS_REVOKED: "Сессии пользователя отозваны",
     USER_STATUS_CHANGED: "Статус пользователя изменён",
@@ -143,7 +138,6 @@ export async function getAdminDashboardView() {
     trialSubscriptions,
     revenueThisMonth,
     revenuePreviousMonth,
-    pendingPayouts,
     openSupportConversations,
     failedJobs,
     failedSubscriptionSyncs,
@@ -211,14 +205,6 @@ export async function getAdminDashboardView() {
         },
       },
       _sum: { amountMinor: true },
-    }),
-    db.payoutRequest.count({
-      where: {
-        status: { in: ["PENDING", "APPROVED"] },
-        user: {
-          is: { role: "USER", isTest: config.testMode },
-        },
-      },
     }),
     db.supportConversation.findMany({
       where: {
@@ -371,7 +357,7 @@ export async function getAdminDashboardView() {
     (conversation) => conversation.messages[0]?.authorRole === "USER"
   ).length
   const attentionTotal =
-    pendingPayouts + openSupport + failedJobs.length + failedSubscriptionSyncs
+    openSupport + failedJobs.length + failedSubscriptionSyncs
   const adminActivityTitle = config.admin.telegramUsername
     ? config.admin.telegramUsername.startsWith("@")
       ? config.admin.telegramUsername
@@ -441,7 +427,6 @@ export async function getAdminDashboardView() {
       attentionTotal,
     },
     attention: {
-      pendingPayouts,
       openSupport,
       failedJobs: failedJobs.length,
       failedSubscriptionSyncs,
@@ -552,12 +537,10 @@ async function resolveEnvironmentEntityKeys(
     users,
     payments,
     subscriptions,
-    payouts,
     conversations,
     messages,
     broadcasts,
     challenges,
-    wallets,
   ] = await Promise.all([
     findIds(ids("User"), (values) =>
       db.user.findMany({
@@ -577,15 +560,6 @@ async function resolveEnvironmentEntityKeys(
     ),
     findIds(ids("Subscription"), (values) =>
       db.subscription.findMany({
-        where: {
-          id: { in: values },
-          user: { is: { role: "USER", isTest } },
-        },
-        select: { id: true },
-      })
-    ),
-    findIds(ids("PayoutRequest"), (values) =>
-      db.payoutRequest.findMany({
         where: {
           id: { in: values },
           user: { is: { role: "USER", isTest } },
@@ -633,15 +607,6 @@ async function resolveEnvironmentEntityKeys(
         select: { id: true },
       })
     ),
-    findIds(ids("WalletAccount"), (values) =>
-      db.walletAccount.findMany({
-        where: {
-          id: { in: values },
-          user: { is: { role: "USER", isTest } },
-        },
-        select: { id: true },
-      })
-    ),
   ])
 
   const keys = new Set<string>()
@@ -649,12 +614,10 @@ async function resolveEnvironmentEntityKeys(
     ["User", users],
     ["Payment", payments],
     ["Subscription", subscriptions],
-    ["PayoutRequest", payouts],
     ["SupportConversation", conversations],
     ["SupportMessage", messages],
     ["TelegramBroadcast", broadcasts],
     ["LoginChallenge", challenges],
-    ["WalletAccount", wallets],
   ] as const)
     for (const row of rows) keys.add(entityKey(type, row.id))
 

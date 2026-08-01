@@ -9,7 +9,6 @@ import {
   RadioTowerIcon,
   SmartphoneIcon,
   UserRoundIcon,
-  WalletIcon,
 } from "lucide-react"
 import Link from "next/link"
 import { notFound } from "next/navigation"
@@ -42,7 +41,6 @@ import {
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller"
 import { Separator } from "@/components/ui/separator"
-import { formatPreviewRub } from "@/src/frontend-preview/format"
 
 import {
   getAdminSupportConversation,
@@ -257,11 +255,6 @@ export default async function AdminSupportConversationPage({
               value={
                 user.subscription ? dateTime(user.subscription.expiresAt) : "—"
               }
-            />
-            <InfoRow
-              icon={WalletIcon}
-              label="Доступный баланс"
-              value={formatPreviewRub((user.wallet?.availableMinor ?? 0) / 100)}
             />
           </InfoCard>
 

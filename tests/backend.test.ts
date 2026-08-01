@@ -67,7 +67,7 @@ async function loadModules() {
     auth,
     billing,
     users,
-    wallet,
+    referrals,
     jobs,
     support,
     subscriptions,
@@ -80,7 +80,7 @@ async function loadModules() {
     import("@/src/server/domain/auth/service"),
     import("@/src/server/domain/billing/service"),
     import("@/src/server/domain/users/service"),
-    import("@/src/server/domain/wallet/service"),
+    import("@/src/server/domain/referrals/service"),
     import("@/src/jobs/handlers"),
     import("@/src/server/domain/support/service"),
     import("@/src/server/domain/subscriptions/service"),
@@ -98,6 +98,22 @@ async function loadModules() {
       ...input,
       ...(await billing.getCheckoutExpectation(input)),
     })
+  const archivedWallet = {
+    async adjustWalletBalanceByAdmin(input: unknown) {
+      void input
+      throw new Error("Internal balance is archived")
+      return { applied: false, availableMinor: 0, ledgerEntryId: "archived" }
+    },
+    async createPayout(input: unknown) {
+      void input
+      throw new Error("Payouts are archived")
+      return { id: "archived" }
+    },
+    async transitionPayout(input: unknown) {
+      void input
+      throw new Error("Payouts are archived")
+    },
+  }
   return {
     db,
     initializeDatabase,
@@ -110,7 +126,8 @@ async function loadModules() {
       rawCreateCheckout: billing.createCheckout,
     },
     users,
-    wallet,
+    referrals,
+    wallet: archivedWallet,
     jobs,
     support,
     subscriptions,
@@ -589,7 +606,7 @@ test("referral happy path is idempotent through provisioning", async () => {
   const trial = await modules.db.trialGrant.findUnique({
     where: { userId: login.userId },
   })
-  assert.equal(trial?.days, 3)
+  assert.equal(trial?.days, 1)
   assert.equal(
     (
       await modules.db.subscription.findUniqueOrThrow({
@@ -621,20 +638,19 @@ test("referral happy path is idempotent through provisioning", async () => {
     await modules.db.subscriptionEvent.count({
       where: { paymentId: payment.id },
     }),
-    1
+    2
   )
-  const reward = await modules.db.referralReward.findUnique({
+  const reward = await modules.db.referralSubscriptionReward.findUnique({
     where: { paymentId: payment.id },
   })
-  assert.equal(reward?.amountMinor, 7_500)
-  assert.equal(
-    (
-      await modules.db.walletAccount.findUniqueOrThrow({
-        where: { userId: inviter.id },
-      })
-    ).availableMinor,
-    7_500
-  )
+  assert.equal(reward?.days, 10)
+  const inviterSubscription = await modules.db.subscription.findUniqueOrThrow({
+    where: { userId: inviter.id },
+  })
+  assert.equal(inviterSubscription.lteEnabled, false)
+  assert.equal(inviterSubscription.deviceLimit, 1)
+  assert.ok(inviterSubscription.expiresAt.getTime() > Date.now() + 9 * 86_400_000)
+  const inviterExpiresAt = inviterSubscription.expiresAt
   const job = await modules.db.outboxJob.findFirstOrThrow({
     where: {
       type: "PROVISION_SUBSCRIPTION",
@@ -667,7 +683,7 @@ test("referral happy path is idempotent through provisioning", async () => {
     await modules.db.subscriptionEvent.count({
       where: { paymentId: payment.id },
     }),
-    1
+    2
   )
   const replayed = await modules.billing.rawCreateCheckout({
     userId: login.userId,
@@ -693,9 +709,243 @@ test("referral happy path is idempotent through provisioning", async () => {
       }),
     /different order|conflict/i
   )
+
+  const secondPayment = await modules.billing.createCheckout({
+    userId: login.userId,
+    durationMonths: 1,
+    deviceLimit: 1,
+    lteEnabled: false,
+    idempotencyKey: "happy-payment-two",
+  })
+  await modules.billing.applyPaymentEvent({
+    ...event,
+    eventId: "happy-confirmed-two",
+    externalPaymentId: secondPayment.externalPaymentId!,
+    amountMinor: secondPayment.amountMinor,
+    payload: { id: secondPayment.externalPaymentId, status: "CONFIRMED" },
+  })
+  assert.equal(
+    await modules.db.referralSubscriptionReward.count({
+      where: { inviteId: reward!.inviteId },
+    }),
+    1
+  )
+  assert.equal(
+    (
+      await modules.db.subscription.findUniqueOrThrow({
+        where: { userId: inviter.id },
+      })
+    ).expiresAt.getTime(),
+    inviterExpiresAt.getTime()
+  )
+
+  await modules.billing.applyPaymentEvent({
+    ...event,
+    eventId: "happy-refunded",
+    eventType: "REFUNDED",
+    status: "REFUNDED",
+  })
+  assert.equal(
+    (
+      await modules.db.subscription.findUniqueOrThrow({
+        where: { userId: inviter.id },
+      })
+    ).expiresAt.getTime(),
+    inviterExpiresAt.getTime()
+  )
+  assert.equal(
+    await modules.db.referralSubscriptionReward.count({
+      where: { inviteId: reward!.inviteId },
+    }),
+    1
+  )
 })
 
-test("internal balance atomically pays for and activates a subscription", async () => {
+test("referral days extend the inviter without replacing connection parameters", async () => {
+  const now = new Date()
+  const inviter = await modules.db.$transaction((tx) =>
+    modules.users.createUserGraph(tx, { isTest: true })
+  )
+  const originalExpiresAt = new Date(now.getTime() + 5 * 86_400_000)
+  await modules.db.subscription.create({
+    data: {
+      userId: inviter.id,
+      status: "ACTIVE",
+      startedAt: new Date(now.getTime() - 25 * 86_400_000),
+      expiresAt: originalExpiresAt,
+      deviceLimit: 4,
+      lteEnabled: true,
+      subscriptionUrl: "https://subscription.example.test/unchanged-token",
+      remnawaveUserId: `referral-inviter-${inviter.id}`,
+      syncStatus: "SYNCED",
+      syncVersion: 7,
+    },
+  })
+  const profile = await modules.db.referralProfile.update({
+    where: { userId: inviter.id },
+    data: { isEnabled: true, enabledAt: now },
+  })
+  const requested = await modules.auth.requestEmailChallenge({
+    email: "referral-preserve@example.com",
+    inviteCode: profile.inviteCode,
+  })
+  const friend = await modules.auth.verifyEmailChallenge({
+    challengeId: requested.challengeId,
+    otp: requested.devOtp!,
+  })
+  const payment = await modules.billing.createCheckout({
+    userId: friend.userId,
+    durationMonths: 1,
+    deviceLimit: 1,
+    lteEnabled: false,
+    idempotencyKey: "referral-preserve-payment",
+  })
+  await modules.billing.applyPaymentEvent({
+    eventId: "referral-preserve-confirmed",
+    eventType: "CONFIRMED",
+    externalPaymentId: payment.externalPaymentId!,
+    status: "CONFIRMED",
+    amountMinor: payment.amountMinor,
+    currency: payment.currency,
+    payload: { id: payment.externalPaymentId, status: "CONFIRMED" },
+  })
+
+  const subscription = await modules.db.subscription.findUniqueOrThrow({
+    where: { userId: inviter.id },
+  })
+  assert.equal(subscription.deviceLimit, 4)
+  assert.equal(subscription.lteEnabled, true)
+  assert.equal(
+    subscription.subscriptionUrl,
+    "https://subscription.example.test/unchanged-token"
+  )
+  assert.equal(subscription.remnawaveUserId, `referral-inviter-${inviter.id}`)
+  assert.equal(subscription.syncVersion, 8)
+  assert.equal(subscription.syncStatus, "PENDING")
+  assert.equal(
+    subscription.expiresAt.getTime(),
+    originalExpiresAt.getTime() + 10 * 86_400_000
+  )
+  assert.equal(
+    await modules.db.outboxJob.count({
+      where: { dedupeKey: `subscription:${subscription.id}:sync:8` },
+    }),
+    1
+  )
+})
+
+test("referral days reactivate an expired inviter from the current time", async () => {
+  const now = new Date("2026-08-01T12:00:00.000Z")
+  const [inviter, friend] = await modules.db.$transaction(async (tx) => [
+    await modules.users.createUserGraph(tx, { isTest: true }),
+    await modules.users.createUserGraph(tx, { isTest: true }),
+  ])
+  const expired = await modules.db.subscription.create({
+    data: {
+      userId: inviter.id,
+      status: "ACTIVE",
+      startedAt: new Date("2026-06-01T12:00:00.000Z"),
+      expiresAt: new Date("2026-07-01T12:00:00.000Z"),
+      deviceLimit: 3,
+      lteEnabled: true,
+      subscriptionUrl: "https://subscription.example.test/expired-token",
+      remnawaveUserId: `expired-${inviter.id}`,
+      syncStatus: "SYNCED",
+      syncVersion: 3,
+    },
+  })
+  const invite = await modules.db.referralInvite.create({
+    data: {
+      inviterUserId: inviter.id,
+      invitedUserId: friend.id,
+      inviteCodeSnapshot: "expired-invite",
+      status: "TRIAL_GRANTED",
+    },
+  })
+  const payment = await modules.db.payment.create({
+    data: {
+      userId: friend.id,
+      provider: "test",
+      externalPaymentId: `expired-payment-${friend.id}`,
+      idempotencyKey: `expired-payment-${friend.id}`,
+      status: "CONFIRMED",
+      amountMinor: 11_900,
+      currency: "RUB",
+      durationDays: 30,
+      deviceLimit: 1,
+      lteEnabled: false,
+      basePriceMinor: 11_900,
+      extraDevicesPriceMinor: 0,
+      ltePriceMinor: 0,
+      discountMinor: 0,
+      priceSnapshotJson: "{}",
+      pricingVersion: 4,
+      confirmedAt: now,
+      isTest: true,
+    },
+  })
+
+  await modules.db.$transaction((tx) =>
+    modules.referrals.grantReferralSubscriptionReward(tx, {
+      invitedUserId: friend.id,
+      paymentId: payment.id,
+      now,
+    })
+  )
+
+  const subscription = await modules.db.subscription.findUniqueOrThrow({
+    where: { userId: inviter.id },
+  })
+  assert.equal(subscription.id, expired.id)
+  assert.equal(subscription.status, "ACTIVE")
+  assert.equal(subscription.deviceLimit, 3)
+  assert.equal(subscription.lteEnabled, true)
+  assert.equal(
+    subscription.subscriptionUrl,
+    "https://subscription.example.test/expired-token"
+  )
+  assert.equal(
+    subscription.expiresAt.toISOString(),
+    "2026-08-11T12:00:00.000Z"
+  )
+  assert.equal(
+    (
+      await modules.db.referralInvite.findUniqueOrThrow({
+        where: { id: invite.id },
+      })
+    ).status,
+    "PAID"
+  )
+})
+
+test("new internal-balance checkout attempts are rejected", async () => {
+  const user = await modules.db.$transaction((tx) =>
+    modules.users.createUserGraph(tx, { isTest: true })
+  )
+  await assert.rejects(
+    () =>
+      modules.billing.rawCreateCheckout({
+        userId: user.id,
+        durationMonths: 1,
+        deviceLimit: 1,
+        lteEnabled: false,
+        paymentMethod: "WALLET" as never,
+        expectedAmountMinor: 11_900,
+        pricingVersion: 4,
+        idempotencyKey: "wallet-checkout-must-be-rejected",
+      }),
+    (error: unknown) =>
+      (error as { code?: string }).code === "PAYMENT_INVALID_PARAMETERS"
+  )
+  assert.equal(
+    await modules.db.payment.count({
+      where: { idempotencyKey: "wallet-checkout-must-be-rejected" },
+    }),
+    0
+  )
+})
+
+test.skip("legacy internal balance checkout is archived", async () => {
   const user = await modules.db.$transaction((tx) =>
     modules.users.createUserGraph(tx, { isTest: true })
   )
@@ -726,7 +976,7 @@ test("internal balance atomically pays for and activates a subscription", async 
     durationMonths: 1,
     deviceLimit: 3,
     lteEnabled: true,
-    paymentMethod: "WALLET",
+    paymentMethod: "WALLET" as never,
     idempotencyKey: "wallet-subscription-payment",
   })
   assert.equal(payment.amountMinor, 19_900)
@@ -790,7 +1040,7 @@ test("internal balance atomically pays for and activates a subscription", async 
     durationMonths: 1,
     deviceLimit: 3,
     lteEnabled: true,
-    paymentMethod: "WALLET",
+    paymentMethod: "WALLET" as never,
     expectedAmountMinor: 19_900,
     pricingVersion: 4,
     idempotencyKey: "wallet-interrupted-retry",
@@ -818,7 +1068,7 @@ test("internal balance atomically pays for and activates a subscription", async 
         durationMonths: 1,
         deviceLimit: 3,
         lteEnabled: true,
-        paymentMethod: "WALLET",
+        paymentMethod: "WALLET" as never,
         idempotencyKey: "wallet-subscription-insufficient",
       }),
     (error: unknown) =>
@@ -865,7 +1115,7 @@ test("stale checkout amount or pricing version cannot create a payment", async (
   )
 })
 
-test("admin wallet adjustments are atomic, idempotent, audited and never overdraw", async () => {
+test.skip("legacy wallet adjustments are archived", async () => {
   const admin = await modules.db.user.findFirstOrThrow({
     where: { role: "ADMIN" },
   })
@@ -984,7 +1234,7 @@ test("admin wallet adjustments are atomic, idempotent, audited and never overdra
   assert.equal(projection._sum.deltaAvailableMinor, 30_000)
 })
 
-test("wallet payout reserve, reject and paid preserve ledger projection", async () => {
+test.skip("legacy payouts are archived", async () => {
   const inviter = await modules.db.$transaction((tx) =>
     modules.users.createUserGraph(tx, { isTest: true })
   )
@@ -1183,9 +1433,8 @@ test("plain /start registers a shared user graph and reuses it", async () => {
   })
   const user = await modules.db.user.findUniqueOrThrow({
     where: { id: identity.userId },
-    include: { wallet: true, referralProfile: true, telegramProfile: true },
+    include: { referralProfile: true, telegramProfile: true },
   })
-  assert.ok(user.wallet)
   assert.ok(user.referralProfile)
   assert.equal(user.telegramProfile?.firstName, "Ирина")
   assert.equal(user.telegramProfile?.newsNotificationsEnabled, true)
@@ -1227,10 +1476,6 @@ test("plain /start registers a shared user graph and reuses it", async () => {
 test("Telegram main screen and referrals read the shared database", async () => {
   const identity = await modules.db.authIdentity.findUniqueOrThrow({
     where: { telegramId: "900000201" },
-  })
-  await modules.db.walletAccount.update({
-    where: { userId: identity.userId },
-    data: { availableMinor: 12_345 },
   })
   await modules.db.referralProfile.update({
     where: { userId: identity.userId },
@@ -1297,7 +1542,7 @@ test("Telegram main screen and referrals read the shared database", async () => 
   const events = modules.telegramGateway.getTestTelegramGatewayEvents()
   const edited = events.find((event) => event.type === "editMessageCaption")
   assert.ok(edited?.type === "editMessageCaption")
-  assert.match(edited.caption, /Баланс: <b>123 ₽<\/b>/)
+  assert.match(edited.caption, /Получено дней: <b>0<\/b>/)
   assert.match(edited.caption, /http:\/\/localhost:3000\/\?invite=/)
   assert.match(edited.caption, /https:\/\/t.me\/pulsar_test_bot\?start=ref_/)
   assert.doesNotMatch(JSON.stringify(edited.replyMarkup), /copy_text/)
@@ -2171,7 +2416,7 @@ test("pending payments get bounded idempotent reconciliation jobs", async () => 
   )
 })
 
-test("test adapters cannot mutate real-user billing, referrals or payouts", async () => {
+test("test adapters cannot mutate real-user billing or referrals", async () => {
   const realUser = await modules.db.$transaction((tx) =>
     modules.users.createUserGraph(tx, { isTest: false })
   )
@@ -2183,16 +2428,6 @@ test("test adapters cannot mutate real-user billing, referrals or payouts", asyn
         deviceLimit: 1,
         lteEnabled: false,
         idempotencyKey: "cross-mode-payment",
-      }),
-    /forbidden|войдите/i
-  )
-  await assert.rejects(
-    () =>
-      modules.wallet.createPayout({
-        userId: realUser.id,
-        amountMinor: 15_000,
-        details: "Real Bank 1234567890",
-        idempotencyKey: "cross-mode-payout",
       }),
     /forbidden|войдите/i
   )
@@ -2292,20 +2527,6 @@ test("test mode requires test payments and explicit isolated live Remnawave opt-
   process.env.DATABASE_URL = `file:${databaseFile.replaceAll("\\", "/")}`
   config.resetConfigForTests()
   config.getConfig()
-})
-
-test("invalid payout transitions are rejected before mutation", async () => {
-  const admin = await modules.db.user.findFirstOrThrow({
-    where: { role: "ADMIN" },
-  })
-  await assert.rejects(() =>
-    modules.wallet.transitionPayout({
-      payoutId: "not-used",
-      adminUserId: admin.id,
-      action: "INVALID" as "APPROVE",
-      correlationId: "invalid-action",
-    })
-  )
 })
 
 test("database permits only one open checkout per user", async () => {

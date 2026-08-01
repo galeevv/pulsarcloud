@@ -1,21 +1,14 @@
 import type { Metadata } from "next"
 import type { ComponentProps } from "react"
-import {
-  AlertCircleIcon,
-  InfoIcon,
-  KeyRoundIcon,
-  Link2Icon,
-  RadioIcon,
-} from "lucide-react"
-import { CopyButton } from "@/components/app/copy-button"
+import { AlertCircleIcon, InfoIcon, Link2Icon, RadioIcon } from "lucide-react"
 import { SubscriptionDevicesCard } from "@/components/app/subscription-devices-card"
 import {
   PulsarAssetCard,
-  PulsarActionRow,
   pulsarLinkButtonClass,
 } from "@/components/app/pulsar-primitives"
 import { SubscriptionPaymentAction } from "@/components/app/subscription-payment-action"
 import { SubscriptionStatusPoller } from "@/components/app/subscription-status-poller"
+import { SubscriptionUrlCard } from "@/components/app/subscription-url-card"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
   Empty,
@@ -30,7 +23,6 @@ import {
   getPricingView,
   getLastPurchasePreferencesView,
   getSubscriptionView,
-  getWalletBalanceView,
 } from "@/src/server/queries/user-dashboard"
 import { requireWebSession } from "@/src/server/transport/web/session"
 import type {
@@ -44,11 +36,10 @@ export const metadata: Metadata = {
 
 export default async function SubscriptionPage() {
   const session = await requireWebSession("USER")
-  const [subscription, settings, walletBalanceRub, lastPurchase] =
+  const [subscription, settings, lastPurchase] =
     await Promise.all([
       getSubscriptionView(session.userId),
       getPricingView(session.userId),
-      getWalletBalanceView(session.userId),
       getLastPurchasePreferencesView(session.userId),
     ])
   const status = subscription?.status ?? "NONE"
@@ -82,12 +73,11 @@ export default async function SubscriptionPage() {
         {!hasSubscriptionRecord ? (
           <SubscriptionEmptyState
             settings={settings}
-            walletBalanceRub={walletBalanceRub}
           />
         ) : subscription ? (
           <>
             {isConnectionReady ? (
-              <SubscriptionUrlCard url={subscription.subscriptionUrl} />
+              <SubscriptionUrlCard url={subscription.subscriptionUrl!} />
             ) : hasActiveSubscription ? (
               <SubscriptionProvisioningSkeleton />
             ) : null}
@@ -128,7 +118,6 @@ export default async function SubscriptionPage() {
             ) : (
               <SubscriptionPaymentAction
                 settings={settings}
-                walletBalanceRub={walletBalanceRub}
                 triggerLabel="Возобновить подписку"
                 initialDeviceLimit={lastPurchase?.deviceLimit}
                 initialLteEnabled={lastPurchase?.lteEnabled}
@@ -138,7 +127,6 @@ export default async function SubscriptionPage() {
         ) : (
           <SubscriptionEmptyState
             settings={settings}
-            walletBalanceRub={walletBalanceRub}
           />
         )}
       </PulsarAssetCard>
@@ -157,10 +145,8 @@ export default async function SubscriptionPage() {
 
 function SubscriptionEmptyState({
   settings,
-  walletBalanceRub,
 }: {
   settings: ComponentProps<typeof SubscriptionPaymentAction>["settings"]
-  walletBalanceRub: number
 }) {
   return (
     <Empty>
@@ -177,31 +163,10 @@ function SubscriptionEmptyState({
       <EmptyContent className="w-full">
         <SubscriptionPaymentAction
           settings={settings}
-          walletBalanceRub={walletBalanceRub}
           triggerLabel="Оплатить подписку"
         />
       </EmptyContent>
     </Empty>
-  )
-}
-
-function SubscriptionUrlCard({ url }: { url: string | null }) {
-  return (
-    <PulsarActionRow
-      icon={KeyRoundIcon}
-      title="Ключ подписки"
-      titleClassName="text-xs font-normal text-muted-foreground"
-      description={
-        <span className="font-mono text-sm text-foreground">
-          {url ? formatCompactSubscriptionUrl(url) : "Ссылка появится позже"}
-        </span>
-      }
-      action={
-        url ? (
-          <CopyButton value={url} label="Скопировать ключ" iconOnly />
-        ) : null
-      }
-    />
   )
 }
 
@@ -269,23 +234,5 @@ function getSubscriptionSummary(
 
   return {
     title: "Подписка",
-  }
-}
-
-function formatCompactSubscriptionUrl(url: string) {
-  try {
-    const parsedUrl = new URL(url)
-    const pathSegments = parsedUrl.pathname.split("/").filter(Boolean)
-    const token = pathSegments[pathSegments.length - 1] ?? ""
-
-    if (!token) {
-      return parsedUrl.host
-    }
-
-    return `${parsedUrl.host}/...${token.slice(-8)}`
-  } catch {
-    const token = url.split("/").filter(Boolean).at(-1) ?? ""
-
-    return token ? `...${token.slice(-10)}` : url
   }
 }

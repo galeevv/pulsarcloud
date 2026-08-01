@@ -13,7 +13,6 @@ export type ErrorCode =
   | "SUBSCRIPTION_UPGRADE_REQUIRES_PAYMENT"
   | "REFERRAL_INVALID_INVITE"
   | "REFERRAL_ALREADY_ASSIGNED"
-  | "WALLET_INSUFFICIENT_BALANCE"
   | "PAYOUT_BELOW_MINIMUM"
   | "ADMIN_FORBIDDEN"
   | "INTEGRATION_TEMPORARILY_UNAVAILABLE"
@@ -38,7 +37,6 @@ const friendlyMessages: Record<ErrorCode, string> = {
     "Изменение тарифа применится при следующем продлении.",
   REFERRAL_INVALID_INVITE: "Реферальная ссылка недействительна.",
   REFERRAL_ALREADY_ASSIGNED: "Пригласившего нельзя изменить.",
-  WALLET_INSUFFICIENT_BALANCE: "Недостаточно средств на внутреннем балансе.",
   PAYOUT_BELOW_MINIMUM: "Сумма меньше минимальной выплаты.",
   ADMIN_FORBIDDEN: "Доступ запрещён.",
   INTEGRATION_TEMPORARILY_UNAVAILABLE:

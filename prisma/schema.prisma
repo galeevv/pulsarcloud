@@ -204,6 +204,8 @@ model User {
   sentInvites             ReferralInvite[]            @relation("Inviter")
   referralRewards         ReferralReward[]            @relation("RewardInviter")
   receivedReferralRewards ReferralReward[]            @relation("RewardInvited")
+  referralSubscriptionRewards         ReferralSubscriptionReward[] @relation("SubscriptionRewardInviter")
+  receivedReferralSubscriptionRewards ReferralSubscriptionReward[] @relation("SubscriptionRewardInvited")
   subscription            Subscription?
   subscriptionEvents      SubscriptionEvent[]         @relation("SubscriptionActor")
   trialGrant              TrialGrant?
@@ -300,7 +302,8 @@ model PricingSettings {
   maxDeviceLimit               Int      @default(5)
   referralRewardMinor          Int      @default(7500)
   referralFriendDiscountPct    Int      @default(0)
-  referralTrialDays            Int      @default(3)
+  referralTrialDays            Int      @default(1)
+  referralRewardDays           Int      @default(10)
   minimalPayoutMinor           Int      @default(15000)
   version                      Int      @default(1)
   updatedAt                    DateTime @updatedAt
@@ -337,6 +340,7 @@ model Payment {
   webhookLogs            PaymentWebhookLog[]
   subscriptionEvents     SubscriptionEvent[]
   referralReward         ReferralReward?
+  referralSubscriptionReward ReferralSubscriptionReward?
 
   @@index([userId, createdAt])
   @@index([status, createdAt])
@@ -488,6 +492,7 @@ model ReferralInvite {
   invited                 User                 @relation("InvitedUser", fields: [invitedUserId], references: [id], onDelete: Restrict)
   trialGrant              TrialGrant?
   reward                  ReferralReward?
+  subscriptionReward      ReferralSubscriptionReward?
 
   @@index([inviterUserId, createdAt])
 }
@@ -508,6 +513,22 @@ model ReferralReward {
   payment       Payment              @relation(fields: [paymentId], references: [id], onDelete: Restrict)
 
   @@index([inviterUserId, status])
+}
+
+model ReferralSubscriptionReward {
+  id            String         @id @default(cuid())
+  inviteId      String         @unique
+  inviterUserId String
+  invitedUserId String
+  paymentId     String         @unique
+  days          Int
+  createdAt     DateTime       @default(now())
+  invite        ReferralInvite @relation(fields: [inviteId], references: [id], onDelete: Restrict)
+  inviter       User           @relation("SubscriptionRewardInviter", fields: [inviterUserId], references: [id], onDelete: Restrict)
+  invited       User           @relation("SubscriptionRewardInvited", fields: [invitedUserId], references: [id], onDelete: Restrict)
+  payment       Payment        @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  @@index([inviterUserId, createdAt])
 }
 
 model WalletAccount {

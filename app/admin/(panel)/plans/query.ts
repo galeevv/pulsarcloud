@@ -20,9 +20,8 @@ type PricingSnapshot = {
   availableDurations: DurationMonths[]
   minDeviceLimit: number
   maxDeviceLimit: number
-  referralRewardMinor: number
+  referralRewardDays: number
   referralTrialDays: number
-  minimalPayoutMinor: number
 }
 
 function parseDiscounts(value: string): Record<string, number> {
@@ -215,19 +214,14 @@ function pricingChanges(
     integer(next, "maxDeviceLimit")
   )
   add(
-    "Реферальная награда",
-    money(previous, "referralRewardMinor"),
-    money(next, "referralRewardMinor")
+    "Награда владельцу, дней",
+    integer(previous, "referralRewardDays"),
+    integer(next, "referralRewardDays")
   )
   add(
     "Пробный период",
     integer(previous, "referralTrialDays"),
     integer(next, "referralTrialDays")
-  )
-  add(
-    "Минимальная выплата",
-    money(previous, "minimalPayoutMinor"),
-    money(next, "minimalPayoutMinor")
   )
   return changes
 }
@@ -325,9 +319,8 @@ export async function getAdminPlansView() {
     availableDurations,
     minDeviceLimit: pricing.minDeviceLimit,
     maxDeviceLimit: pricing.maxDeviceLimit,
-    referralRewardMinor: pricing.referralRewardMinor,
+    referralRewardDays: pricing.referralRewardDays,
     referralTrialDays: pricing.referralTrialDays,
-    minimalPayoutMinor: pricing.minimalPayoutMinor,
   }
 
   return {

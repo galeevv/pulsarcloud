@@ -695,7 +695,7 @@ test(
         | {
             syncStatus: string
             subscriptionUrl: string | null
-            rewardMinor: number
+            rewardDays: number
             trialDays: number
             subscriptionEvents: number
           }
@@ -707,7 +707,7 @@ test(
           projection = projectionDb
             .prepare(
               `SELECT s."syncStatus", s."subscriptionUrl",
-                      iw."availableMinor" AS rewardMinor,
+                      rsr."days" AS rewardDays,
                       tg."days" AS trialDays,
                       (SELECT count(*) FROM "SubscriptionEvent" se
                        WHERE se."paymentId" = ?) AS subscriptionEvents
@@ -715,7 +715,7 @@ test(
                JOIN "Subscription" s ON s."userId" = friend."userId"
                JOIN "TrialGrant" tg ON tg."userId" = friend."userId"
                JOIN "ReferralInvite" ri ON ri."invitedUserId" = friend."userId"
-               JOIN "WalletAccount" iw ON iw."userId" = ri."inviterUserId"
+               JOIN "ReferralSubscriptionReward" rsr ON rsr."inviteId" = ri."id"
                WHERE friend."emailNormalized" = ?`
             )
             .get(friendPaymentId, "http-friend@pulsar.local") as
@@ -730,9 +730,9 @@ test(
 
       assert.equal(projection?.syncStatus, "SYNCED")
       assert.match(projection?.subscriptionUrl ?? "", /\/test\/sub\//)
-      assert.equal(projection?.rewardMinor, 7_500)
-      assert.equal(projection?.trialDays, 3)
-      assert.equal(projection?.subscriptionEvents, 1)
+      assert.equal(projection?.rewardDays, 10)
+      assert.equal(projection?.trialDays, 1)
+      assert.equal(projection?.subscriptionEvents, 2)
       const leaseDb = new BetterSqlite3(databaseFile, { readonly: true })
       const recovered = leaseDb
         .prepare(`SELECT "status", "attempts" FROM "OutboxJob" WHERE "id" = ?`)

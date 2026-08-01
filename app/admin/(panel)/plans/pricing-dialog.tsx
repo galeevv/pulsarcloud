@@ -257,11 +257,14 @@ export function PricingDialog({
                   error={state.fieldErrors?.maxDevices}
                   disabled={pending}
                 />
-                <MoneyField
+                <NumberField
                   id="pricing-referral-reward"
-                  name="referralRewardRub"
-                  label="Реферальная награда"
-                  defaultValue={rub(pricing.referralRewardMinor)}
+                  name="referralRewardDays"
+                  label="Награда владельцу, дней"
+                  min={1}
+                  max={365}
+                  defaultValue={pricing.referralRewardDays}
+                  error={state.fieldErrors?.referralRewardDays}
                   disabled={pending}
                 />
                 <NumberField
@@ -271,13 +274,7 @@ export function PricingDialog({
                   min={1}
                   max={365}
                   defaultValue={pricing.referralTrialDays}
-                  disabled={pending}
-                />
-                <MoneyField
-                  id="pricing-min-payout"
-                  name="minimalPayoutRub"
-                  label="Минимальная выплата"
-                  defaultValue={rub(pricing.minimalPayoutMinor)}
+                  error={state.fieldErrors?.referralTrialDays}
                   disabled={pending}
                 />
               </FieldGroup>

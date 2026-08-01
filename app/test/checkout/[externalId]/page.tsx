@@ -63,7 +63,11 @@ export default async function TestCheckout({
         currency: item.currency,
       },
     })
-    redirect("/subscription")
+    redirect(
+      status === "CONFIRMED"
+        ? "/instructions?payment=success"
+        : "/subscription?payment=failed"
+    )
   }
 
   return (

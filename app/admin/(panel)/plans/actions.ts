@@ -32,9 +32,8 @@ const pricingSchema = z
     available12: availabilitySchema,
     minDevices: z.coerce.number().int().min(1).max(5),
     maxDevices: z.coerce.number().int().min(1).max(5),
-    referralRewardRub: moneySchema,
+    referralRewardDays: z.coerce.number().int().min(1).max(365),
     referralTrialDays: z.coerce.number().int().min(1).max(365),
-    minimalPayoutRub: moneySchema,
     reason: z.string().trim().min(5).max(500),
     idempotencyKey: z.uuid(),
     expectedVersion: z.coerce.number().int().positive(),
@@ -67,6 +66,8 @@ export type PricingActionState = {
     planNames?: string
     availability?: string
     maxDevices?: string
+    referralRewardDays?: string
+    referralTrialDays?: string
     reason?: string
   }
 }
@@ -113,6 +114,8 @@ export async function updatePricingSettings(
           errors.available6?.[0] ??
           errors.available12?.[0],
         maxDevices: errors.maxDevices?.[0],
+        referralRewardDays: errors.referralRewardDays?.[0],
+        referralTrialDays: errors.referralTrialDays?.[0],
         reason: errors.reason?.[0],
       },
     }
@@ -147,9 +150,8 @@ export async function updatePricingSettings(
     availableDurationsJson: JSON.stringify(availableDurations),
     minDeviceLimit: value.minDevices,
     maxDeviceLimit: value.maxDevices,
-    referralRewardMinor: toMinor(value.referralRewardRub),
+    referralRewardDays: value.referralRewardDays,
     referralTrialDays: value.referralTrialDays,
-    minimalPayoutMinor: toMinor(value.minimalPayoutRub),
   }
 
   try {
@@ -183,9 +185,8 @@ export async function updatePricingSettings(
           nextValues.availableDurationsJson &&
         previous.minDeviceLimit === nextValues.minDeviceLimit &&
         previous.maxDeviceLimit === nextValues.maxDeviceLimit &&
-        previous.referralRewardMinor === nextValues.referralRewardMinor &&
-        previous.referralTrialDays === nextValues.referralTrialDays &&
-        previous.minimalPayoutMinor === nextValues.minimalPayoutMinor
+        previous.referralRewardDays === nextValues.referralRewardDays &&
+        previous.referralTrialDays === nextValues.referralTrialDays
 
       if (unchanged) return { version: previous.version, unchanged: true }
 
@@ -232,9 +233,8 @@ export async function updatePricingSettings(
               availableDurationsJson: previous.availableDurationsJson,
               minDeviceLimit: previous.minDeviceLimit,
               maxDeviceLimit: previous.maxDeviceLimit,
-              referralRewardMinor: previous.referralRewardMinor,
+              referralRewardDays: previous.referralRewardDays,
               referralTrialDays: previous.referralTrialDays,
-              minimalPayoutMinor: previous.minimalPayoutMinor,
             },
             next: nextValues,
           }),
