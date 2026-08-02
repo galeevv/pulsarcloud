@@ -1,6 +1,12 @@
 import type { Metadata } from "next"
+import Link from "next/link"
 import type { ComponentProps } from "react"
-import { AlertCircleIcon, InfoIcon, Link2Icon, RadioIcon } from "lucide-react"
+import {
+  AlertCircleIcon,
+  BookOpenIcon,
+  InfoIcon,
+  RadioIcon,
+} from "lucide-react"
 import { SubscriptionDevicesCard } from "@/components/app/subscription-devices-card"
 import {
   PulsarAssetCard,
@@ -36,12 +42,11 @@ export const metadata: Metadata = {
 
 export default async function SubscriptionPage() {
   const session = await requireWebSession("USER")
-  const [subscription, settings, lastPurchase] =
-    await Promise.all([
-      getSubscriptionView(session.userId),
-      getPricingView(session.userId),
-      getLastPurchasePreferencesView(session.userId),
-    ])
+  const [subscription, settings, lastPurchase] = await Promise.all([
+    getSubscriptionView(session.userId),
+    getPricingView(session.userId),
+    getLastPurchasePreferencesView(session.userId),
+  ])
   const status = subscription?.status ?? "NONE"
   const hasActiveSubscription =
     subscription && ["ACTIVE", "TRIAL"].includes(status)
@@ -71,9 +76,7 @@ export default async function SubscriptionPage() {
         )}
 
         {!hasSubscriptionRecord ? (
-          <SubscriptionEmptyState
-            settings={settings}
-          />
+          <SubscriptionEmptyState settings={settings} />
         ) : subscription ? (
           <>
             {isConnectionReady ? (
@@ -95,13 +98,10 @@ export default async function SubscriptionPage() {
 
             {hasActiveSubscription ? (
               isConnectionReady && subscription.subscriptionUrl ? (
-                <a
-                  href={`happ://add/${subscription.subscriptionUrl}`}
-                  className={pulsarLinkButtonClass()}
-                >
-                  <Link2Icon data-icon="inline-start" />
-                  Подключить в Happ
-                </a>
+                <Link href="/instructions" className={pulsarLinkButtonClass()}>
+                  <BookOpenIcon data-icon="inline-start" />
+                  Инструкция
+                </Link>
               ) : (
                 <>
                   <SubscriptionStatusPoller
@@ -125,9 +125,7 @@ export default async function SubscriptionPage() {
             )}
           </>
         ) : (
-          <SubscriptionEmptyState
-            settings={settings}
-          />
+          <SubscriptionEmptyState settings={settings} />
         )}
       </PulsarAssetCard>
 

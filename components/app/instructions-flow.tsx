@@ -19,13 +19,21 @@ import {
 
 import { buttonVariants, Button } from "@/components/ui/button"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { cn } from "@/lib/utils"
 
 type Platform = "Android" | "iOS" | "Windows" | "macOS"
+type VpnApp = "incy" | "happ"
 type Step =
-  "start" | "choose-device" | "apple-region" | "install" | "key" | "done"
+  | "start"
+  | "choose-device"
+  | "choose-app"
+  | "apple-region"
+  | "install"
+  | "key"
+  | "done"
 
 const platformOptions = [
   { value: "Android" as const, icon: SmartphoneIcon },
@@ -34,12 +42,39 @@ const platformOptions = [
   { value: "macOS" as const, icon: LaptopIcon },
 ]
 
-const installLinks: Record<Platform, string> = {
-  Android: "https://play.google.com/store/apps/details?id=com.happproxy",
-  iOS: "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215",
-  Windows:
-    "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe",
-  macOS: "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215",
+const appOptions = [
+  {
+    value: "incy" as const,
+    name: "Incy",
+    description: "Рекомендуемый способ подключения к Pulsar.",
+    badge: "Рекомендуем",
+    icon: "/instructions/apps/incy.webp",
+  },
+  {
+    value: "happ" as const,
+    name: "Happ",
+    description: "Альтернативное приложение для подключения.",
+    badge: "Поддерживается",
+    icon: "/instructions/apps/happ.webp",
+  },
+]
+
+const installLinks: Record<VpnApp, Record<Platform, string>> = {
+  incy: {
+    Android:
+      "https://play.google.com/store/apps/details?id=llc.itdev.incy&hl=ru",
+    iOS: "https://apps.apple.com/us/app/incy/id6756943388",
+    Windows:
+      "https://github.com/INCY-DEV/incy-platforms/releases/download/desktop-v3.3.9/incy-windows-setup.exe",
+    macOS: "https://apps.apple.com/us/app/incy/id6756943388",
+  },
+  happ: {
+    Android: "https://play.google.com/store/apps/details?id=com.happproxy",
+    iOS: "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215",
+    Windows:
+      "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe",
+    macOS: "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215",
+  },
 }
 
 function subscribe(listener: () => void) {
@@ -75,6 +110,13 @@ export function InstructionsFlow({
   const [step, setStep] = React.useState<Step>("start")
   const [, setHistory] = React.useState<Step[]>([])
   const [platform, setPlatform] = React.useState<Platform | null>(null)
+  const [vpnApp, setVpnApp] = React.useState<VpnApp>("incy")
+  const selectedAppName = vpnApp === "incy" ? "Incy" : "Happ"
+  const connectionUrl = subscriptionUrl
+    ? vpnApp === "incy"
+      ? `incy://import/${subscriptionUrl}`
+      : `happ://add/${subscriptionUrl}`
+    : null
 
   function go(nextStep: Step) {
     setHistory((current) => [...current, step])
@@ -91,11 +133,15 @@ export function InstructionsFlow({
 
   function continueWithPlatform(nextPlatform: Platform) {
     setPlatform(nextPlatform)
-    go(
-      nextPlatform === "iOS" || nextPlatform === "macOS"
-        ? "apple-region"
-        : "install"
-    )
+    setVpnApp("incy")
+    go("choose-app")
+  }
+
+  function continueWithApp() {
+    if (!platform) return
+    const needsAppStoreRegion =
+      vpnApp === "happ" && (platform === "iOS" || platform === "macOS")
+    go(needsAppStoreRegion ? "apple-region" : "install")
   }
 
   return (
@@ -145,6 +191,66 @@ export function InstructionsFlow({
           </section>
         ) : null}
 
+        {step === "choose-app" ? (
+          <section
+            className="flex flex-1 flex-col gap-5"
+            aria-labelledby="app-title"
+          >
+            <div className="flex flex-col gap-1">
+              <h1 id="app-title" className="text-xl font-semibold">
+                Выберите приложение
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                Мы рекомендуем Incy, но подписка также работает в Happ.
+              </p>
+            </div>
+            <div className="flex flex-1 items-center">
+              <ToggleGroup
+                value={[vpnApp]}
+                onValueChange={(values) =>
+                  values[0] && setVpnApp(values[0] as VpnApp)
+                }
+                orientation="vertical"
+                variant="outline"
+                spacing={3}
+                className="w-full items-stretch"
+                aria-label="Приложение для подключения"
+              >
+                {appOptions.map((option) => (
+                  <ToggleGroupItem
+                    key={option.value}
+                    value={option.value}
+                    className="h-auto min-h-20 w-full justify-start rounded-[18px] px-3 py-3 text-left"
+                  >
+                    <Image
+                      src={option.icon}
+                      alt=""
+                      width={48}
+                      height={48}
+                      className="size-12 shrink-0 rounded-[14px]"
+                    />
+                    <span className="flex min-w-0 flex-1 flex-col items-start gap-1 whitespace-normal">
+                      <span className="flex w-full flex-wrap items-center gap-2">
+                        <span className="font-medium">{option.name}</span>
+                        <Badge
+                          variant={
+                            option.value === "incy" ? "default" : "secondary"
+                          }
+                        >
+                          {option.badge}
+                        </Badge>
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {option.description}
+                      </span>
+                    </span>
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+            </div>
+          </section>
+        ) : null}
+
         {step === "apple-region" && platform ? (
           <AppleRegionStep platform={platform} />
         ) : null}
@@ -157,7 +263,7 @@ export function InstructionsFlow({
             <InstructionStepHeading
               titleId="install-title"
               icon={DownloadIcon}
-              title="Установите Happ"
+              title={`Установите ${selectedAppName}`}
               description="После установки вернитесь сюда, чтобы добавить подписку."
             />
           </section>
@@ -172,7 +278,7 @@ export function InstructionsFlow({
               titleId="key-title"
               icon={Link2Icon}
               title="Добавьте подписку"
-              description="Нажмите «Подключить в Happ», чтобы автоматически добавить подписку."
+              description={`Нажмите «Подключить в ${selectedAppName}», чтобы автоматически добавить подписку.`}
             />
             {!subscriptionUrl ? (
               <Alert>
@@ -239,7 +345,7 @@ export function InstructionsFlow({
         ) : null}
         {step === "install" && platform ? (
           <a
-            href={installLinks[platform]}
+            href={installLinks[vpnApp][platform]}
             target="_blank"
             rel="noopener noreferrer"
             className={cn(
@@ -248,20 +354,20 @@ export function InstructionsFlow({
             )}
           >
             <DownloadIcon data-icon="inline-start" />
-            Установить HAPP
+            Установить {selectedAppName}
             <ExternalLinkIcon data-icon="inline-end" />
           </a>
         ) : null}
-        {step === "key" && subscriptionUrl ? (
+        {step === "key" && connectionUrl ? (
           <a
-            href={`happ://add/${subscriptionUrl}`}
+            href={connectionUrl}
             className={cn(
               buttonVariants({ size: "lg" }),
               "col-span-2 h-11 w-full rounded-[18px]"
             )}
           >
             <Link2Icon data-icon="inline-start" />
-            Подключить в Happ
+            Подключить в {selectedAppName}
           </a>
         ) : null}
         {step !== "start" && step !== "done" ? (
@@ -277,6 +383,17 @@ export function InstructionsFlow({
           >
             <ArrowLeftIcon data-icon="inline-start" />
             Назад
+          </Button>
+        ) : null}
+        {step === "choose-app" ? (
+          <Button
+            type="button"
+            size="lg"
+            className="h-11 rounded-[18px]"
+            onClick={continueWithApp}
+          >
+            Продолжить
+            <ArrowRightIcon data-icon="inline-end" />
           </Button>
         ) : null}
         {step === "apple-region" || step === "install" ? (
