@@ -76,7 +76,7 @@ test("navigation and primary preview interfaces remain wired", async () => {
   assert.match(support, /SupportComposer/)
 })
 
-test("Happ connection actions use the subscription deeplink", async () => {
+test("Incy and Happ instruction flows use the correct links", async () => {
   const subscription = await readFile(
     path.join(root, "app/(dashboard)/subscription/page.tsx"),
     "utf8"
@@ -90,10 +90,38 @@ test("Happ connection actions use the subscription deeplink", async () => {
     "utf8"
   )
 
-  assert.ok(
-    subscription.includes("href={`happ://add/${subscription.subscriptionUrl}`}")
+  assert.match(subscription, /<Link href="\/instructions"/)
+  assert.match(subscription, /Инструкция/)
+  assert.doesNotMatch(subscription, /incy:\/\/import|happ:\/\/add/)
+  assert.match(instructions, /incy:\/\/import\/\$\{subscriptionUrl\}/)
+  assert.match(instructions, /happ:\/\/add\/\$\{subscriptionUrl\}/)
+  assert.match(instructions, /React\.useState<VpnApp>\("incy"\)/)
+  assert.match(instructions, /"choose-app"/)
+  assert.match(instructions, /Выберите приложение/)
+  assert.match(instructions, /Рекомендуем/)
+  assert.match(instructions, /Поддерживается/)
+  assert.match(instructions, /vpnApp === "happ"/)
+  assert.match(instructions, /platform === "iOS" \|\| platform === "macOS"/)
+  assert.match(
+    instructions,
+    /play\.google\.com\/store\/apps\/details\?id=llc\.itdev\.incy/
   )
-  assert.ok(instructions.includes("href={`happ://add/${subscriptionUrl}`}"))
+  assert.match(instructions, /apps\.apple\.com\/us\/app\/incy\/id6756943388/)
+  assert.match(instructions, /incy-windows-setup\.exe/)
+  assert.match(instructions, /\/instructions\/apps\/incy\.webp/)
+  assert.match(instructions, /\/instructions\/apps\/happ\.webp/)
+  assert.equal(
+    (
+      await stat(path.join(root, "public/instructions/apps/incy.webp"))
+    ).isFile(),
+    true
+  )
+  assert.equal(
+    (
+      await stat(path.join(root, "public/instructions/apps/happ.webp"))
+    ).isFile(),
+    true
+  )
   assert.match(instructions, /На этом устройстве/)
   assert.match(instructions, /Настроить на \$\{detectedPlatform\}\?/)
   assert.match(
@@ -102,8 +130,8 @@ test("Happ connection actions use the subscription deeplink", async () => {
   )
   assert.match(instructions, /size-18/)
   assert.match(instructions, /size-7/)
-  assert.match(instructions, /Установите Happ/)
-  assert.match(instructions, /Установить HAPP/)
+  assert.match(instructions, /Установите \$\{selectedAppName\}/)
+  assert.match(instructions, /Установить \{selectedAppName\}/)
   assert.match(instructions, /Добавьте подписку/)
   assert.match(instructions, /InstructionStepHeading/)
   assert.match(instructions, /border border-border\/70 bg-transparent/)
@@ -147,17 +175,19 @@ test("Happ connection actions use the subscription deeplink", async () => {
   assert.match(referralMetrics, /icon: GiftIcon/)
   assert.doesNotMatch(referralMetrics, /CalendarPlusIcon/)
   assert.doesNotMatch(referralMetrics, /<Card/)
-  assert.match(referralMetrics, /Другу \$\{friendTrialLabel\} бесплатно/)
-  assert.match(referralMetrics, /Вам \+\$\{formatBonusDaysLabel/)
-  assert.match(referralMetrics, /Вы получили \$\{formatBonusDaysLabel/)
-  assert.match(referralMetrics, /За \$\{formatInvitedFriendsLabel/)
+  assert.match(referralMetrics, /<PulsarIconContainer icon=\{UsersIcon\}/)
+  assert.match(referralMetrics, /\{friendTrialLabel\} бесплатно/)
+  assert.match(referralMetrics, /\+\{formatBonusDaysLabel\(ownerRewardDays\)\}/)
+  assert.match(referralMetrics, /<Badge variant="secondary">/)
+  assert.match(referralMetrics, /\{invitedValue\} приглашено/)
+  assert.match(referralMetrics, /\{earnedDays\} бонусных дней/)
   assert.doesNotMatch(referralMetrics, /<Empty /)
   assert.doesNotMatch(referralMetrics, /Пока нет наград/)
   assert.doesNotMatch(referralMetrics, /hasRewards|return null/)
-  assert.match(referralMetrics, /<PulsarActionRow/)
-  assert.match(referralMetrics, /Условия и бонусы/)
-  assert.match(referralMetrics, /descriptionClassName="text-foreground"/)
-  assert.match(referrals, /Пригласите друга по вашей ссылке/)
+  assert.doesNotMatch(referralMetrics, /<PulsarActionRow/)
+  assert.match(referralMetrics, /Условия реферальной программы/)
+  assert.match(referralMetrics, /variant="outline"/)
+  assert.match(referrals, /Ваша реферальная ссылка/)
   assert.match(referralMetrics, /Детальная аналитика/)
   assert.doesNotMatch(
     referralMetrics,

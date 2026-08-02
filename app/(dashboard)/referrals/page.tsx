@@ -118,12 +118,9 @@ export default async function ReferralsPage() {
           </h1>
         </div>
         {inviteUrl ? (
-          <section
-            className="flex flex-col gap-2"
-            aria-labelledby="invite-title"
-          >
-            <h2 id="invite-title" className="text-[16px] font-semibold">
-              Пригласите друга по вашей ссылке
+          <section className="flex flex-col" aria-labelledby="invite-title">
+            <h2 id="invite-title" className="sr-only">
+              Ваша реферальная ссылка
             </h2>
             <PulsarActionRow
               icon={Link2Icon}

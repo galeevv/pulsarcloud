@@ -7,7 +7,7 @@ import {
   UsersIcon,
 } from "lucide-react"
 
-import { PulsarActionRow } from "@/components/app/pulsar-primitives"
+import { PulsarIconContainer } from "@/components/app/pulsar-primitives"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
@@ -101,64 +101,49 @@ export function ReferralsMetrics({
   ]
 
   return (
-    <div className="flex flex-col gap-3">
-      <section
-        className="flex flex-col gap-2"
-        aria-labelledby="conditions-title"
-      >
-        <h2 id="conditions-title" className="text-[16px] font-semibold">
-          Условия и бонусы
+    <div className="flex flex-col gap-4">
+      <section aria-labelledby="conditions-title">
+        <h2 id="conditions-title" className="sr-only">
+          Условия реферальной программы
         </h2>
-        <div className="flex flex-col gap-3">
-          <ConditionsCard
-            friendTrialLabel={friendTrialLabel}
-            ownerRewardDays={ownerRewardDays}
-          />
-          <RewardsCard
-            earnedDays={earnedDays}
-            rewardedFriendsCount={rewards.length}
-          />
+        <div className="soft-panel flex flex-col overflow-hidden">
+          <div className="flex min-w-0 items-center gap-3 p-3">
+            <PulsarIconContainer icon={UsersIcon} />
+            <div className="min-w-0">
+              <p className="text-xs text-muted-foreground">Другу</p>
+              <p className="text-sm font-medium">
+                {friendTrialLabel} бесплатно
+              </p>
+            </div>
+          </div>
+          <Separator />
+          <div className="flex min-w-0 items-center gap-3 p-3">
+            <PulsarIconContainer icon={GiftIcon} />
+            <div className="min-w-0">
+              <p className="text-xs text-muted-foreground">Вам</p>
+              <p className="text-sm font-medium">
+                +{formatBonusDaysLabel(ownerRewardDays)}
+              </p>
+            </div>
+          </div>
         </div>
       </section>
       <Separator />
+      <div
+        className="flex flex-wrap items-center justify-center gap-2"
+        aria-label={`${invitedValue} приглашено, ${earnedDays} бонусных дней получено`}
+      >
+        <Badge variant="secondary">
+          <UsersIcon data-icon="inline-start" />
+          {invitedValue} приглашено
+        </Badge>
+        <Badge variant="secondary">
+          <GiftIcon data-icon="inline-start" />
+          {earnedDays} бонусных дней
+        </Badge>
+      </div>
       <AnalyticsDisclosure metrics={metrics} />
     </div>
-  )
-}
-
-function ConditionsCard({
-  friendTrialLabel,
-  ownerRewardDays,
-}: {
-  friendTrialLabel: string
-  ownerRewardDays: number
-}) {
-  return (
-    <PulsarActionRow
-      icon={UsersIcon}
-      title={`Другу ${friendTrialLabel} бесплатно.`}
-      titleClassName="font-normal text-foreground"
-      description={`Вам +${formatBonusDaysLabel(ownerRewardDays)}.`}
-      descriptionClassName="text-foreground"
-    />
-  )
-}
-
-function RewardsCard({
-  earnedDays,
-  rewardedFriendsCount,
-}: {
-  earnedDays: number
-  rewardedFriendsCount: number
-}) {
-  return (
-    <PulsarActionRow
-      icon={GiftIcon}
-      title={`Вы получили ${formatBonusDaysLabel(earnedDays)}.`}
-      titleClassName="font-normal text-foreground"
-      description={`За ${formatInvitedFriendsLabel(rewardedFriendsCount)}.`}
-      descriptionClassName="text-foreground"
-    />
   )
 }
 
@@ -167,14 +152,6 @@ function formatBonusDaysLabel(days: number) {
     "бонусный день",
     "бонусных дня",
     "бонусных дней",
-  ])}`
-}
-
-function formatInvitedFriendsLabel(count: number) {
-  return `${count} ${pluralizeRu(count, [
-    "приглашённого друга",
-    "приглашённых друзей",
-    "приглашённых друзей",
   ])}`
 }
 
