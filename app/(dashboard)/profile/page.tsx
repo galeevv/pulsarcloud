@@ -25,7 +25,11 @@ import {
   pulsarCtaClass,
 } from "@/components/app/pulsar-primitives"
 import { LoginMethodsManager } from "@/components/app/login-methods-manager"
-import { getProfileView } from "@/src/server/queries/user-dashboard"
+import { SupportUnreadDot } from "@/components/app/support-unread-dot"
+import {
+  getProfileView,
+  hasUnreadSupportReply,
+} from "@/src/server/queries/user-dashboard"
 import { requireWebSession } from "@/src/server/transport/web/session"
 
 export const metadata: Metadata = {
@@ -34,7 +38,10 @@ export const metadata: Metadata = {
 
 export default async function ProfilePage() {
   const session = await requireWebSession("USER")
-  const user = await getProfileView(session.userId)
+  const [user, hasUnreadSupport] = await Promise.all([
+    getProfileView(session.userId),
+    hasUnreadSupportReply(session.userId),
+  ])
   const email =
     user.identities.find((identity) => identity.provider === "EMAIL")
       ?.emailNormalized ?? null
@@ -71,7 +78,10 @@ export default async function ProfilePage() {
             description="Поможем с доступом и оплатой"
             className="transition-colors group-hover:bg-card/55"
             trailing={
-              <ChevronRightIcon className="size-4 text-muted-foreground transition-colors group-hover:text-foreground" />
+              <span className="flex items-center gap-3">
+                {hasUnreadSupport ? <SupportUnreadDot /> : null}
+                <ChevronRightIcon className="size-4 text-muted-foreground transition-colors group-hover:text-foreground" />
+              </span>
             }
           />
         </Link>

@@ -6,6 +6,7 @@ export type SupportThreadMessage = {
   createdAtDayKey: string
   createdAtDayLabel: string
   createdAtLabel: string
+  createdAtIso: string
   id: string
 }
 
@@ -47,6 +48,7 @@ export function toSupportThreadMessage(
     createdAtDayKey: dayKeyFormatter.format(createdAt),
     createdAtDayLabel: dayLabelFormatter.format(createdAt),
     createdAtLabel: timeFormatter.format(createdAt),
+    createdAtIso: createdAt.toISOString(),
     id: message.id,
   }
 }

@@ -51,7 +51,7 @@ export async function sendSupportMessage(input: {
         : existing?.workflowState === "ANSWERED" ||
             existing?.workflowState === "CLOSED"
           ? ("WAITING" as const)
-          : existing?.workflowState ?? ("NEW" as const)
+          : (existing?.workflowState ?? ("NEW" as const))
       const conversation = await tx.supportConversation.upsert({
         where: { userId: input.userId },
         create: {
@@ -75,6 +75,51 @@ export async function sendSupportMessage(input: {
           body,
         },
       })
+    })
+  )
+}
+
+export async function markSupportRepliesRead(input: {
+  userId: string
+  through: Date
+}) {
+  if (Number.isNaN(input.through.getTime()))
+    throw new BusinessError("INVALID_INPUT")
+
+  return withBusyRetry(() =>
+    db.$transaction(async (tx) => {
+      const conversation = await tx.supportConversation.findUnique({
+        where: { userId: input.userId },
+        select: {
+          id: true,
+          userLastReadAt: true,
+          messages: {
+            where: {
+              authorRole: "ADMIN",
+              isInternal: false,
+              createdAt: { lte: input.through },
+            },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+            take: 1,
+            select: { createdAt: true },
+          },
+        },
+      })
+      const renderedReplyAt = conversation?.messages[0]?.createdAt
+      if (
+        !conversation ||
+        !renderedReplyAt ||
+        (conversation.userLastReadAt &&
+          conversation.userLastReadAt >= renderedReplyAt)
+      ) {
+        return false
+      }
+
+      await tx.supportConversation.update({
+        where: { id: conversation.id },
+        data: { userLastReadAt: renderedReplyAt },
+      })
+      return true
     })
   )
 }

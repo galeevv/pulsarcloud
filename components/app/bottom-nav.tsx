@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation"
 import { GiftIcon, HomeIcon, RadioIcon, UserIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { SupportUnreadDot } from "@/components/app/support-unread-dot"
 
 const navItems = [
   {
@@ -34,7 +35,11 @@ const navItems = [
   },
 ]
 
-export function BottomNav() {
+export function BottomNav({
+  hasUnreadSupport = false,
+}: {
+  hasUnreadSupport?: boolean
+}) {
   const pathname = usePathname()
   const router = useRouter()
   const warmedAssets = React.useRef(new Set<string>())
@@ -94,12 +99,17 @@ export function BottomNav() {
               aria-label={item.label}
               aria-current={active ? "page" : undefined}
             >
-              <Icon
-                className={cn(
-                  "transition-colors",
-                  !active && "group-hover:text-foreground"
-                )}
-              />
+              <span className="relative flex items-center justify-center">
+                <Icon
+                  className={cn(
+                    "transition-colors",
+                    !active && "group-hover:text-foreground"
+                  )}
+                />
+                {item.href === "/profile" && hasUnreadSupport ? (
+                  <SupportUnreadDot className="absolute -top-1 -right-1 ring-2 ring-card" />
+                ) : null}
+              </span>
             </Link>
           )
         })}

@@ -588,6 +588,7 @@ model SupportConversation {
   channel       SupportChannel       @default(WEB)
   topic         String               @default("Обращение в поддержку")
   lastMessageAt DateTime             @default(now())
+  userLastReadAt DateTime?
   createdAt     DateTime             @default(now())
   updatedAt     DateTime             @updatedAt
   user          User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
