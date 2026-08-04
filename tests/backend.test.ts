@@ -74,6 +74,7 @@ async function loadModules() {
     telegramWebhook,
     telegramGateway,
     security,
+    userDashboard,
   ] = await Promise.all([
     import("@/src/server/infrastructure/db/client"),
     import("@/prisma/seed"),
@@ -87,6 +88,7 @@ async function loadModules() {
     import("@/app/api/integrations/telegram/webhook/route"),
     import("@/src/server/infrastructure/telegram/gateway"),
     import("@/src/server/infrastructure/security/crypto"),
+    import("@/src/server/queries/user-dashboard"),
   ])
   const createCheckout = async (
     input: Omit<
@@ -134,6 +136,7 @@ async function loadModules() {
     telegramWebhook,
     telegramGateway,
     security,
+    userDashboard,
   }
 }
 
@@ -649,7 +652,9 @@ test("referral happy path is idempotent through provisioning", async () => {
   })
   assert.equal(inviterSubscription.lteEnabled, false)
   assert.equal(inviterSubscription.deviceLimit, 1)
-  assert.ok(inviterSubscription.expiresAt.getTime() > Date.now() + 9 * 86_400_000)
+  assert.ok(
+    inviterSubscription.expiresAt.getTime() > Date.now() + 9 * 86_400_000
+  )
   const inviterExpiresAt = inviterSubscription.expiresAt
   const job = await modules.db.outboxJob.findFirstOrThrow({
     where: {
@@ -904,10 +909,7 @@ test("referral days reactivate an expired inviter from the current time", async 
     subscription.subscriptionUrl,
     "https://subscription.example.test/expired-token"
   )
-  assert.equal(
-    subscription.expiresAt.toISOString(),
-    "2026-08-11T12:00:00.000Z"
-  )
+  assert.equal(subscription.expiresAt.toISOString(), "2026-08-11T12:00:00.000Z")
   assert.equal(
     (
       await modules.db.referralInvite.findUniqueOrThrow({
@@ -2858,6 +2860,62 @@ test("support messages are rate-limited with persisted counters", async () => {
     where: { key: `support:${user.id}:minute` },
   })
   assert.equal(bucket.count, 6)
+})
+
+test("support reply indicators clear only through rendered admin replies", async () => {
+  const user = await modules.db.$transaction((tx) =>
+    modules.users.createUserGraph(tx, { isTest: true })
+  )
+  await modules.support.sendSupportMessage({
+    userId: user.id,
+    body: "Need help with setup",
+  })
+  assert.equal(
+    await modules.userDashboard.hasUnreadSupportReply(user.id),
+    false
+  )
+
+  const firstReply = await modules.support.sendSupportMessage({
+    userId: user.id,
+    body: "First admin reply",
+    admin: true,
+  })
+  assert.equal(await modules.userDashboard.hasUnreadSupportReply(user.id), true)
+  assert.equal(
+    await modules.support.markSupportRepliesRead({
+      userId: user.id,
+      through: new Date(firstReply.createdAt.getTime() - 1),
+    }),
+    false
+  )
+  assert.equal(await modules.userDashboard.hasUnreadSupportReply(user.id), true)
+  assert.equal(
+    await modules.support.markSupportRepliesRead({
+      userId: user.id,
+      through: firstReply.createdAt,
+    }),
+    true
+  )
+  assert.equal(
+    await modules.userDashboard.hasUnreadSupportReply(user.id),
+    false
+  )
+
+  const conversation = await modules.db.supportConversation.findUniqueOrThrow({
+    where: { userId: user.id },
+    select: { id: true },
+  })
+  await modules.db.supportMessage.create({
+    data: {
+      conversationId: conversation.id,
+      authorRole: "ADMIN",
+      senderUserId: user.id,
+      source: "ADMIN",
+      body: "Later admin reply",
+      createdAt: new Date(firstReply.createdAt.getTime() + 1000),
+    },
+  })
+  assert.equal(await modules.userDashboard.hasUnreadSupportReply(user.id), true)
 })
 
 test("subscription URL regeneration is bounded and stale jobs are no-ops", async () => {

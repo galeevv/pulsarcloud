@@ -3,13 +3,16 @@ import { Badge } from "@/components/ui/badge"
 import { redirect } from "next/navigation"
 import { getSession } from "@/src/server/transport/web/session"
 import { getConfig } from "@/src/server/config"
+import { hasUnreadSupportReply } from "@/src/server/queries/user-dashboard"
 
 export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  if (!(await getSession("USER"))) redirect("/")
+  const session = await getSession("USER")
+  if (!session) redirect("/")
+  const hasUnreadSupport = await hasUnreadSupportReply(session.userId)
   return (
     <div className="pulsar-page">
       {getConfig().testMode ? (
@@ -22,7 +25,7 @@ export default async function DashboardLayout({
         </Badge>
       ) : null}
       {children}
-      <BottomNav />
+      <BottomNav hasUnreadSupport={hasUnreadSupport} />
     </div>
   )
 }

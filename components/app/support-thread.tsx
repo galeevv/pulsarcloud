@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { useRouter } from "next/navigation"
 import { ArrowDownIcon, HeadphonesIcon } from "lucide-react"
 
 import {
@@ -34,6 +35,8 @@ export function SupportThread({
 }: {
   messages: SupportThreadMessage[]
 }) {
+  const router = useRouter()
+  const markedThrough = React.useRef<string | null>(null)
   const [threadState, setThreadState] = React.useState(() => ({
     messages: initialMessages,
     source: initialMessages,
@@ -42,6 +45,37 @@ export function SupportThread({
     threadState.source === initialMessages
       ? threadState.messages
       : initialMessages
+
+  const markRenderedRepliesRead = React.useCallback(
+    async (renderedMessages: SupportThreadMessage[]) => {
+      const latestAdminReply = [...renderedMessages]
+        .reverse()
+        .find((message) => message.authorRole === "ADMIN")
+      if (
+        !latestAdminReply ||
+        markedThrough.current === latestAdminReply.createdAtIso
+      )
+        return
+
+      markedThrough.current = latestAdminReply.createdAtIso
+      try {
+        const response = await fetch("/api/support/read", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ through: latestAdminReply.createdAtIso }),
+        })
+        if (response.ok) router.refresh()
+        else markedThrough.current = null
+      } catch {
+        markedThrough.current = null
+      }
+    },
+    [router]
+  )
+
+  React.useEffect(() => {
+    void markRenderedRepliesRead(messages)
+  }, [markRenderedRepliesRead, messages])
 
   React.useEffect(() => {
     let active = true
@@ -63,10 +97,12 @@ export function SupportThread({
 
         if (!active || !Array.isArray(result.messages)) return
 
+        const refreshedMessages = result.messages.map(toSupportThreadMessage)
         setThreadState({
-          messages: result.messages.map(toSupportThreadMessage),
+          messages: refreshedMessages,
           source: initialMessages,
         })
+        void markRenderedRepliesRead(refreshedMessages)
       } catch {
         // A transient polling failure does not disrupt the conversation UI.
       }
@@ -84,7 +120,7 @@ export function SupportThread({
       window.removeEventListener(SUPPORT_MESSAGES_REFRESH_EVENT, handleRefresh)
       window.clearInterval(timer)
     }
-  }, [initialMessages])
+  }, [initialMessages, markRenderedRepliesRead])
 
   return (
     <MessageScrollerProvider autoScroll defaultScrollPosition="end">

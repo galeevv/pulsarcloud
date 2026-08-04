@@ -7,6 +7,7 @@ import type { LucideIcon } from "lucide-react"
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
+  BlocksIcon,
   CheckCircle2Icon,
   CircleAlertIcon,
   DownloadIcon,
@@ -14,6 +15,7 @@ import {
   LaptopIcon,
   Link2Icon,
   MonitorIcon,
+  MonitorSmartphoneIcon,
   SmartphoneIcon,
 } from "lucide-react"
 
@@ -44,18 +46,18 @@ const platformOptions = [
 
 const appOptions = [
   {
-    value: "incy" as const,
-    name: "Incy",
-    description: "Рекомендуемый способ подключения к Pulsar.",
-    badge: "Рекомендуем",
-    icon: "/instructions/apps/incy.webp",
-  },
-  {
     value: "happ" as const,
     name: "Happ",
-    description: "Альтернативное приложение для подключения.",
-    badge: "Поддерживается",
+    description: "Лучший выбор для Pulsar.",
+    badge: "Рекомендуем",
     icon: "/instructions/apps/happ.webp",
+  },
+  {
+    value: "incy" as const,
+    name: "Incy",
+    description: "Альтернативный вариант.",
+    badge: "Поддерживается",
+    icon: "/instructions/apps/incy.webp",
   },
 ]
 
@@ -110,8 +112,8 @@ export function InstructionsFlow({
   const [step, setStep] = React.useState<Step>("start")
   const [, setHistory] = React.useState<Step[]>([])
   const [platform, setPlatform] = React.useState<Platform | null>(null)
-  const [vpnApp, setVpnApp] = React.useState<VpnApp>("incy")
-  const selectedAppName = vpnApp === "incy" ? "Incy" : "Happ"
+  const [vpnApp, setVpnApp] = React.useState<VpnApp>("happ")
+  const selectedAppName = vpnApp === "happ" ? "Happ" : "Incy"
   const connectionUrl = subscriptionUrl
     ? vpnApp === "incy"
       ? `incy://import/${subscriptionUrl}`
@@ -133,7 +135,7 @@ export function InstructionsFlow({
 
   function continueWithPlatform(nextPlatform: Platform) {
     setPlatform(nextPlatform)
-    setVpnApp("incy")
+    setVpnApp("happ")
     go("choose-app")
   }
 
@@ -156,23 +158,22 @@ export function InstructionsFlow({
             className="flex flex-1 flex-col gap-5"
             aria-labelledby="device-title"
           >
-            <div className="flex flex-col gap-1">
-              <h1 id="device-title" className="text-xl font-semibold">
-                Выберите устройство
-              </h1>
-              <p className="text-sm text-muted-foreground">
-                Для каждой платформы покажем подходящую инструкцию.
-              </p>
-            </div>
+            <InstructionStepHeading
+              compact
+              titleId="device-title"
+              icon={MonitorSmartphoneIcon}
+              title="Выберите устройство"
+              description="Выберите нужную платформу."
+            />
             <div className="flex flex-1 items-center">
               <ToggleGroup
                 value={platform ? [platform] : []}
                 onValueChange={(values) =>
-                  values[0] && continueWithPlatform(values[0] as Platform)
+                  values[0] && setPlatform(values[0] as Platform)
                 }
                 orientation="vertical"
                 variant="outline"
-                spacing={3}
+                spacing={0}
                 className="w-full items-stretch"
                 aria-label="Операционная система"
               >
@@ -180,7 +181,7 @@ export function InstructionsFlow({
                   <ToggleGroupItem
                     key={value}
                     value={value}
-                    className="h-12 w-full justify-start rounded-[18px] px-4"
+                    className="h-12 w-full justify-center"
                   >
                     <Icon data-icon="inline-start" />
                     {value}
@@ -196,14 +197,13 @@ export function InstructionsFlow({
             className="flex flex-1 flex-col gap-5"
             aria-labelledby="app-title"
           >
-            <div className="flex flex-col gap-1">
-              <h1 id="app-title" className="text-xl font-semibold">
-                Выберите приложение
-              </h1>
-              <p className="text-sm text-muted-foreground">
-                Мы рекомендуем Incy, но подписка также работает в Happ.
-              </p>
-            </div>
+            <InstructionStepHeading
+              compact
+              titleId="app-title"
+              icon={BlocksIcon}
+              title="Выберите приложение"
+              description="Выберите приложение для подключения."
+            />
             <div className="flex flex-1 items-center">
               <ToggleGroup
                 value={[vpnApp]}
@@ -212,7 +212,7 @@ export function InstructionsFlow({
                 }
                 orientation="vertical"
                 variant="outline"
-                spacing={3}
+                spacing={0}
                 className="w-full items-stretch"
                 aria-label="Приложение для подключения"
               >
@@ -220,28 +220,30 @@ export function InstructionsFlow({
                   <ToggleGroupItem
                     key={option.value}
                     value={option.value}
-                    className="h-auto min-h-20 w-full justify-start rounded-[18px] px-3 py-3 text-left"
+                    className="h-auto min-h-24 w-full justify-center px-4 py-4 text-left"
                   >
-                    <Image
-                      src={option.icon}
-                      alt=""
-                      width={48}
-                      height={48}
-                      className="size-12 shrink-0 rounded-[14px]"
-                    />
-                    <span className="flex min-w-0 flex-1 flex-col items-start gap-1 whitespace-normal">
-                      <span className="flex w-full flex-wrap items-center gap-2">
-                        <span className="font-medium">{option.name}</span>
-                        <Badge
-                          variant={
-                            option.value === "incy" ? "default" : "secondary"
-                          }
-                        >
-                          {option.badge}
-                        </Badge>
-                      </span>
-                      <span className="text-xs text-muted-foreground">
-                        {option.description}
+                    <span className="flex w-full max-w-72 items-center gap-4">
+                      <Image
+                        src={option.icon}
+                        alt=""
+                        width={48}
+                        height={48}
+                        className="size-12 shrink-0 rounded-[14px]"
+                      />
+                      <span className="flex min-w-0 flex-1 flex-col items-start gap-1.5 whitespace-normal">
+                        <span className="flex w-full flex-wrap items-center gap-2">
+                          <span className="font-medium">{option.name}</span>
+                          <Badge
+                            variant={
+                              option.value === "happ" ? "default" : "secondary"
+                            }
+                          >
+                            {option.badge}
+                          </Badge>
+                        </span>
+                        <span className="text-xs leading-5 text-muted-foreground">
+                          {option.description}
+                        </span>
                       </span>
                     </span>
                   </ToggleGroupItem>
@@ -375,14 +377,23 @@ export function InstructionsFlow({
             type="button"
             size="lg"
             variant="outline"
-            className={cn(
-              "h-11 rounded-[18px]",
-              step === "choose-device" && "col-span-2"
-            )}
+            className="h-11 rounded-[18px]"
             onClick={back}
           >
             <ArrowLeftIcon data-icon="inline-start" />
             Назад
+          </Button>
+        ) : null}
+        {step === "choose-device" ? (
+          <Button
+            type="button"
+            size="lg"
+            className="h-11 rounded-[18px]"
+            disabled={!platform}
+            onClick={() => platform && continueWithPlatform(platform)}
+          >
+            Продолжить
+            <ArrowRightIcon data-icon="inline-end" />
           </Button>
         ) : null}
         {step === "choose-app" ? (
@@ -465,18 +476,25 @@ function StepIntro({
 }
 
 function InstructionStepHeading({
+  compact = false,
   description,
   icon: Icon,
   title,
   titleId,
 }: {
+  compact?: boolean
   description: string
   icon: LucideIcon
   title: string
   titleId: string
 }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-5 text-center">
+    <div
+      className={cn(
+        "flex flex-col items-center justify-center gap-5 text-center",
+        !compact && "flex-1"
+      )}
+    >
       <div className="flex size-18 items-center justify-center rounded-[22px] border border-border/70 bg-background/40">
         <Icon className="size-7" />
       </div>

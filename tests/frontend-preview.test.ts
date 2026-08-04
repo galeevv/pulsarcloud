@@ -67,6 +67,9 @@ test("navigation and primary preview interfaces remain wired", async () => {
     "utf8"
   )
   assert.match(profile, /LoginMethodsManager/)
+  assert.match(profile, /<SupportUnreadDot \/>/)
+  assert.match(navigation, /hasUnreadSupport/)
+  assert.match(navigation, /<SupportUnreadDot/)
 
   const support = await readFile(
     path.join(root, "app/(dashboard)/support/page.tsx"),
@@ -95,12 +98,32 @@ test("Incy and Happ instruction flows use the correct links", async () => {
   assert.doesNotMatch(subscription, /incy:\/\/import|happ:\/\/add/)
   assert.match(instructions, /incy:\/\/import\/\$\{subscriptionUrl\}/)
   assert.match(instructions, /happ:\/\/add\/\$\{subscriptionUrl\}/)
-  assert.match(instructions, /React\.useState<VpnApp>\("incy"\)/)
+  assert.match(instructions, /React\.useState<VpnApp>\("happ"\)/)
   assert.match(instructions, /"choose-app"/)
   assert.match(instructions, /Выберите приложение/)
+  assert.match(instructions, /Выберите приложение для подключения/)
+  assert.match(instructions, /Выберите нужную платформу/)
   assert.match(instructions, /Рекомендуем/)
   assert.match(instructions, /Поддерживается/)
   assert.match(instructions, /vpnApp === "happ"/)
+  assert.match(instructions, /option\.value === "happ"/)
+  const appOptionsSource = instructions.slice(
+    instructions.indexOf("const appOptions"),
+    instructions.indexOf("const installLinks")
+  )
+  assert.ok(
+    appOptionsSource.indexOf('value: "happ"') <
+      appOptionsSource.indexOf('value: "incy"'),
+    "Happ should be shown before Incy"
+  )
+  assert.match(instructions, /icon=\{MonitorSmartphoneIcon\}/)
+  assert.match(instructions, /icon=\{BlocksIcon\}/)
+  assert.match(instructions, /spacing=\{0\}/)
+  assert.match(instructions, /className="h-12 w-full justify-center"/)
+  assert.match(instructions, /option\.description/)
+  assert.match(instructions, /min-h-24 w-full justify-center/)
+  assert.match(instructions, /max-w-72 items-center gap-4/)
+  assert.match(instructions, /disabled=\{!platform\}/)
   assert.match(instructions, /platform === "iOS" \|\| platform === "macOS"/)
   assert.match(
     instructions,
@@ -232,7 +255,7 @@ test("Incy and Happ instruction flows use the correct links", async () => {
   assert.match(instructions, /flex list-decimal flex-col gap-1/)
   assert.doesNotMatch(instructions, /<CardTitle>Шаг/)
   assert.match(instructions, /className="flex flex-1 items-center"/)
-  assert.match(instructions, /spacing=\{3\}/)
+  assert.match(instructions, /spacing=\{0\}/)
   assert.match(instructions, /rounded-\[22px\]/)
   assert.match(instructions, /border-border\/70/)
   assert.match(instructions, /bg-transparent/)
@@ -281,6 +304,8 @@ test("user routes keep accessible titles, headings, and navigation state", async
   )
   assert.match(supportThread, /MessageScrollerContent/)
   assert.match(supportThread, /aria-live="polite"/)
+  assert.match(supportThread, /\/api\/support\/read/)
+  assert.match(supportThread, /router\.refresh\(\)/)
 })
 
 test("legal documents remain readable", async () => {

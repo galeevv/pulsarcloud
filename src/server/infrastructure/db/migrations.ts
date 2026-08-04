@@ -9,6 +9,7 @@ export const EXPECTED_MIGRATIONS = [
   "20260718133000_subscription_plan_duration",
   "20260725090000_promo_campaigns",
   "20260801120000_referral_subscription_rewards",
+  "20260804120000_support_user_read_state",
 ] as const
 
 export type MigrationRecord = {

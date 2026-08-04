@@ -102,6 +102,26 @@ export async function getSupportMessagesView(userId: string) {
   return conversation?.messages ?? []
 }
 
+export async function hasUnreadSupportReply(userId: string) {
+  const conversation = await db.supportConversation.findUnique({
+    where: { userId },
+    select: {
+      userLastReadAt: true,
+      messages: {
+        where: { authorRole: "ADMIN", isInternal: false },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: 1,
+        select: { createdAt: true },
+      },
+    },
+  })
+  const latestReplyAt = conversation?.messages[0]?.createdAt
+  if (!latestReplyAt) return false
+  return (
+    !conversation.userLastReadAt || latestReplyAt > conversation.userLastReadAt
+  )
+}
+
 export async function getReferralsView(userId: string) {
   const user = await db.user.findUniqueOrThrow({
     where: { id: userId },
@@ -126,30 +146,28 @@ export async function getReferralsView(userId: string) {
 }
 
 export async function getReferralSummaryView(userId: string) {
-  const [profile, invitedUsers, activeUsers, rewards] =
-    await Promise.all([
-      db.referralProfile.findUnique({ where: { userId } }),
-      db.referralInvite.count({ where: { inviterUserId: userId } }),
-      db.referralInvite.count({
-        where: {
-          inviterUserId: userId,
-          status: "PAID",
-        },
-      }),
-      db.referralSubscriptionReward.aggregate({
-        where: { inviterUserId: userId },
-        _sum: { days: true },
-      }),
-    ])
+  const [profile, invitedUsers, activeUsers, rewards] = await Promise.all([
+    db.referralProfile.findUnique({ where: { userId } }),
+    db.referralInvite.count({ where: { inviterUserId: userId } }),
+    db.referralInvite.count({
+      where: {
+        inviterUserId: userId,
+        status: "PAID",
+      },
+    }),
+    db.referralSubscriptionReward.aggregate({
+      where: { inviterUserId: userId },
+      _sum: { days: true },
+    }),
+  ])
 
   const inviteCode =
     profile?.isEnabled && profile.inviteCode ? profile.inviteCode : null
   const botUsername = getConfig().telegram.botUsername
   return {
-    inviteUrl:
-      inviteCode
-        ? `${getConfig().appUrl}/?invite=${inviteCode}`
-        : null,
+    inviteUrl: inviteCode
+      ? `${getConfig().appUrl}/?invite=${inviteCode}`
+      : null,
     telegramInviteUrl:
       inviteCode && botUsername
         ? `https://t.me/${botUsername}?start=ref_${inviteCode}`
