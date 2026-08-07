@@ -333,6 +333,8 @@ model Payment {
   confirmedAt            DateTime?
   refundedAt             DateTime?
   expiresAt              DateTime?
+  supersededAt           DateTime?
+  supersededByPaymentId  String?
   isTest                 Boolean             @default(false)
   createdAt              DateTime            @default(now())
   updatedAt              DateTime            @updatedAt
@@ -344,6 +346,7 @@ model Payment {
 
   @@index([userId, createdAt])
   @@index([status, createdAt])
+  @@index([supersededByPaymentId])
 }
 
 model PaymentWebhookLog {

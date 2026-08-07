@@ -120,6 +120,95 @@ export async function expireOverduePendingPayments(input?: {
   )
 }
 
+type TransactionClient = Parameters<Parameters<typeof db.$transaction>[0]>[0]
+
+/**
+ * The customer walked away from an unpaid invoice and asked for a different
+ * plan. Free the single-open-checkout slot by marking the abandoned payment
+ * CANCELED, create the replacement, then link the two.
+ *
+ * `Payment_userId_open_key` allows only one CREATED/PENDING payment per user,
+ * so the cancellation has to land before the replacement is inserted — hence
+ * the callback rather than two independent helpers.
+ */
+async function supersedeOpenPayment(
+  tx: TransactionClient,
+  openPaymentId: string,
+  now: Date,
+  createReplacement: () => Promise<Payment>
+) {
+  const superseded = await tx.payment.updateMany({
+    where: { id: openPaymentId, status: { in: ["CREATED", "PENDING"] } },
+    data: { status: "CANCELED", supersededAt: now },
+  })
+  if (superseded.count !== 1)
+    throw new BusinessError(
+      "CONFLICT",
+      409,
+      "A previous checkout changed state while it was being replaced"
+    )
+  const replacement = await createReplacement()
+  await tx.payment.update({
+    where: { id: openPaymentId },
+    data: { supersededByPaymentId: replacement.id },
+  })
+  await tx.auditLog.create({
+    data: {
+      actorType: "SYSTEM",
+      action: "PAYMENT_SUPERSEDED",
+      entityType: "Payment",
+      entityId: openPaymentId,
+      metadataJson: JSON.stringify({ replacementPaymentId: replacement.id }),
+      correlationId: correlationId(),
+    },
+  })
+  return replacement
+}
+
+/**
+ * Voiding the abandoned invoice is a courtesy to the customer and to the
+ * provider dashboard; it must never fail the new checkout. If it does not go
+ * through, the invoice simply stays payable and a late CONFIRMED callback is
+ * still fulfilled by {@link applyPaymentEvent}.
+ */
+async function cancelSupersededInvoice(
+  payment: Pick<Payment, "id" | "externalPaymentId" | "provider">,
+  provider: PaymentProvider
+) {
+  if (!payment.externalPaymentId || payment.provider !== provider.name) return
+  try {
+    const result = await provider.cancelCheckout(payment.externalPaymentId)
+    await db.integrationLog.create({
+      data: {
+        integration: provider.name,
+        operation: "CANCEL_SUPERSEDED_CHECKOUT",
+        entityType: "Payment",
+        entityId: payment.id,
+        success: result.accepted,
+        responseSummary: JSON.stringify(result),
+        correlationId: correlationId(),
+      },
+    })
+  } catch (error) {
+    await db.integrationLog
+      .create({
+        data: {
+          integration: provider.name,
+          operation: "CANCEL_SUPERSEDED_CHECKOUT",
+          entityType: "Payment",
+          entityId: payment.id,
+          success: false,
+          technicalError:
+            error instanceof Error
+              ? error.message.slice(0, 1000)
+              : String(error),
+          correlationId: correlationId(),
+        },
+      })
+      .catch(() => undefined)
+  }
+}
+
 async function createProviderCheckout(
   payment: Payment,
   provider: PaymentProvider,
@@ -272,30 +361,20 @@ export async function createCheckout(
       status: { in: ["CREATED", "PENDING"] },
     },
   })
-  if (openPayment?.checkoutUrl) {
-    if (
-      openPayment.purpose === "SUBSCRIPTION" &&
-      openPayment.amountMinor === input.expectedAmountMinor &&
-      openPayment.durationDays ===
-        durationDays[input.durationMonths as keyof typeof durationDays] &&
-      openPayment.deviceLimit === input.deviceLimit &&
-      openPayment.lteEnabled === input.lteEnabled &&
-      openPayment.pricingVersion === input.pricingVersion &&
-      openPayment.provider === providerName
-    )
-      return openPayment
-    throw new BusinessError(
-      "CONFLICT",
-      409,
-      "A different checkout is already pending for this user"
-    )
-  }
-  if (openPayment)
-    throw new BusinessError(
-      "CONFLICT",
-      409,
-      "A previous checkout is awaiting operator reconciliation"
-    )
+  // Same order, second click: hand back the invoice the customer already has
+  // instead of minting a duplicate at the provider.
+  if (
+    openPayment?.checkoutUrl &&
+    openPayment.purpose === "SUBSCRIPTION" &&
+    openPayment.amountMinor === input.expectedAmountMinor &&
+    openPayment.durationDays ===
+      durationDays[input.durationMonths as keyof typeof durationDays] &&
+    openPayment.deviceLimit === input.deviceLimit &&
+    openPayment.lteEnabled === input.lteEnabled &&
+    openPayment.pricingVersion === input.pricingVersion &&
+    openPayment.provider === providerName
+  )
+    return openPayment
   const { pricing, quote } = await loadCheckoutQuote(input)
   if (
     input.pricingVersion !== pricing.version ||
@@ -314,26 +393,32 @@ export async function createCheckout(
   let payment
   try {
     payment = await withBusyRetry(() =>
-      db.payment.create({
-        data: {
-          userId: input.userId,
-          provider: providerName,
-          idempotencyKey: key,
-          status: "CREATED",
-          purpose: "SUBSCRIPTION",
-          amountMinor: quote.amountMinor,
-          currency: "RUB",
-          durationDays: quote.durationDays,
-          deviceLimit: quote.deviceLimit,
-          lteEnabled: quote.lteEnabled,
-          basePriceMinor: quote.basePriceMinor,
-          extraDevicesPriceMinor: quote.extraDevicesPriceMinor,
-          ltePriceMinor: quote.ltePriceMinor,
-          discountMinor: quote.discountMinor,
-          priceSnapshotJson: quote.snapshotJson,
-          pricingVersion: quote.pricingVersion,
-          isTest: config.testMode,
-        },
+      db.$transaction(async (tx) => {
+        const create = () =>
+          tx.payment.create({
+            data: {
+              userId: input.userId,
+              provider: providerName,
+              idempotencyKey: key,
+              status: "CREATED",
+              purpose: "SUBSCRIPTION",
+              amountMinor: quote.amountMinor,
+              currency: "RUB",
+              durationDays: quote.durationDays,
+              deviceLimit: quote.deviceLimit,
+              lteEnabled: quote.lteEnabled,
+              basePriceMinor: quote.basePriceMinor,
+              extraDevicesPriceMinor: quote.extraDevicesPriceMinor,
+              ltePriceMinor: quote.ltePriceMinor,
+              discountMinor: quote.discountMinor,
+              priceSnapshotJson: quote.snapshotJson,
+              pricingVersion: quote.pricingVersion,
+              isTest: config.testMode,
+            },
+          })
+        return openPayment
+          ? supersedeOpenPayment(tx, openPayment.id, now, create)
+          : create()
       })
     )
   } catch (error) {
@@ -345,6 +430,7 @@ export async function createCheckout(
       )
     throw error
   }
+  if (openPayment) await cancelSupersededInvoice(openPayment, provider)
   return createProviderCheckout(
     payment,
     provider,
@@ -403,27 +489,15 @@ export async function createDeviceLimitUpgradeCheckout(
       status: { in: ["CREATED", "PENDING"] },
     },
   })
-  if (openPayment?.checkoutUrl) {
-    if (
-      openPayment.purpose === "DEVICE_LIMIT_UPGRADE" &&
-      openPayment.amountMinor === input.expectedAmountMinor &&
-      openPayment.deviceLimit === input.targetDeviceLimit &&
-      openPayment.pricingVersion === input.pricingVersion &&
-      openPayment.provider === provider.name
-    )
-      return openPayment
-    throw new BusinessError(
-      "CONFLICT",
-      409,
-      "A different checkout is already pending for this user"
-    )
-  }
-  if (openPayment)
-    throw new BusinessError(
-      "CONFLICT",
-      409,
-      "A previous checkout is awaiting operator reconciliation"
-    )
+  if (
+    openPayment?.checkoutUrl &&
+    openPayment.purpose === "DEVICE_LIMIT_UPGRADE" &&
+    openPayment.amountMinor === input.expectedAmountMinor &&
+    openPayment.deviceLimit === input.targetDeviceLimit &&
+    openPayment.pricingVersion === input.pricingVersion &&
+    openPayment.provider === provider.name
+  )
+    return openPayment
 
   const quote = await loadDeviceLimitUpgradeQuote(input, now)
   if (
@@ -435,34 +509,40 @@ export async function createDeviceLimitUpgradeCheckout(
   let payment
   try {
     payment = await withBusyRetry(() =>
-      db.payment.create({
-        data: {
-          userId: input.userId,
-          provider: provider.name,
-          idempotencyKey: key,
-          status: "CREATED",
-          purpose: "DEVICE_LIMIT_UPGRADE",
-          amountMinor: quote.amountMinor,
-          currency: "RUB",
-          durationDays: 0,
-          deviceLimit: input.targetDeviceLimit,
-          lteEnabled: quote.subscription.lteEnabled,
-          basePriceMinor: 0,
-          extraDevicesPriceMinor: quote.amountMinor,
-          ltePriceMinor: 0,
-          discountMinor: 0,
-          priceSnapshotJson: JSON.stringify({
-            purpose: "DEVICE_LIMIT_UPGRADE",
-            previousDeviceLimit: quote.subscription.deviceLimit,
-            targetDeviceLimit: input.targetDeviceLimit,
-            addedDevices: quote.addedDevices,
-            unitPriceMinor: quote.pricing.deviceLimitUpgradePriceMinor,
-            amountMinor: quote.amountMinor,
-            pricingVersion: quote.pricing.version,
-          }),
-          pricingVersion: quote.pricing.version,
-          isTest: config.testMode,
-        },
+      db.$transaction(async (tx) => {
+        const create = () =>
+          tx.payment.create({
+            data: {
+              userId: input.userId,
+              provider: provider.name,
+              idempotencyKey: key,
+              status: "CREATED",
+              purpose: "DEVICE_LIMIT_UPGRADE",
+              amountMinor: quote.amountMinor,
+              currency: "RUB",
+              durationDays: 0,
+              deviceLimit: input.targetDeviceLimit,
+              lteEnabled: quote.subscription.lteEnabled,
+              basePriceMinor: 0,
+              extraDevicesPriceMinor: quote.amountMinor,
+              ltePriceMinor: 0,
+              discountMinor: 0,
+              priceSnapshotJson: JSON.stringify({
+                purpose: "DEVICE_LIMIT_UPGRADE",
+                previousDeviceLimit: quote.subscription.deviceLimit,
+                targetDeviceLimit: input.targetDeviceLimit,
+                addedDevices: quote.addedDevices,
+                unitPriceMinor: quote.pricing.deviceLimitUpgradePriceMinor,
+                amountMinor: quote.amountMinor,
+                pricingVersion: quote.pricing.version,
+              }),
+              pricingVersion: quote.pricing.version,
+              isTest: config.testMode,
+            },
+          })
+        return openPayment
+          ? supersedeOpenPayment(tx, openPayment.id, now, create)
+          : create()
       })
     )
   } catch (error) {
@@ -474,6 +554,7 @@ export async function createDeviceLimitUpgradeCheckout(
       )
     throw error
   }
+  if (openPayment) await cancelSupersededInvoice(openPayment, provider)
 
   return createProviderCheckout(
     payment,
@@ -515,7 +596,11 @@ export async function applyPaymentEvent(
           candidate.provider === providerName &&
           candidate.amountMinor === event.amountMinor &&
           candidate.currency === event.currency &&
-          ["CREATED", "PENDING"].includes(candidate.status)
+          (["CREATED", "PENDING"].includes(candidate.status) ||
+            // A checkout replaced before its provider id was persisted is still
+            // payable; the customer must not lose a payment they made.
+            (candidate.status === "CANCELED" &&
+              candidate.supersededAt !== null))
         ) {
           payment = await tx.payment.update({
             where: { id: candidate.id },
@@ -582,6 +667,24 @@ export async function applyPaymentEvent(
             status: payment.status,
           }
         }
+        // A superseded invoice already yielded its open-checkout slot to the
+        // replacement. Reviving it as PENDING would collide with that guard,
+        // and every other non-confirmed state is what it already is.
+        if (payment.supersededAt && event.status !== "REFUNDED") {
+          await tx.paymentWebhookLog.update({
+            where: { id: log.id },
+            data: {
+              processedAt: new Date(),
+              processingError:
+                "Ignored non-confirming event for a superseded checkout",
+            },
+          })
+          return {
+            duplicate: true,
+            paymentId: payment.id,
+            status: payment.status,
+          }
+        }
         const mapped =
           event.status === "REFUNDED"
             ? "REFUNDED"
@@ -638,7 +741,12 @@ export async function applyPaymentEvent(
         })
         return { duplicate: true, paymentId: payment.id }
       }
-      if (!["CREATED", "PENDING", "EXPIRED"].includes(payment.status)) {
+      // A superseded checkout the customer paid anyway is a real payment and is
+      // fulfilled like any other. Its replacement stays open on its own.
+      const confirmable =
+        ["CREATED", "PENDING", "EXPIRED"].includes(payment.status) ||
+        (payment.status === "CANCELED" && payment.supersededAt !== null)
+      if (!confirmable) {
         await tx.paymentWebhookLog.update({
           where: { id: log.id },
           data: {
