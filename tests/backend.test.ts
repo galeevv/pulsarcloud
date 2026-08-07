@@ -2542,17 +2542,6 @@ test("database permits only one open checkout per user", async () => {
     lteEnabled: false,
     idempotencyKey: "single-open-first",
   })
-  await assert.rejects(
-    () =>
-      modules.billing.createCheckout({
-        userId: user.id,
-        durationMonths: 1,
-        deviceLimit: 2,
-        lteEnabled: false,
-        idempotencyKey: "single-open-second",
-      }),
-    /pending|checkout|conflict/i
-  )
   await assert.rejects(() =>
     modules.db.payment.create({
       data: {
@@ -2575,6 +2564,155 @@ test("database permits only one open checkout per user", async () => {
         isTest: true,
       },
     })
+  )
+})
+
+test("changing the plan supersedes the open checkout", async () => {
+  const user = await modules.db.$transaction((tx) =>
+    modules.users.createUserGraph(tx, { isTest: true })
+  )
+  const first = await modules.billing.createCheckout({
+    userId: user.id,
+    durationMonths: 1,
+    deviceLimit: 1,
+    lteEnabled: false,
+    idempotencyKey: "supersede-first",
+  })
+  assert.equal(first.status, "PENDING")
+
+  const replacement = await modules.billing.createCheckout({
+    userId: user.id,
+    durationMonths: 12,
+    deviceLimit: 3,
+    lteEnabled: true,
+    idempotencyKey: "supersede-replacement",
+  })
+  assert.notEqual(replacement.id, first.id)
+  assert.equal(replacement.status, "PENDING")
+  assert.equal(replacement.durationDays, 365)
+  assert.equal(replacement.deviceLimit, 3)
+  assert.equal(replacement.lteEnabled, true)
+  assert.ok(replacement.checkoutUrl)
+  assert.notEqual(replacement.checkoutUrl, first.checkoutUrl)
+
+  const supersededFirst = await modules.db.payment.findUniqueOrThrow({
+    where: { id: first.id },
+  })
+  assert.equal(supersededFirst.status, "CANCELED")
+  assert.ok(supersededFirst.supersededAt)
+  assert.equal(supersededFirst.supersededByPaymentId, replacement.id)
+  assert.equal(
+    await modules.db.payment.count({
+      where: { userId: user.id, status: { in: ["CREATED", "PENDING"] } },
+    }),
+    1
+  )
+})
+
+test("an unchanged plan reuses the existing checkout", async () => {
+  const user = await modules.db.$transaction((tx) =>
+    modules.users.createUserGraph(tx, { isTest: true })
+  )
+  const first = await modules.billing.createCheckout({
+    userId: user.id,
+    durationMonths: 3,
+    deviceLimit: 2,
+    lteEnabled: false,
+    idempotencyKey: "reuse-first",
+  })
+  const repeated = await modules.billing.createCheckout({
+    userId: user.id,
+    durationMonths: 3,
+    deviceLimit: 2,
+    lteEnabled: false,
+    idempotencyKey: "reuse-second",
+  })
+  assert.equal(repeated.id, first.id)
+  assert.equal(repeated.checkoutUrl, first.checkoutUrl)
+  assert.equal(
+    await modules.db.payment.count({ where: { userId: user.id } }),
+    1
+  )
+})
+
+test("a superseded checkout that is paid anyway is still fulfilled once", async () => {
+  const user = await modules.db.$transaction((tx) =>
+    modules.users.createUserGraph(tx, { isTest: true })
+  )
+  const abandoned = await modules.billing.createCheckout({
+    userId: user.id,
+    durationMonths: 1,
+    deviceLimit: 1,
+    lteEnabled: false,
+    idempotencyKey: "superseded-paid-first",
+  })
+  const replacement = await modules.billing.createCheckout({
+    userId: user.id,
+    durationMonths: 6,
+    deviceLimit: 2,
+    lteEnabled: false,
+    idempotencyKey: "superseded-paid-replacement",
+  })
+
+  // A stale non-confirming callback must not resurrect the superseded payment
+  // into the open state that the replacement now occupies.
+  await modules.billing.applyPaymentEvent({
+    eventId: "superseded-paid-stale-pending",
+    eventType: "PENDING",
+    externalPaymentId: abandoned.externalPaymentId!,
+    status: "PENDING",
+    amountMinor: abandoned.amountMinor,
+    currency: abandoned.currency,
+    payload: { id: abandoned.externalPaymentId, status: "PENDING" },
+  })
+  assert.equal(
+    (
+      await modules.db.payment.findUniqueOrThrow({
+        where: { id: abandoned.id },
+      })
+    ).status,
+    "CANCELED"
+  )
+
+  const outcome = await modules.billing.applyPaymentEvent({
+    eventId: "superseded-paid-confirmed",
+    eventType: "CONFIRMED",
+    externalPaymentId: abandoned.externalPaymentId!,
+    status: "CONFIRMED",
+    amountMinor: abandoned.amountMinor,
+    currency: abandoned.currency,
+    payload: { payload: abandoned.id },
+  })
+  assert.equal(outcome.duplicate, false)
+  assert.ok("subscriptionId" in outcome && outcome.subscriptionId)
+  const confirmed = await modules.db.payment.findUniqueOrThrow({
+    where: { id: abandoned.id },
+  })
+  assert.equal(confirmed.status, "CONFIRMED")
+
+  const replay = await modules.billing.applyPaymentEvent({
+    eventId: "superseded-paid-confirmed",
+    eventType: "CONFIRMED",
+    externalPaymentId: abandoned.externalPaymentId!,
+    status: "CONFIRMED",
+    amountMinor: abandoned.amountMinor,
+    currency: abandoned.currency,
+    payload: { payload: abandoned.id },
+  })
+  assert.equal(replay.duplicate, true)
+  assert.equal(
+    await modules.db.subscriptionEvent.count({
+      where: { paymentId: abandoned.id },
+    }),
+    1
+  )
+  assert.equal(
+    (
+      await modules.db.payment.findUniqueOrThrow({
+        where: { id: replacement.id },
+      })
+    ).status,
+    "PENDING"
   )
 })
 

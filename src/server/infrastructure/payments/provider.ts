@@ -61,6 +61,14 @@ export interface PaymentProvider {
   }>
   verifyWebhook(request: Request): Promise<VerifiedPaymentEvent>
   getPaymentStatus(externalPaymentId: string): Promise<ProviderPaymentSnapshot>
+  /**
+   * Best-effort void of an invoice the customer abandoned. Implementations must
+   * refuse rather than throw when the provider would charge for the
+   * cancellation, and callers must treat a rejection as non-fatal.
+   */
+  cancelCheckout(
+    externalPaymentId: string
+  ): Promise<{ accepted: boolean; reason?: string }>
 }
 
 class TestPaymentProvider implements PaymentProvider {
@@ -113,6 +121,10 @@ class TestPaymentProvider implements PaymentProvider {
       status: "PENDING" as const,
       payload: { id: externalPaymentId, status: "PENDING" },
     }
+  }
+  async cancelCheckout(externalPaymentId: string) {
+    void externalPaymentId
+    return { accepted: true }
   }
 }
 
@@ -267,6 +279,48 @@ class PlategaPaymentProvider implements PaymentProvider {
       currency,
       payload: body,
     }
+  }
+  async cancelCheckout(externalPaymentId: string) {
+    const base = `${getConfig().payments.plategaBaseUrl}/transaction/${encodeURIComponent(externalPaymentId)}`
+    // Short timeouts: a customer waiting on a new invoice must not be held up
+    // by housekeeping on the one they abandoned.
+    const eligibility = await fetch(`${base}/cancel-supported`, {
+      headers: this.headers(),
+      signal: AbortSignal.timeout(5_000),
+    })
+    if (!eligibility.ok)
+      return {
+        accepted: false,
+        reason: `cancel-supported returned HTTP ${eligibility.status}`,
+      }
+    const quote = (await eligibility.json()) as {
+      supported?: boolean
+      penaltyUsdt?: number
+      totalDeductUsdt?: number
+      blockReason?: string
+    }
+    // Platega can settle a cancellation against the merchant balance. An
+    // abandoned invoice must never cost us money, so only free voids proceed.
+    if (!quote.supported)
+      return { accepted: false, reason: quote.blockReason ?? "not supported" }
+    if ((quote.penaltyUsdt ?? 0) > 0 || (quote.totalDeductUsdt ?? 0) > 0)
+      return { accepted: false, reason: "cancellation is not free" }
+
+    const response = await fetch(`${base}/cancel`, {
+      method: "POST",
+      headers: this.headers(),
+      signal: AbortSignal.timeout(5_000),
+    })
+    if (!response.ok)
+      return {
+        accepted: false,
+        reason: `cancel returned HTTP ${response.status}`,
+      }
+    const body = (await response.json()) as {
+      accepted?: boolean
+      message?: string
+    }
+    return { accepted: Boolean(body.accepted), reason: body.message }
   }
 }
 
