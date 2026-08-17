@@ -1,12 +1,14 @@
 # Remnawave deployment and integration boundary
 
-Remnawave Panel 2.8.0, its subscription page, and the Pulsar HTTP provisioning adapter are installed for the management plane. The adapter contract was checked against the official `remnawave/backend` tag `2.8.0` and exercised against the live Panel. This proves management-plane create/update/read/URL-rotation behavior; it does **not** prove usable VPN traffic because no Remnawave Node or Host is installed.
+Remnawave Panel 2.8.0, its subscription page, and the Pulsar HTTP provisioning adapter run the management plane. The adapter contract was checked against the official `remnawave/backend` tag `2.8.0` and exercised against the live Panel.
+
+**Status (2026-08-17): this is live production.** Billing is enabled, real traffic Nodes are attached, and paying users are provisioned through this path. Five Nodes are connected — Poland, Germany and Finland-2 (VLESS Reality), Netherlands (Hysteria2), Germany-2 (VLESS xHTTP behind a CDN) — grouped into the `Pulsar` and `PulsarLTE` internal squads. Node addresses, SNI/dest choices, firewall rules and per-node keys are deliberately **not** kept in this repository; they live in the gitignored `docs/infrastructure/remnawave-operations.md` on the operator's machine, together with the node-provisioning scripts in `/opt/pulsar/` on the panel host.
 
 `ProvisioningProvider` defines `upsertSubscriber`, `updateSubscriber`, `regenerateSubscriptionUrl`, and `getSubscriberState`. `MockProvisioningProvider` remains limited to local test mode. `RemnawaveHttpProvider` implements the live 2.8.0 API with bounded timeouts and response bodies, schema validation, sanitized errors, and deterministic hashed usernames. It uses `GET /api/users/by-username/{username}` plus `POST /api/users` for idempotent creation, `PATCH /api/users` for renewal and entitlement changes, `GET /api/users/{uuid}` for reconciliation, and `POST /api/users/{uuid}/actions/revoke` for subscription URL rotation.
 
 Local subscription state is desired state. Every change increments `syncVersion` and creates `subscription:<id>:sync:<version>`. The worker ignores stale versions, records success or failure, keeps friendly errors separate from technical logs, and never rolls back a confirmed payment because provisioning is temporarily unavailable. Standard access maps to the Standard internal squad; LTE adds the LTE squad while retaining Standard. `deviceLimit` maps to Remnawave `hwidDeviceLimit`, unlimited traffic maps to `trafficLimitBytes=0` and `NO_RESET`, and the remote account is always reconciled to `ACTIVE` for a live local term.
 
-Production still keeps `BILLING_ENABLED=false`. The management adapter is proven, but the Platega callback-to-worker acceptance suite and a usable subscription through a separate real Node/Host have not been proven together. Enabling charges before that would risk accepting money without delivering working VPN access.
+Production runs with `BILLING_ENABLED=true` (flipped after the payment-to-usable-Node acceptance flow passed; the safe procedure is `deploy/pulsar/go-live.sh`, which backs up the env file and rolls back on an unhealthy start).
 
 ## Authorized live topology
 
@@ -22,7 +24,9 @@ The management VPS is Ubuntu 24.04 with 2 vCPU, 4 GB RAM, local NVMe, and 2 GB t
 | Subscription page    | `127.0.0.1:3010`            | proxied as `sub.pulsar-cloud.space`   |
 | Valkey               | Docker network only         | no host or public binding             |
 
-The Panel is limited to `API_INSTANCES=1`. No Remnawave Node is installed here, and this VPS must not accept VPN inbound traffic. Traffic Nodes belong on separate servers and will be connected through the Panel later.
+The Panel is limited to `API_INSTANCES=1`. No Remnawave Node is installed here, and this VPS must not accept VPN inbound traffic — traffic Nodes live on separate servers and are attached through the Panel.
+
+The panel virtual host is additionally gated by source IP: an nginx `geo $panel_access_class` map answers **404** to everyone except loopback, the Docker network, the panel's own public address, and the current node egress addresses. That list must be refreshed whenever a node or the panel is re-IP'd, otherwise the panel becomes unreachable (and site→panel provisioning would break if `/etc/hosts` did not pin the three domains to `127.0.0.1`).
 
 One Let's Encrypt SAN certificate covers `pulsar-cloud.space`, `panel.pulsar-cloud.space`, and `sub.pulsar-cloud.space`. All three Nginx virtual hosts use:
 
@@ -55,26 +59,18 @@ An upstream compose change must never restore the Panel host mapping to port 300
 
 Monitor memory availability, swap-in/swap-out, OOM events, container restarts, PostgreSQL latency, and disk usage. Build Pulsar before starting Remnawave or in a controlled maintenance window. Move the Panel stack to a larger/separate VPS if sustained swap churn or resource pressure affects requests.
 
-## Safe entitlement fixtures
+## Entitlement mapping
 
-The live Panel contains two clearly marked, deliberately unusable entitlement fixtures. They exist only to verify Standard/LTE assignment before real traffic Nodes are available.
+Standard access maps to the internal squad `Pulsar`, LTE adds `PulsarLTE`; their UUIDs are the values of `REMNAWAVE_STANDARD_SQUAD_UUID` and `REMNAWAVE_LTE_SQUAD_UUID` in `/etc/pulsar/pulsar.env`. Both squads are backed by real Nodes. The earlier `PULSAR_TEST_STANDARD`/`PULSAR_TEST_LTE` blackhole fixtures were replaced during the traffic rollout and no longer exist in the Panel; `deploy/remnawave/bootstrap-test-entitlements.sh` is therefore historical and must not be run against production.
 
-| Kind     | Profile UUID                           | Inbound UUID                           | Internal squad UUID                    |
-| -------- | -------------------------------------- | -------------------------------------- | -------------------------------------- |
-| Standard | `6c3a8d36-0483-48b2-875f-ce778f0e6bbb` | `e279b4b8-2ec4-4a19-aeaf-fd5bf51ab2b1` | `1d64e64b-b56e-4fa5-a947-f0d071114ddf` |
-| LTE      | `46bea9a0-6682-436f-beb1-8e5b315a99c8` | `8fafb99a-638b-4aef-a4dd-b8ccff90cdf8` | `1d0c6f11-8049-48c0-8d2b-ed79f00ad128` |
+Adding or retiring a Node changes only which inbounds belong to those squads — never the squad UUIDs, because the site provisions users against them. A new Node is first attached to a throwaway squad, verified with real traffic from Russia, and only then added to `Pulsar`/`PulsarLTE`.
 
-Profiles are named `PULSAR_TEST_STANDARD_PROFILE` and `PULSAR_TEST_LTE_PROFILE`; their inbounds/squads are named `PULSAR_TEST_STANDARD` and `PULSAR_TEST_LTE`. Each dummy inbound listens on `127.0.0.1` in a hypothetical Node config and routes all traffic to Xray `blackhole`. No Node or Host is attached, and no client port is published on this VPS. Do not turn these fixtures into production profiles; replace their squad UUIDs with squads backed by separately hosted Nodes during the real traffic rollout.
-
-The idempotent bootstrap and safe inspection commands are:
+Useful inspection commands that remain safe to run:
 
 ```bash
-sudo /opt/pulsar/current/deploy/remnawave/bootstrap-test-entitlements.sh
 sudo /opt/pulsar/current/deploy/remnawave/inspect-safe-state.sh
 sudo /opt/pulsar/current/deploy/remnawave/smoke-test-provider.sh
 ```
-
-The live provider smoke test created a temporary Standard user, updated the same UUID to two devices plus LTE, fetched it by deterministic identity, rotated its subscription URL, received HTTP 200 from the subscription page, deleted the user, and confirmed HTTP 404 afterward. Temporary user `2fcefcf7-5125-437e-a727-fca1eaed5a83` was deleted.
 
 ## Production API contract
 
@@ -94,12 +90,12 @@ REMNAWAVE_TIMEOUT_MS=8000
 
 The token is stored only in `/etc/pulsar/pulsar.env` (`root:pulsar`, mode `0640`). Rotate it with `deploy/remnawave/rotate-pulsar-api-token.sh`; the script replaces the environment value atomically, verifies the new credential, and then revokes superseded `pulsar-backend*` tokens. Never print, log, or copy the token into Markdown.
 
-The following work remains before billing can be enabled:
+Work that is still open now that billing is live:
 
-1. Add at least one separate Remnawave Node and Host, then replace the dummy squads with production squads. Do not install the Node on this management VPS.
-2. Expand adapter coverage for expired/blocked users and true network timeouts against a disposable compatible Panel. Unit coverage already includes create, update, Standard/LTE assignment, state reads, URL regeneration, ambiguous-create recovery, sanitized 5xx errors, and oversized responses.
-3. Reconcile local `PENDING`/`FAILED` subscription syncs and prove through a process-crash acceptance test that retries cannot create duplicate Remnawave users.
-4. Run the full Platega sandbox payment -> committed local subscription -> outbox provisioning -> usable connection flow, including duplicate callbacks and transient Panel failures.
-5. Keep `BILLING_ENABLED=false` until all acceptance cases pass and rollback/incident procedures are rehearsed; only then enable billing as a separate controlled change.
+1. Expand adapter coverage for expired/blocked users and true network timeouts against a disposable compatible Panel. Unit coverage already includes create, update, Standard/LTE assignment, state reads, URL regeneration, ambiguous-create recovery, sanitized 5xx errors, and oversized responses.
+2. Reconcile local `PENDING`/`FAILED` subscription syncs and prove through a process-crash acceptance test that retries cannot create duplicate Remnawave users.
+3. Alerting on a Node going offline (currently noticed by hand) and on failed provisioning jobs.
+
+Node-level operations — adding, replacing or retiring a traffic Node, choosing its Reality dest, and the client fingerprint rule (`edge`, never `chrome`, which Russian DPI blocks) — are documented in the operator-local `docs/infrastructure/remnawave-operations.md`, not here.
 
 The Pulsar readiness endpoint deliberately does not call Remnawave. Monitor failed provisioning jobs, `syncStatus`, `IntegrationLog`, provider health, and worker heartbeat independently. Panel/subscription HTTP health proves only that those services are reachable; it does not prove that Pulsar provisioning works.
