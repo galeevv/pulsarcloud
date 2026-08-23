@@ -532,38 +532,43 @@ function AppleRegionStep({ platform }: { platform: Platform }) {
       ]
     : [
         { text: "Откройте приложение «Настройки»." },
-        { text: "Нажмите на свое имя, а затем — «Контент и покупки»." },
-        { text: "Нажмите «Просмотреть». Может потребоваться выполнить вход." },
+        { text: "Нажмите на свое имя → «Контент и покупки» → «Просмотреть»." },
+        { text: "Авторизуйтесь с помощью Face ID или Touch ID." },
         {
-          image: "/instructions/app-store/apple-country-region.png",
+          image: "/instructions/app-store/apple-region-tinkoff.png",
           alt: "Раздел «Страна/регион» в настройках Аккаунта Apple",
-          text: "Нажмите «Страна/регион».",
+          text: "Нажмите «Страна/регион». При активных подписках их потребуется отменить.",
         },
-        { text: "Выберите новую страну или регион." },
-        { text: "Нажмите «Изменить страну или регион»." },
+        { text: "Выберите страну. Например, США." },
         {
-          text: "Выберите новую страну или регион, затем просмотрите положения и условия.",
+          text: "Прочитайте условия и нажмите «Принять».",
         },
         {
-          text: "Нажмите «Принимаю» в верхнем правом углу, затем снова нажмите «Принимаю» для подтверждения.",
+          text: "Выберите способ оплаты. Если покупки не нужны, выберите «Нет».",
+        },
+        {
+          text: "Введите адрес для выставления счета и нажмите «Далее».",
         },
       ]
 
   return (
-    <section className="flex flex-col gap-5" aria-labelledby="region-title">
-      <div className="flex flex-col gap-1">
+    <section
+      className="flex flex-col items-center gap-5 text-center"
+      aria-labelledby="region-title"
+    >
+      <div className="flex flex-col items-center gap-1">
         <h1 id="region-title" className="text-xl font-semibold">
           Поменяйте регион App Store
         </h1>
-        <p className="text-sm text-muted-foreground">
+        <p className="text-center text-sm text-muted-foreground">
           {isMacOS
             ? "Смените регион Аккаунта Apple через Apple Music или Apple TV."
-            : "В российском App Store приложение Happ может быть недоступно."}
+            : "Для Happ может понадобиться смена региона."}
         </p>
       </div>
       <Card
         size="sm"
-        className="rounded-[22px] border border-border/70 bg-transparent py-0 shadow-none! ring-0!"
+        className="w-full rounded-[22px] border border-border/70 bg-transparent py-0 text-left shadow-none! ring-0!"
       >
         <CardContent className="p-4">
           <ol className="flex list-decimal flex-col gap-1 pl-5 text-sm marker:font-semibold">
@@ -595,12 +600,12 @@ function AppleSupportSource() {
     <p className="text-xs text-muted-foreground">
       Источник:{" "}
       <a
-        href="https://support.apple.com/ru-ru/118283"
+        href="https://t-j.ru/apple-region/"
         target="_blank"
         rel="noopener noreferrer"
         className="underline underline-offset-4"
       >
-        Служба поддержки Apple
+        Т—Ж
       </a>
       .
     </p>

@@ -128,7 +128,6 @@ export function ReferralsMetrics({
           </div>
         </div>
       </section>
-      <Separator />
       <div
         className="flex flex-wrap items-center justify-center gap-2"
         aria-label={`${invitedValue} приглашено, ${earnedDays} бонусных дней получено`}

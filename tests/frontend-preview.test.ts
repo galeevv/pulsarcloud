@@ -167,6 +167,10 @@ test("Incy and Happ instruction flows use the correct links", async () => {
   )
   assert.doesNotMatch(instructions, /SubscriptionUrlCard/)
   assert.match(instructions, /Поменяйте регион App Store/)
+  assert.match(
+    instructions,
+    /\/instructions\/app-store\/apple-region-tinkoff\.png/
+  )
   assert.match(instructions, /useSyncExternalStore/)
   for (const platform of ["Android", "iOS", "Windows", "macOS"]) {
     assert.ok(instructions.includes(platform), `missing ${platform} flow`)
@@ -221,23 +225,23 @@ test("Incy and Happ instruction flows use the correct links", async () => {
   assert.doesNotMatch(referrals, /<Carousel/)
   assert.match(
     instructions,
-    /\/instructions\/app-store\/apple-country-region\.png/
+    /\/instructions\/app-store\/apple-region-tinkoff\.png/
   )
   assert.match(
     instructions,
     /\/instructions\/app-store\/apple-account-information\.png/
   )
-  assert.match(instructions, /https:\/\/support\.apple\.com\/ru-ru\/118283/)
+  assert.match(instructions, /https:\/\/t-j\.ru\/apple-region\//)
   assert.doesNotMatch(instructions, /region-account|region-country|журнал T2/)
   for (const step of [
     "Откройте приложение «Настройки».",
-    "Нажмите на свое имя, а затем — «Контент и покупки».",
-    "Нажмите «Просмотреть». Может потребоваться выполнить вход.",
-    "Нажмите «Страна/регион».",
-    "Выберите новую страну или регион.",
-    "Нажмите «Изменить страну или регион».",
-    "Выберите новую страну или регион, затем просмотрите положения и условия.",
-    "Нажмите «Принимаю» в верхнем правом углу, затем снова нажмите «Принимаю» для подтверждения.",
+    "Нажмите на свое имя → «Контент и покупки» → «Просмотреть».",
+    "Авторизуйтесь с помощью Face ID или Touch ID.",
+    "Нажмите «Страна/регион». При активных подписках их потребуется отменить.",
+    "Выберите страну. Например, США.",
+    "Прочитайте условия и нажмите «Принять».",
+    "Выберите способ оплаты. Если покупки не нужны, выберите «Нет».",
+    "Введите адрес для выставления счета и нажмите «Далее».",
   ]) {
     assert.ok(instructions.includes(step))
   }
