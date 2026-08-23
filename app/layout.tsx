@@ -8,9 +8,9 @@ export const metadata: Metadata = {
   title: "PULSAR",
   description: "Личный кабинет PulsarVPN",
   icons: {
-    icon: "/logo/Logo1.svg",
-    shortcut: "/logo/Logo1.svg",
-    apple: "/logo/logo-no-bg-preview (carve.photos).png",
+    icon: "/logo/Logo1.svg?v=2",
+    shortcut: "/logo/Logo1.svg?v=2",
+    apple: "/logo/Logo1.svg?v=2",
   },
 }
 

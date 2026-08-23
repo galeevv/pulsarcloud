@@ -71,9 +71,9 @@ Production invariants:
 - `PULSAR_TEST_MODE=false` and `PULSAR_ALLOW_TEST_MODE_IN_PRODUCTION=false`;
 - real `RESEND_API_KEY`, verified sender, Telegram credentials/webhook secret, Platega merchant credentials, and `PAYMENT_PROVIDER=platega`;
 - `REMNAWAVE_PROVIDER=http`, `REMNAWAVE_BASE_URL=https://panel.pulsar-cloud.space`, protected API token, Standard/LTE squad UUIDs, and an 8-second bounded timeout outside test mode;
-- `BILLING_ENABLED=false` until the implemented Remnawave 2.8 HTTP provider, Platega callback, worker, and a usable subscription through a separate Node pass one end-to-end acceptance run.
+- `BILLING_ENABLED` — `true` in the current production environment; it was flipped only after the Remnawave HTTP provider, Platega callback, worker, and a usable subscription through a separate Node passed one end-to-end acceptance run. For any **new** environment start at `false` and repeat that acceptance before enabling it.
 
-Installing the Panel, implementing its management API, and creating dummy squads still do **not** provide usable VPN connectivity. Do not set `BILLING_ENABLED=true` until the complete Platega sandbox-to-worker flow provisions a subscription that connects through a separate real Node/Host.
+Installing the Panel and its management API does **not** by itself provide usable VPN connectivity: that requires separate traffic Nodes attached to the squads the site provisions against. Use `deploy/pulsar/go-live.sh` to flip billing — it backs up the env file and rolls back on an unhealthy start.
 
 The same file is read by systemd and sourced for release commands. Use shell-compatible `KEY=value` lines and quote values containing spaces, for example `RESEND_FROM_EMAIL='Pulsar <auth@pulsar-cloud.space>'`. Do not add `export`, do not keep a production `.env` in the repository, and never print the file in deployment logs.
 
@@ -208,7 +208,7 @@ sudo systemctl restart pulsar-web pulsar-worker
 
 `install-panel.sh` downloads the official production compose definition, changes only the host-side Panel and metrics mappings to loopback ports 3020/3021, keeps PostgreSQL on its loopback port 6767, sets `API_INSTANCES=1`, generates secrets, limits Docker logs, and starts the Panel stack. `bootstrap-panel.sh` performs the one-time administrator/API-token bootstrap, starts the bundled subscription page on loopback port 3010, and idempotently creates the loopback/blackhole TEST Standard/LTE profiles and squads. It writes only their non-secret UUIDs into `/etc/pulsar/pulsar.env`. Protect all generated `.env`, token, and bootstrap-credential files with root-only permissions and rotate the initial administrator credential after handoff.
 
-Do not install or start a Remnawave Node on this VPS. The scripts install management services and the API-side Standard/LTE entitlement fixtures only. The HTTP adapter is implemented, but leave `BILLING_ENABLED=false` until a separate traffic Node and the complete paid acceptance path are verified.
+Do not install or start a Remnawave Node on this VPS — traffic Nodes belong on separate servers. The bootstrap script's Standard/LTE entitlement fixtures were replaced by real squads during the traffic rollout, so on the live host it is historical; do not re-run it there. In a new environment, leave `BILLING_ENABLED=false` until a separate traffic Node and the complete paid acceptance path are verified.
 
 ## 9. Firewall, callbacks, and acceptance
 
@@ -242,7 +242,7 @@ The final command is a read-only audit: it parses (but never sources or prints) 
 
 Do not allow ports 3000, 3010, 3020, 3021, or 6767 through UFW; they must remain loopback-only. SQLite has no listener. Confirm that no Remnawave Node or VPN inbound port is present on this host. Configure Telegram webhook `https://pulsar-cloud.space/api/integrations/telegram/webhook` with its secret header and the Platega callback alias `https://pulsar-cloud.space/api/integrations/payments/platega/callback`.
 
-Current acceptance proves the website, Panel, subscription page, and the Remnawave 2.8 management provider: create, Standard/LTE update, lookup, URL rotation, subscription-page response, and cleanup passed against the live Panel. It still does not prove delivery of usable VPN traffic because no separate Node/Host exists, and no complete Platega payment → callback → worker → working connection run has passed. Keep `BILLING_ENABLED=false` until those two conditions, duplicate callback idempotency, and rollback handling are accepted together.
+Acceptance in the live environment has since gone further: separate traffic Nodes are attached, the Platega payment → callback → worker → working connection run has passed, and billing is enabled. Treat the checklist above as the gate for a **new** environment, and re-run the acceptance path after any change to the payment, provisioning, or Node topology.
 
 ## 10. Rollback
 
