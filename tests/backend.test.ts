@@ -25,6 +25,8 @@ process.env.RESEND_FROM_EMAIL = "Pulsar <auth@example.test>"
 process.env.TELEGRAM_BOT_TOKEN = "123456789:test-pulsar-bot-token"
 process.env.TELEGRAM_BOT_USERNAME = "pulsar_test_bot"
 process.env.TELEGRAM_WEBHOOK_SECRET = "telegram-test-webhook-secret"
+process.env.DEMO_ACCOUNT_EMAIL = "demo@pulsar.local"
+process.env.DEMO_ACCOUNT_CODE = "424242"
 
 type Modules = Awaited<ReturnType<typeof loadModules>>
 let modules: Modules
@@ -3145,4 +3147,51 @@ test("cookie-authenticated mutations require exact same origin", async () => {
       })
     )
   )
+})
+
+test("demo account signs in without an email and cannot pay", async () => {
+  const demoEmail = "demo@pulsar.local"
+  const requested = await modules.auth.requestEmailChallenge({
+    email: demoEmail,
+  })
+  const mailJobs = await modules.db.outboxJob.count({
+    where: { type: "SEND_EMAIL_OTP", aggregateId: requested.challengeId },
+  })
+  assert.equal(mailJobs, 0, "письмо демо-аккаунту отправляться не должно")
+
+  const login = await modules.auth.verifyEmailChallenge({
+    challengeId: requested.challengeId,
+    otp: "424242",
+  })
+  assert.equal(login.kind, "USER")
+  assert.equal(await modules.userDashboard.isDemoAccount(login.userId), true)
+
+  await assert.rejects(
+    () =>
+      modules.billing.createCheckout({
+        userId: login.userId,
+        durationMonths: 1,
+        deviceLimit: 1,
+        lteEnabled: false,
+        idempotencyKey: "demo-account-checkout",
+      }),
+    (error: unknown) =>
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code: string }).code === "BILLING_DISABLED"
+  )
+
+  const regular = await modules.db.$transaction((tx) =>
+    modules.users.createUserGraph(tx, { isTest: true })
+  )
+  const payment = await modules.billing.createCheckout({
+    userId: regular.id,
+    durationMonths: 1,
+    deviceLimit: 1,
+    lteEnabled: false,
+    idempotencyKey: "regular-account-checkout",
+  })
+  assert.ok(payment.checkoutUrl, "обычный пользователь платит как раньше")
+  assert.equal(await modules.userDashboard.isDemoAccount(regular.id), false)
 })

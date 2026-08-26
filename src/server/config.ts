@@ -31,6 +31,16 @@ const envSchema = z.object({
   TELEGRAM_BOT_USERNAME: z.string().optional(),
   TELEGRAM_WEBHOOK_SECRET: z.string().optional(),
   ADMIN_EMAIL: z.email().transform((value) => value.trim().toLowerCase()),
+  // Демо-аккаунт для внешних ревью: входит по фиксированному коду без письма
+  // и не может оплачивать. Пока переменные пустые, ничего этого не существует.
+  DEMO_ACCOUNT_EMAIL: z
+    .email()
+    .transform((value) => value.trim().toLowerCase())
+    .optional(),
+  DEMO_ACCOUNT_CODE: z
+    .string()
+    .regex(/^\d{6}$/)
+    .optional(),
   ADMIN_TELEGRAM_ID: z.string().regex(/^\d+$/),
   ADMIN_TELEGRAM_USERNAME: z.string().optional(),
   PAYMENT_PROVIDER: z.enum(["test", "platega"]).default("test"),
@@ -253,6 +263,10 @@ function buildConfig() {
       telegramId: env.ADMIN_TELEGRAM_ID,
       telegramUsername: env.ADMIN_TELEGRAM_USERNAME,
     },
+    demoAccount:
+      env.DEMO_ACCOUNT_EMAIL && env.DEMO_ACCOUNT_CODE
+        ? { email: env.DEMO_ACCOUNT_EMAIL, code: env.DEMO_ACCOUNT_CODE }
+        : null,
     payments: {
       enabled: env.BILLING_ENABLED,
       provider: env.PAYMENT_PROVIDER,

@@ -64,6 +64,8 @@ type SubscriptionDevicesCardProps = {
   maxDeviceLimit: number
   deviceLimitUpgradePriceRub: number
   pricingVersion: number
+  /** Демо-аккаунт: оплата апгрейда недоступна. */
+  paymentsUnavailable?: boolean
 }
 
 function formatDeviceCountAfterPreposition(count: number) {
@@ -81,6 +83,7 @@ export function SubscriptionDevicesCard({
   maxDeviceLimit,
   deviceLimitUpgradePriceRub,
   pricingVersion,
+  paymentsUnavailable = false,
 }: SubscriptionDevicesCardProps) {
   const [devices, setDevices] = React.useState<SubscriberDevice[]>([])
   const [loading, setLoading] = React.useState(true)
@@ -179,6 +182,7 @@ export function SubscriptionDevicesCard({
               maxDeviceLimit={maximum}
               deviceLimitUpgradePriceRub={deviceLimitUpgradePriceRub}
               pricingVersion={pricingVersion}
+              paymentsUnavailable={paymentsUnavailable}
             />
           </>
         ) : null}
@@ -275,11 +279,13 @@ function DeviceLimitUpgradeDialog({
   maxDeviceLimit,
   deviceLimitUpgradePriceRub,
   pricingVersion,
+  paymentsUnavailable,
 }: {
   currentDeviceLimit: number
   maxDeviceLimit: number
   deviceLimitUpgradePriceRub: number
   pricingVersion: number
+  paymentsUnavailable: boolean
 }) {
   const [open, setOpen] = React.useState(false)
   const [targetDeviceLimit, setTargetDeviceLimit] = React.useState(
@@ -394,10 +400,14 @@ function DeviceLimitUpgradeDialog({
             type="button"
             size="lg"
             className={pulsarCtaClass}
-            disabled={pending}
+            disabled={pending || paymentsUnavailable}
             onClick={createPayment}
           >
-            {pending ? "Создаём платёж…" : formatPreviewRub(amountMinor / 100)}
+            {paymentsUnavailable
+              ? "Оплата временно недоступна"
+              : pending
+                ? "Создаём платёж…"
+                : formatPreviewRub(amountMinor / 100)}
           </Button>
         </DialogFooter>
       </DialogContent>

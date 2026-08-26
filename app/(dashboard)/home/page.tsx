@@ -23,6 +23,7 @@ import {
   getPricingView,
   getLastPurchasePreferencesView,
   getSubscriptionView,
+  isDemoAccount,
 } from "@/src/server/queries/user-dashboard"
 import { requireWebSession } from "@/src/server/transport/web/session"
 import type {
@@ -36,11 +37,13 @@ export const metadata: Metadata = {
 
 export default async function HomePage() {
   const session = await requireWebSession("USER")
-  const [subscription, settings, lastPurchase] = await Promise.all([
-    getSubscriptionView(session.userId),
-    getPricingView(session.userId),
-    getLastPurchasePreferencesView(session.userId),
-  ])
+  const [subscription, settings, lastPurchase, paymentsUnavailable] =
+    await Promise.all([
+      getSubscriptionView(session.userId),
+      getPricingView(session.userId),
+      getLastPurchasePreferencesView(session.userId),
+      isDemoAccount(session.userId),
+    ])
   const status = subscription?.status ?? "NONE"
   const renewalLabel =
     status === "NONE" ? "Оплатить подписку" : "Продлить подписку"
@@ -123,6 +126,7 @@ export default async function HomePage() {
                 triggerLabel={renewalLabel}
                 initialDeviceLimit={lastPurchase?.deviceLimit}
                 initialLteEnabled={lastPurchase?.lteEnabled}
+                paymentsUnavailable={paymentsUnavailable}
               />
               <Link
                 href="/instructions"

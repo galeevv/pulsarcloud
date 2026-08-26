@@ -13,6 +13,7 @@ import {
   type VerifiedPaymentEvent,
 } from "@/src/server/infrastructure/payments/provider"
 import { BusinessError } from "@/src/server/application/errors"
+import { isDemoAccount } from "@/src/server/queries/user-dashboard"
 import { grantReferralSubscriptionReward } from "@/src/server/domain/referrals/service"
 import {
   correlationId,
@@ -320,6 +321,8 @@ export async function createCheckout(
   const user = await db.user.findUnique({ where: { id: input.userId } })
   if (!user || user.status !== "ACTIVE" || user.isTest !== config.testMode)
     throw new BusinessError("AUTH_FORBIDDEN", 403)
+  if (await isDemoAccount(input.userId))
+    throw new BusinessError("BILLING_DISABLED", 403)
   const paymentMethod = input.paymentMethod ?? "SBP"
   if (paymentMethod !== "SBP")
     throw new BusinessError("PAYMENT_INVALID_PARAMETERS", 400)
@@ -452,6 +455,8 @@ export async function createDeviceLimitUpgradeCheckout(
   const user = await db.user.findUnique({ where: { id: input.userId } })
   if (!user || user.status !== "ACTIVE" || user.isTest !== config.testMode)
     throw new BusinessError("AUTH_FORBIDDEN", 403)
+  if (await isDemoAccount(input.userId))
+    throw new BusinessError("BILLING_DISABLED", 403)
 
   const now = new Date()
   await expireOverduePendingPayments({ now, userId: input.userId })

@@ -70,6 +70,21 @@ export async function getSubscriptionView(
   }
 }
 
+/**
+ * Демо-аккаунт для внешних ревью: продукт показываем целиком, оплату не даём.
+ * UI прячет кнопки, а сам запрет живёт в billing/service — чтобы отказ нельзя
+ * было обойти запросом мимо интерфейса.
+ */
+export async function isDemoAccount(userId: string) {
+  const demoEmail = getConfig().demoAccount?.email
+  if (!demoEmail) return false
+  const identity = await db.authIdentity.findFirst({
+    where: { userId, provider: "EMAIL", emailNormalized: demoEmail },
+    select: { id: true },
+  })
+  return Boolean(identity)
+}
+
 export async function getLastPurchasePreferencesView(userId: string) {
   return db.payment.findFirst({
     where: { userId, status: "CONFIRMED" },

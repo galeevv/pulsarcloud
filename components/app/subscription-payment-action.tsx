@@ -344,14 +344,31 @@ export function SubscriptionPaymentAction({
   triggerLabel,
   initialDeviceLimit,
   initialLteEnabled,
+  paymentsUnavailable = false,
 }: {
   settings: PreviewPricing
   triggerLabel: string
   initialDeviceLimit?: number
   initialLteEnabled?: boolean
+  paymentsUnavailable?: boolean
 }) {
   const [drawerOpen, setDrawerOpen] = React.useState(false)
   const [dialogOpen, setDialogOpen] = React.useState(false)
+
+  // Показываем неактивную кнопку вместо формы: сервер всё равно откажет,
+  // и лучше сказать об этом сразу, чем после заполнения параметров.
+  if (paymentsUnavailable)
+    return (
+      <Button
+        type="button"
+        size="lg"
+        disabled
+        className={cn(pulsarCtaClass, "w-full")}
+      >
+        <CreditCardIcon data-icon="inline-start" />
+        Оплата временно недоступна
+      </Button>
+    )
 
   return (
     <>
