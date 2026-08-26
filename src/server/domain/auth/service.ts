@@ -68,10 +68,17 @@ export async function requestEmailChallenge(input: {
   if (purpose === "ADMIN_LOGIN" && email !== getConfig().admin.email)
     throw new BusinessError("ADMIN_FORBIDDEN", 403)
   const id = randomUUID()
-  const otp = randomInt(0, 1_000_000).toString().padStart(6, "0")
+  const config = getConfig()
+  // Демо-аккаунт для внешних ревью входит по заранее известному коду: письмо
+  // не отправляется, почтовый ящик не нужен. Всё остальное — обычный вход:
+  // те же лимиты, тот же срок жизни челленджа, та же проверка кода.
+  const isDemoLogin =
+    purpose === "USER_LOGIN" && config.demoAccount?.email === email
+  const otp = isDemoLogin
+    ? config.demoAccount!.code
+    : randomInt(0, 1_000_000).toString().padStart(6, "0")
   const magicLinkToken = randomToken(32)
   const now = new Date()
-  const config = getConfig()
   try {
     await authTransaction(async (tx) => {
       const recentChallenge = await tx.loginChallenge.findFirst({
@@ -127,6 +134,7 @@ export async function requestEmailChallenge(input: {
           devOtpEncrypted: config.testMode ? encryptSensitive(otp) : null,
         },
       })
+      if (isDemoLogin) return
       await tx.outboxJob.create({
         data: {
           type: "SEND_EMAIL_OTP",

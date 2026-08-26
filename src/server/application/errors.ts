@@ -27,7 +27,7 @@ const friendlyMessages: Record<ErrorCode, string> = {
   AUTH_IDENTITY_IN_USE: "Этот способ входа уже связан с другим аккаунтом.",
   AUTH_RATE_LIMITED: "Слишком много попыток. Попробуйте немного позже.",
   AUTH_FORBIDDEN: "Войдите в аккаунт, чтобы продолжить.",
-  BILLING_DISABLED: "Оплата временно приостановлена. Попробуйте позже.",
+  BILLING_DISABLED: "Оплата временно недоступна.",
   PAYMENT_INVALID_PARAMETERS: "Проверьте параметры подписки.",
   PAYMENT_PRICE_CHANGED:
     "Цена изменилась. Обновите страницу и проверьте сумму ещё раз.",
