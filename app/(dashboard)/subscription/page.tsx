@@ -29,6 +29,7 @@ import {
   getPricingView,
   getLastPurchasePreferencesView,
   getSubscriptionView,
+  isBillingDisabledForUser,
 } from "@/src/server/queries/user-dashboard"
 import { requireWebSession } from "@/src/server/transport/web/session"
 import type {
@@ -42,11 +43,13 @@ export const metadata: Metadata = {
 
 export default async function SubscriptionPage() {
   const session = await requireWebSession("USER")
-  const [subscription, settings, lastPurchase] = await Promise.all([
-    getSubscriptionView(session.userId),
-    getPricingView(session.userId),
-    getLastPurchasePreferencesView(session.userId),
-  ])
+  const [subscription, settings, lastPurchase, billingDisabled] =
+    await Promise.all([
+      getSubscriptionView(session.userId),
+      getPricingView(session.userId),
+      getLastPurchasePreferencesView(session.userId),
+      isBillingDisabledForUser(session.userId),
+    ])
   const status = subscription?.status ?? "NONE"
   const hasActiveSubscription =
     subscription && ["ACTIVE", "TRIAL"].includes(status)
@@ -76,7 +79,7 @@ export default async function SubscriptionPage() {
         )}
 
         {!hasSubscriptionRecord ? (
-          <SubscriptionEmptyState settings={settings} />
+          <SubscriptionEmptyState settings={settings} billingDisabled={billingDisabled} />
         ) : subscription ? (
           <>
             {isConnectionReady ? (
@@ -121,11 +124,12 @@ export default async function SubscriptionPage() {
                 triggerLabel="Возобновить подписку"
                 initialDeviceLimit={lastPurchase?.deviceLimit}
                 initialLteEnabled={lastPurchase?.lteEnabled}
+                billingDisabled={billingDisabled}
               />
             )}
           </>
         ) : (
-          <SubscriptionEmptyState settings={settings} />
+          <SubscriptionEmptyState settings={settings} billingDisabled={billingDisabled} />
         )}
       </PulsarAssetCard>
 
@@ -135,6 +139,7 @@ export default async function SubscriptionPage() {
           maxDeviceLimit={settings.maxDeviceLimit}
           deviceLimitUpgradePriceRub={settings.deviceLimitUpgradePriceRub}
           pricingVersion={settings.pricingVersion}
+          billingDisabled={billingDisabled}
         />
       ) : null}
     </main>
@@ -143,8 +148,10 @@ export default async function SubscriptionPage() {
 
 function SubscriptionEmptyState({
   settings,
+  billingDisabled,
 }: {
   settings: ComponentProps<typeof SubscriptionPaymentAction>["settings"]
+  billingDisabled: boolean
 }) {
   return (
     <Empty>
@@ -162,6 +169,7 @@ function SubscriptionEmptyState({
         <SubscriptionPaymentAction
           settings={settings}
           triggerLabel="Оплатить подписку"
+          billingDisabled={billingDisabled}
         />
       </EmptyContent>
     </Empty>

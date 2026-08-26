@@ -344,14 +344,36 @@ export function SubscriptionPaymentAction({
   triggerLabel,
   initialDeviceLimit,
   initialLteEnabled,
+  billingDisabled = false,
 }: {
   settings: PreviewPricing
   triggerLabel: string
   initialDeviceLimit?: number
   initialLteEnabled?: boolean
+  billingDisabled?: boolean
 }) {
   const [drawerOpen, setDrawerOpen] = React.useState(false)
   const [dialogOpen, setDialogOpen] = React.useState(false)
+
+  // Оплата отключена точечно для аккаунта: показываем неактивную кнопку вместо
+  // формы, чтобы пользователь не дошёл до отказа на стороне сервера.
+  if (billingDisabled)
+    return (
+      <div className="flex flex-col items-center gap-2">
+        <Button
+          type="button"
+          size="lg"
+          disabled
+          className={cn(pulsarCtaClass, "w-full")}
+        >
+          <CreditCardIcon data-icon="inline-start" />
+          {triggerLabel}
+        </Button>
+        <p className="text-muted-foreground text-center text-xs">
+          Для этого аккаунта оплата недоступна.
+        </p>
+      </div>
+    )
 
   return (
     <>

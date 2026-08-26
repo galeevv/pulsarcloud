@@ -20,6 +20,7 @@ import {
   getLastPurchasePreferencesView,
   getSubscriptionView,
   getReferralsView,
+  isBillingDisabledForUser,
 } from "@/src/server/queries/user-dashboard"
 import { requireWebSession } from "@/src/server/transport/web/session"
 
@@ -29,13 +30,19 @@ export const metadata: Metadata = {
 
 export default async function ReferralsPage() {
   const session = await requireWebSession("USER")
-  const [{ user, inviteUrl }, settings, subscription, lastPurchase] =
-    await Promise.all([
-      getReferralsView(session.userId),
-      getPricingView(session.userId),
-      getSubscriptionView(session.userId),
-      getLastPurchasePreferencesView(session.userId),
-    ])
+  const [
+    { user, inviteUrl },
+    settings,
+    subscription,
+    lastPurchase,
+    billingDisabled,
+  ] = await Promise.all([
+    getReferralsView(session.userId),
+    getPricingView(session.userId),
+    getSubscriptionView(session.userId),
+    getLastPurchasePreferencesView(session.userId),
+    isBillingDisabledForUser(session.userId),
+  ])
   if (!user.referralProfile?.isEnabled)
     return (
       <main className="pulsar-container">
@@ -64,6 +71,7 @@ export default async function ReferralsPage() {
                 }
                 initialDeviceLimit={lastPurchase?.deviceLimit}
                 initialLteEnabled={lastPurchase?.lteEnabled}
+                billingDisabled={billingDisabled}
               />
             </EmptyContent>
           </Empty>

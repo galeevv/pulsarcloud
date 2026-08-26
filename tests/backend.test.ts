@@ -3146,3 +3146,50 @@ test("cookie-authenticated mutations require exact same origin", async () => {
     )
   )
 })
+
+test("billing can be disabled for a single account without affecting others", async () => {
+  const demo = await modules.db.$transaction((tx) =>
+    modules.users.createUserGraph(tx, { isTest: true })
+  )
+  const regular = await modules.db.$transaction((tx) =>
+    modules.users.createUserGraph(tx, { isTest: true })
+  )
+  await modules.db.user.update({
+    where: { id: demo.id },
+    data: { billingDisabled: true },
+  })
+
+  await assert.rejects(
+    () =>
+      modules.billing.createCheckout({
+        userId: demo.id,
+        durationMonths: 1,
+        deviceLimit: 1,
+        lteEnabled: false,
+        idempotencyKey: "billing-disabled-demo",
+      }),
+    (error: unknown) =>
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code: string }).code === "BILLING_DISABLED_FOR_ACCOUNT"
+  )
+
+  const subscriptionPayment = await modules.billing.createCheckout({
+    userId: regular.id,
+    durationMonths: 1,
+    deviceLimit: 1,
+    lteEnabled: false,
+    idempotencyKey: "billing-enabled-regular",
+  })
+  assert.ok(subscriptionPayment.checkoutUrl)
+
+  assert.equal(
+    await modules.userDashboard.isBillingDisabledForUser(demo.id),
+    true
+  )
+  assert.equal(
+    await modules.userDashboard.isBillingDisabledForUser(regular.id),
+    false
+  )
+})

@@ -6,6 +6,7 @@ export type ErrorCode =
   | "AUTH_RATE_LIMITED"
   | "AUTH_FORBIDDEN"
   | "BILLING_DISABLED"
+  | "BILLING_DISABLED_FOR_ACCOUNT"
   | "PAYMENT_INVALID_PARAMETERS"
   | "PAYMENT_PRICE_CHANGED"
   | "PAYMENT_ALREADY_PROCESSED"
@@ -28,6 +29,8 @@ const friendlyMessages: Record<ErrorCode, string> = {
   AUTH_RATE_LIMITED: "Слишком много попыток. Попробуйте немного позже.",
   AUTH_FORBIDDEN: "Войдите в аккаунт, чтобы продолжить.",
   BILLING_DISABLED: "Оплата временно приостановлена. Попробуйте позже.",
+  BILLING_DISABLED_FOR_ACCOUNT:
+    "Для этого аккаунта оплата недоступна. Обратитесь в поддержку.",
   PAYMENT_INVALID_PARAMETERS: "Проверьте параметры подписки.",
   PAYMENT_PRICE_CHANGED:
     "Цена изменилась. Обновите страницу и проверьте сумму ещё раз.",

@@ -320,6 +320,8 @@ export async function createCheckout(
   const user = await db.user.findUnique({ where: { id: input.userId } })
   if (!user || user.status !== "ACTIVE" || user.isTest !== config.testMode)
     throw new BusinessError("AUTH_FORBIDDEN", 403)
+  if (user.billingDisabled)
+    throw new BusinessError("BILLING_DISABLED_FOR_ACCOUNT", 403)
   const paymentMethod = input.paymentMethod ?? "SBP"
   if (paymentMethod !== "SBP")
     throw new BusinessError("PAYMENT_INVALID_PARAMETERS", 400)
@@ -452,6 +454,8 @@ export async function createDeviceLimitUpgradeCheckout(
   const user = await db.user.findUnique({ where: { id: input.userId } })
   if (!user || user.status !== "ACTIVE" || user.isTest !== config.testMode)
     throw new BusinessError("AUTH_FORBIDDEN", 403)
+  if (user.billingDisabled)
+    throw new BusinessError("BILLING_DISABLED_FOR_ACCOUNT", 403)
 
   const now = new Date()
   await expireOverduePendingPayments({ now, userId: input.userId })

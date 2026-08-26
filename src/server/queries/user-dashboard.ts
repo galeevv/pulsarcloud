@@ -70,6 +70,19 @@ export async function getSubscriptionView(
   }
 }
 
+/**
+ * Оплата может быть точечно отключена у отдельного аккаунта (демо-доступ для
+ * партнёров). Флаг нужен UI, чтобы не показывать кнопку, которая всё равно
+ * упрётся в отказ на сервере; сам запрет живёт в billing/service.
+ */
+export async function isBillingDisabledForUser(userId: string) {
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: { billingDisabled: true },
+  })
+  return user?.billingDisabled ?? false
+}
+
 export async function getLastPurchasePreferencesView(userId: string) {
   return db.payment.findFirst({
     where: { userId, status: "CONFIRMED" },
