@@ -267,7 +267,7 @@ export default async function AdminUserDetailsPage({
                 />
                 <DetailRow
                   icon={RadioTowerIcon}
-                  label="Расширенный"
+                  label="Плюс"
                   value={
                     user.subscription.lteEnabled ? "Подключён" : "Не подключён"
                   }

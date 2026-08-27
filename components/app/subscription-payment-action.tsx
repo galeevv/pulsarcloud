@@ -297,7 +297,7 @@ function PaymentFlow({
               <PulsarIconContainer icon={ZapIcon} size="md" />
               <div className="flex min-w-0 flex-col gap-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <p className="font-medium">Расширенный доступ</p>
+                  <p className="font-medium">Доступ Плюс</p>
                   <Badge variant="secondary">
                     +{formatPreviewRub(settings.lteMonthlyPriceRub)} / месяц
                   </Badge>
@@ -309,7 +309,7 @@ function PaymentFlow({
             </div>
             <Switch
               checked={lteEnabled}
-              aria-label="Подключить расширенный доступ"
+              aria-label="Подключить доступ Плюс"
               onClick={(event) => event.stopPropagation()}
               onCheckedChange={setLteEnabled}
             />

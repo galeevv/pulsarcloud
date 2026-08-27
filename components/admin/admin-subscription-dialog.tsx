@@ -119,7 +119,7 @@ export function AdminSubscriptionDialog({
           <DialogTitle>Управление подпиской</DialogTitle>
           <DialogDescription>
             Добавьте дни и при необходимости измените доступные устройства или
-            расширенный доступ.
+            доступ Плюс.
           </DialogDescription>
         </DialogHeader>
 
@@ -220,17 +220,17 @@ export function AdminSubscriptionDialog({
               <FieldContent>
                 <FieldTitle>
                   <RadioTowerIcon />
-                  Расширенный доступ
+                  Доступ Плюс
                 </FieldTitle>
                 <FieldDescription>
-                  Добавляет расширенный набор серверов к стандартному доступу.
+                  Добавляет доступ Плюс к стандартным серверам.
                 </FieldDescription>
               </FieldContent>
               <Switch
                 checked={lteEnabled}
                 onCheckedChange={setLteEnabled}
                 disabled={pending}
-                aria-label="Включить Расширенный доступ"
+                aria-label="Включить доступ Плюс"
               />
             </Field>
 
