@@ -202,7 +202,7 @@ export default async function AdminPromosPage() {
                         </dd>
                       </div>
                       <div className="soft-panel p-3">
-                        <dt className="text-xs text-muted-foreground">LTE</dt>
+                        <dt className="text-xs text-muted-foreground">Расширенный</dt>
                         <dd className="mt-1 font-medium">
                           {campaign.lteEnabled ? "Включён" : "Выключен"}
                         </dd>
@@ -304,7 +304,7 @@ export default async function AdminPromosPage() {
                         {claim.lteEnabled ? (
                           <Badge variant="secondary">
                             <RadioTowerIcon data-icon="inline-start" />
-                            LTE
+                            Расширенный
                           </Badge>
                         ) : null}
                       </div>

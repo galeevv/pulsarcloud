@@ -119,7 +119,7 @@ export function AdminSubscriptionDialog({
           <DialogTitle>Управление подпиской</DialogTitle>
           <DialogDescription>
             Добавьте дни и при необходимости измените доступные устройства или
-            LTE.
+            расширенный доступ.
           </DialogDescription>
         </DialogHeader>
 
@@ -220,17 +220,17 @@ export function AdminSubscriptionDialog({
               <FieldContent>
                 <FieldTitle>
                   <RadioTowerIcon />
-                  LTE-доступ
+                  Расширенный доступ
                 </FieldTitle>
                 <FieldDescription>
-                  Добавляет LTE entitlement, сохраняя стандартный доступ.
+                  Добавляет расширенный набор серверов к стандартному доступу.
                 </FieldDescription>
               </FieldContent>
               <Switch
                 checked={lteEnabled}
                 onCheckedChange={setLteEnabled}
                 disabled={pending}
-                aria-label="Включить LTE-доступ"
+                aria-label="Включить Расширенный доступ"
               />
             </Field>
 

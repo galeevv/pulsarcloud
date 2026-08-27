@@ -164,16 +164,16 @@ export function CreatePromoDialog({
 
             <Field orientation="horizontal" data-disabled={pending}>
               <FieldContent>
-                <FieldTitle>LTE включён</FieldTitle>
+                <FieldTitle>Расширенный доступ включён</FieldTitle>
                 <FieldDescription>
-                  Промо создаст желаемое состояние подписки с LTE.
+                  Промо создаст желаемое состояние подписки с расширенным доступом.
                 </FieldDescription>
               </FieldContent>
               <Switch
                 checked={lteEnabled}
                 onCheckedChange={setLteEnabled}
                 disabled={pending}
-                aria-label="Включить LTE в промоподписку"
+                aria-label="Включить расширенный доступ в промоподписку"
               />
             </Field>
           </FieldGroup>

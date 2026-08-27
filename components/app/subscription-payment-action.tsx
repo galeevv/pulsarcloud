@@ -115,10 +115,12 @@ function PaymentFlow({
   settings,
   initialDeviceLimit,
   initialLteEnabled,
+  paymentsUnavailable = false,
 }: {
   settings: PreviewPricing
   initialDeviceLimit?: number
   initialLteEnabled?: boolean
+  paymentsUnavailable?: boolean
 }) {
   const [months, setMonths] = React.useState(
     settings.durationOptions[0]?.months ?? 1
@@ -146,6 +148,7 @@ function PaymentFlow({
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
+    if (paymentsUnavailable) return
     setPending(true)
     idempotencyKey.current ||= globalThis.crypto.randomUUID()
 
@@ -294,19 +297,19 @@ function PaymentFlow({
               <PulsarIconContainer icon={ZapIcon} size="md" />
               <div className="flex min-w-0 flex-col gap-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <p className="font-medium">LTE-доступ</p>
+                  <p className="font-medium">Расширенный доступ</p>
                   <Badge variant="secondary">
                     +{formatPreviewRub(settings.lteMonthlyPriceRub)} / месяц
                   </Badge>
                 </div>
                 <p className="truncate text-sm leading-5 text-muted-foreground">
-                  Стабильнее с мобильного интернета.
+                  Дополнительные серверы на выбор.
                 </p>
               </div>
             </div>
             <Switch
               checked={lteEnabled}
-              aria-label="Подключить LTE-доступ"
+              aria-label="Подключить расширенный доступ"
               onClick={(event) => event.stopPropagation()}
               onCheckedChange={setLteEnabled}
             />
@@ -319,9 +322,11 @@ function PaymentFlow({
           type="submit"
           size="lg"
           className={pulsarCtaClass}
-          disabled={pending}
+          disabled={pending || paymentsUnavailable}
         >
-          {pending ? (
+          {paymentsUnavailable ? (
+            "Оплата временно недоступна"
+          ) : pending ? (
             "Создаем платеж..."
           ) : (
             <span className="flex items-center justify-center gap-2">
@@ -355,21 +360,6 @@ export function SubscriptionPaymentAction({
   const [drawerOpen, setDrawerOpen] = React.useState(false)
   const [dialogOpen, setDialogOpen] = React.useState(false)
 
-  // Показываем неактивную кнопку вместо формы: сервер всё равно откажет,
-  // и лучше сказать об этом сразу, чем после заполнения параметров.
-  if (paymentsUnavailable)
-    return (
-      <Button
-        type="button"
-        size="lg"
-        disabled
-        className={cn(pulsarCtaClass, "w-full")}
-      >
-        <CreditCardIcon data-icon="inline-start" />
-        Оплата временно недоступна
-      </Button>
-    )
-
   return (
     <>
       <Drawer
@@ -401,6 +391,7 @@ export function SubscriptionPaymentAction({
             settings={settings}
             initialDeviceLimit={initialDeviceLimit}
             initialLteEnabled={initialLteEnabled}
+            paymentsUnavailable={paymentsUnavailable}
           />
         </DrawerContent>
       </Drawer>
@@ -429,6 +420,7 @@ export function SubscriptionPaymentAction({
             settings={settings}
             initialDeviceLimit={initialDeviceLimit}
             initialLteEnabled={initialLteEnabled}
+            paymentsUnavailable={paymentsUnavailable}
           />
         </DialogContent>
       </Dialog>
