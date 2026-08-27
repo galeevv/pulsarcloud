@@ -151,7 +151,7 @@ export function PricingDialog({
                 <MoneyField
                   id="pricing-lte"
                   name="lteRub"
-                  label="Доступ Плюс за месяц"
+                  label="Доступ Plus за месяц"
                   defaultValue={rub(pricing.lteMonthlyPriceMinor)}
                   error={state.fieldErrors?.lteRub}
                   disabled={pending}

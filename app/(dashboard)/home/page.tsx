@@ -78,7 +78,7 @@ export default async function HomePage() {
               </Badge>
             ) : null}
             {subscription?.lteEnabled ? (
-              <Badge variant="secondary">Плюс</Badge>
+              <Badge variant="secondary">Plus</Badge>
             ) : null}
           </div>
         </div>

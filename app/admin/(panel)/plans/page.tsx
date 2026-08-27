@@ -147,7 +147,7 @@ export default async function AdminPlansPage() {
                     </dd>
                   </div>
                   <div className="flex items-center justify-between gap-3">
-                    <dt className="text-muted-foreground">Плюс</dt>
+                    <dt className="text-muted-foreground">Plus</dt>
                     <dd className="font-medium">
                       +
                       {formatPreviewRub(
