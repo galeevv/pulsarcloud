@@ -164,16 +164,16 @@ export function CreatePromoDialog({
 
             <Field orientation="horizontal" data-disabled={pending}>
               <FieldContent>
-                <FieldTitle>Доступ Плюс включён</FieldTitle>
+                <FieldTitle>Доступ Plus включён</FieldTitle>
                 <FieldDescription>
-                  Промо создаст желаемое состояние подписки с доступом Плюс.
+                  Промо создаст желаемое состояние подписки с доступом Plus.
                 </FieldDescription>
               </FieldContent>
               <Switch
                 checked={lteEnabled}
                 onCheckedChange={setLteEnabled}
                 disabled={pending}
-                aria-label="Включить доступ Плюс в промоподписку"
+                aria-label="Включить доступ Plus в промоподписку"
               />
             </Field>
           </FieldGroup>
