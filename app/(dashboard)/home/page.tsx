@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils"
 import {
   getPricingView,
   getLastPurchasePreferencesView,
+  getProfileView,
   getSubscriptionView,
   isDemoAccount,
 } from "@/src/server/queries/user-dashboard"
@@ -37,12 +38,13 @@ export const metadata: Metadata = {
 
 export default async function HomePage() {
   const session = await requireWebSession("USER")
-  const [subscription, settings, lastPurchase, paymentsUnavailable] =
+  const [subscription, settings, lastPurchase, paymentsUnavailable, profile] =
     await Promise.all([
       getSubscriptionView(session.userId),
       getPricingView(session.userId),
       getLastPurchasePreferencesView(session.userId),
       isDemoAccount(session.userId),
+      getProfileView(session.userId),
     ])
   const status = subscription?.status ?? "NONE"
   const renewalLabel =
@@ -143,6 +145,28 @@ export default async function HomePage() {
         </div>
       </PulsarAssetCard>
 
+      {getMissingLoginMethod(profile) ? (
+        <Link
+          href={`/profile?link=${getMissingLoginMethod(profile)}`}
+          className="group block"
+        >
+          <Card className="relative overflow-hidden rounded-3xl border border-border/70 bg-card/40 py-0 transition-colors hover:bg-card/55">
+            <CardContent className="grid grid-cols-[auto_1fr_auto] items-center gap-3 p-4">
+              <PulsarIconContainer icon={AlertCircleIcon} size="md" className="text-warning" />
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-medium">
+                  Привяжите {getMissingLoginMethod(profile)}
+                </span>
+                <span className="block truncate text-sm text-muted-foreground">
+                  чтобы не потерять доступ
+                </span>
+              </span>
+              <ChevronRightIcon className="size-5 text-muted-foreground transition-colors group-hover:text-foreground" />
+            </CardContent>
+          </Card>
+        </Link>
+      ) : null}
+
       <Link
         href="/referrals"
         className="group block"
@@ -169,6 +193,14 @@ export default async function HomePage() {
       </Link>
     </main>
   )
+}
+
+function getMissingLoginMethod(profile: Awaited<ReturnType<typeof getProfileView>>) {
+  const hasEmail = profile.identities.some((identity) => identity.provider === "EMAIL")
+  const hasTelegram = profile.identities.some((identity) => identity.provider === "TELEGRAM")
+  if (!hasEmail) return "email"
+  if (!hasTelegram) return "Telegram"
+  return null
 }
 
 function getHomeSubscriptionSummary(

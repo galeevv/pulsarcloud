@@ -203,3 +203,287 @@ export async function manageUserSubscription(
     return { status: "error", message: toFriendlyError(error).message }
   }
 }
+
+const partnerEnrollmentSchema = z.object({
+  userId: z.string().min(8).max(100),
+  enabled: z.enum(["true", "false"]).transform((value) => value === "true"),
+  rateBps: z.coerce.number().int().min(1).max(10_000),
+})
+
+export async function setPartnerEnrollment(formData: FormData) {
+  const session = await requireWebSession("ADMIN")
+  const parsed = partnerEnrollmentSchema.safeParse({
+    userId: formData.get("userId"),
+    enabled: formData.get("enabled"),
+    rateBps: formData.get("rateBps"),
+  })
+  if (!parsed.success) throw new BusinessError("INVALID_INPUT")
+
+  await db.$transaction(async (tx) => {
+    const user = await tx.user.findFirst({
+      where: {
+        id: parsed.data.userId,
+        role: "USER",
+        isTest: getConfig().testMode,
+      },
+      select: { id: true },
+    })
+    if (!user) throw new BusinessError("NOT_FOUND", 404)
+    const now = new Date()
+    await tx.partnerEnrollment.upsert({
+      where: { userId: user.id },
+      create: {
+        userId: user.id,
+        enabled: parsed.data.enabled,
+        rateBps: parsed.data.rateBps,
+        enabledAt: parsed.data.enabled ? now : null,
+        disabledAt: parsed.data.enabled ? null : now,
+      },
+      update: {
+        enabled: parsed.data.enabled,
+        rateBps: parsed.data.rateBps,
+        enabledAt: parsed.data.enabled ? now : undefined,
+        disabledAt: parsed.data.enabled ? null : now,
+      },
+    })
+    await tx.auditLog.create({
+      data: {
+        actorType: "ADMIN",
+        actorId: session.userId,
+        action: parsed.data.enabled
+          ? "PARTNER_PROGRAM_ENABLED"
+          : "PARTNER_PROGRAM_DISABLED",
+        entityType: "User",
+        entityId: user.id,
+        metadataJson: JSON.stringify({ rateBps: parsed.data.rateBps }),
+        correlationId: correlationId(),
+      },
+    })
+  })
+  revalidatePath(`/admin/users/${parsed.data.userId}`)
+  revalidatePath("/referrals")
+  revalidatePath("/partner")
+}
+
+const referralProgramSchema = z.object({
+  userId: z.string().min(8).max(100),
+  enabled: z.enum(["true", "false"]).transform((value) => value === "true"),
+})
+
+export async function setReferralProgram(formData: FormData) {
+  const session = await requireWebSession("ADMIN")
+  const parsed = referralProgramSchema.safeParse({
+    userId: formData.get("userId"),
+    enabled: formData.get("enabled"),
+  })
+  if (!parsed.success) throw new BusinessError("INVALID_INPUT")
+  await db.$transaction(async (tx) => {
+    const user = await tx.user.findFirst({
+      where: { id: parsed.data.userId, role: "USER", isTest: getConfig().testMode },
+      select: { id: true },
+    })
+    if (!user) throw new BusinessError("NOT_FOUND", 404)
+    const now = new Date()
+    await tx.referralProfile.update({
+      where: { userId: user.id },
+      data: { isEnabled: parsed.data.enabled, enabledAt: parsed.data.enabled ? now : null },
+    })
+    await tx.auditLog.create({
+      data: {
+        actorType: "ADMIN",
+        actorId: session.userId,
+        action: parsed.data.enabled ? "REFERRAL_PROGRAM_ENABLED" : "REFERRAL_PROGRAM_DISABLED",
+        entityType: "User",
+        entityId: user.id,
+        correlationId: correlationId(),
+      },
+    })
+  })
+  revalidatePath(`/admin/users/${parsed.data.userId}`)
+  revalidatePath("/referrals")
+}
+
+const partnerPayoutReviewSchema = z.object({
+  payoutId: z.string().min(8).max(100),
+  decision: z.enum(["PAID", "REJECTED"]),
+  rejectionReason: z.string().trim().max(500).optional(),
+})
+
+export async function reviewPartnerPayout(formData: FormData) {
+  const session = await requireWebSession("ADMIN")
+  const parsed = partnerPayoutReviewSchema.safeParse({
+    payoutId: formData.get("payoutId"),
+    decision: formData.get("decision"),
+    rejectionReason: formData.get("rejectionReason") || undefined,
+  })
+  if (!parsed.success) throw new BusinessError("INVALID_INPUT")
+
+  await db.$transaction(async (tx) => {
+    const payout = await tx.payoutRequest.findUnique({
+      where: { id: parsed.data.payoutId },
+    })
+    if (!payout || payout.status !== "PENDING")
+      throw new BusinessError("CONFLICT")
+    const wallet = await tx.walletAccount.findUnique({
+      where: { userId: payout.userId },
+    })
+    if (!wallet || wallet.reservedMinor < payout.amountMinor)
+      throw new BusinessError("CONFLICT")
+    const now = new Date()
+    const walletAfter = await tx.walletAccount.update({
+      where: { id: wallet.id },
+      data:
+        parsed.data.decision === "PAID"
+          ? {
+              reservedMinor: { decrement: payout.amountMinor },
+              version: { increment: 1 },
+            }
+          : {
+              availableMinor: { increment: payout.amountMinor },
+              reservedMinor: { decrement: payout.amountMinor },
+              version: { increment: 1 },
+            },
+    })
+    await tx.payoutRequest.update({
+      where: { id: payout.id },
+      data: {
+        status: parsed.data.decision,
+        reviewedByAdminId: session.userId,
+        reviewedAt: now,
+        rejectionReason:
+          parsed.data.decision === "REJECTED"
+            ? (parsed.data.rejectionReason ?? null)
+            : null,
+      },
+    })
+    await tx.walletLedgerEntry.create({
+      data: {
+        walletAccountId: walletAfter.id,
+        userId: payout.userId,
+        type:
+          parsed.data.decision === "PAID"
+            ? "PARTNER_PAYOUT_PAID"
+            : "PARTNER_PAYOUT_RELEASE",
+        deltaAvailableMinor:
+          parsed.data.decision === "PAID" ? 0 : payout.amountMinor,
+        deltaReservedMinor: -payout.amountMinor,
+        referenceType: "PayoutRequest",
+        referenceId: payout.id,
+        idempotencyKey: `partner-payout-review:${payout.id}:${parsed.data.decision}`,
+        description:
+          parsed.data.decision === "PAID"
+            ? "Партнёрская выплата подтверждена администратором"
+            : "Средства возвращены после отклонения заявки",
+        createdAt: now,
+      },
+    })
+    await tx.auditLog.create({
+      data: {
+        actorType: "ADMIN",
+        actorId: session.userId,
+        action:
+          parsed.data.decision === "PAID"
+            ? "PARTNER_PAYOUT_PAID"
+            : "PARTNER_PAYOUT_REJECTED",
+        entityType: "PayoutRequest",
+        entityId: payout.id,
+        metadataJson: JSON.stringify({
+          amountMinor: payout.amountMinor,
+          rejectionReason: parsed.data.rejectionReason,
+        }),
+        correlationId: correlationId(),
+      },
+    })
+  })
+  revalidatePath("/admin/partner")
+  revalidatePath("/partner")
+}
+
+const infrastructurePaymentSchema = z.object({
+  title: z.string().trim().min(2).max(120),
+  vendor: z.string().trim().min(2).max(120),
+  amountRubles: z.coerce.number().min(0).max(1_000_000),
+  dueAt: z.coerce.date(),
+  note: z.string().trim().max(500).optional(),
+  idempotencyKey: z.uuid(),
+})
+
+export type InfrastructurePaymentActionState = {
+  status: "idle" | "success" | "error"
+  message: string
+  fieldErrors?: Record<string, string>
+}
+
+export async function createInfrastructurePayment(
+  _previousState: InfrastructurePaymentActionState,
+  formData: FormData
+): Promise<InfrastructurePaymentActionState> {
+  const session = await requireWebSession("ADMIN")
+  const parsed = infrastructurePaymentSchema.safeParse({
+    title: formData.get("title"),
+    vendor: formData.get("vendor"),
+    amountRubles: formData.get("amountRubles"),
+    dueAt: formData.get("dueAt"),
+    note: formData.get("note") || undefined,
+    idempotencyKey: formData.get("idempotencyKey"),
+  })
+  if (!parsed.success) return { status: "error", message: "Проверьте поля платежа." }
+  try {
+    await db.$transaction(async (tx) => {
+      const existing = await tx.auditLog.findFirst({
+        where: {
+          actorId: session.userId,
+          action: "INFRASTRUCTURE_PAYMENT_CREATED",
+          correlationId: parsed.data.idempotencyKey,
+        },
+      })
+      if (existing) return
+      const payment = await tx.infrastructurePayment.create({
+        data: {
+          title: parsed.data.title,
+          vendor: parsed.data.vendor,
+          amountMinor: Math.round(parsed.data.amountRubles * 100),
+          dueAt: parsed.data.dueAt,
+          note: parsed.data.note || null,
+        },
+      })
+      await tx.auditLog.create({
+        data: {
+          actorType: "ADMIN",
+          actorId: session.userId,
+          action: "INFRASTRUCTURE_PAYMENT_CREATED",
+          entityType: "InfrastructurePayment",
+          entityId: payment.id,
+          correlationId: parsed.data.idempotencyKey,
+        },
+      })
+    })
+    revalidatePath("/admin/infrastructure")
+    return { status: "success", message: "Платёж добавлен." }
+  } catch (error) {
+    return { status: "error", message: toFriendlyError(error).message }
+  }
+}
+
+export async function markInfrastructurePaymentPaid(formData: FormData) {
+  const session = await requireWebSession("ADMIN")
+  const id = String(formData.get("paymentId") ?? "")
+  if (!id) return
+  const result = await db.infrastructurePayment.updateMany({
+    where: { id, status: "PLANNED" },
+    data: { status: "PAID", paidAt: new Date() },
+  })
+  if (result.count) {
+    await db.auditLog.create({
+      data: {
+        actorType: "ADMIN",
+        actorId: session.userId,
+        action: "INFRASTRUCTURE_PAYMENT_PAID",
+        entityType: "InfrastructurePayment",
+        entityId: id,
+        correlationId: correlationId(),
+      },
+    })
+  }
+  revalidatePath("/admin/infrastructure")
+}

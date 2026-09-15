@@ -16,6 +16,10 @@ import { BusinessError } from "@/src/server/application/errors"
 import { isDemoAccount } from "@/src/server/queries/user-dashboard"
 import { grantReferralSubscriptionReward } from "@/src/server/domain/referrals/service"
 import {
+  grantPartnerCommission,
+  reversePartnerCommission,
+} from "@/src/server/domain/partner/service"
+import {
   correlationId,
   stableEventId,
 } from "@/src/server/infrastructure/security/crypto"
@@ -77,12 +81,19 @@ async function loadDeviceLimitUpgradeQuote(
     throw new BusinessError("INVALID_INPUT", 400)
 
   const addedDevices = input.targetDeviceLimit - subscription.deviceLimit
+  const remainingDays = Math.max(
+    1,
+    Math.ceil((subscription.expiresAt.getTime() - now.getTime()) / 86_400_000)
+  )
   return {
     pricing,
     subscription,
     maximumDeviceLimit,
     addedDevices,
-    amountMinor: addedDevices * pricing.deviceLimitUpgradePriceMinor,
+    remainingDays,
+    amountMinor: Math.ceil(
+      (addedDevices * pricing.deviceLimitUpgradePriceMinor * remainingDays) / 30
+    ),
   }
 }
 
@@ -699,6 +710,10 @@ export async function applyPaymentEvent(
                 ? "FAILED"
                 : "PENDING"
         if (mapped === "REFUNDED" && payment.status === "CONFIRMED") {
+          await reversePartnerCommission(tx, {
+            paymentId: payment.id,
+            now: new Date(),
+          })
           const subscription = await tx.subscription.findUnique({
             where: { userId: payment.userId },
           })
@@ -928,6 +943,11 @@ export async function applyPaymentEvent(
         },
       })
       await grantReferralSubscriptionReward(tx, {
+        invitedUserId: payment.userId,
+        paymentId: payment.id,
+        now,
+      })
+      await grantPartnerCommission(tx, {
         invitedUserId: payment.userId,
         paymentId: payment.id,
         now,

@@ -109,10 +109,8 @@ export default async function AdminSupportPage({
                 <TableHeader>
                   <TableRow>
                     <TableHead>Пользователь</TableHead>
-                    <TableHead>Тема</TableHead>
-                    <TableHead>Последнее сообщение</TableHead>
-                    <TableHead>Канал</TableHead>
-                    <TableHead>Статус</TableHead>
+                        <TableHead>Последнее сообщение</TableHead>
+                        <TableHead>Статус</TableHead>
                     <TableHead className="text-right">Обновлено</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -133,24 +131,31 @@ export default async function AdminSupportPage({
                               "Email не привязан"}
                           </span>
                         </TableCell>
-                        <TableCell>{conversation.topic}</TableCell>
                         <TableCell className="max-w-sm">
-                          <span className="block truncate">
+                          <Link
+                            href={`/admin/support/${conversation.id}`}
+                            className="block truncate underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                          >
                             {latest?.body ?? "Нет сообщений"}
-                          </span>
+                          </Link>
                         </TableCell>
                         <TableCell>
-                          <Badge variant="outline">
-                            {channelLabel(conversation.channel)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <SupportBadge
-                            classification={conversation.classification}
-                          />
+                          <Link
+                            href={`/admin/support/${conversation.id}`}
+                            className="focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                          >
+                            <SupportBadge
+                              classification={conversation.classification}
+                            />
+                          </Link>
                         </TableCell>
                         <TableCell className="text-right whitespace-nowrap">
-                          {dateTime(conversation.lastMessageAt)}
+                          <Link
+                            href={`/admin/support/${conversation.id}`}
+                            className="underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                          >
+                            {dateTime(conversation.lastMessageAt)}
+                          </Link>
                         </TableCell>
                       </TableRow>
                     )
@@ -244,8 +249,3 @@ function dateTime(value: Date) {
   }).format(value)
 }
 
-function channelLabel(channel: "WEB" | "TELEGRAM" | "EMAIL") {
-  if (channel === "TELEGRAM") return "Telegram"
-  if (channel === "EMAIL") return "Email"
-  return "WEB"
-}

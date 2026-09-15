@@ -8,6 +8,7 @@ import {
   CreditCardIcon,
   FlaskConicalIcon,
   GiftIcon,
+  WalletCardsIcon,
   HeadphonesIcon,
   LayoutDashboardIcon,
   LogOutIcon,
@@ -93,6 +94,18 @@ const navigation: Array<{ label: string; items: NavigationItem[] }> = [
         icon: GiftIcon,
         activePath: "/admin/promos",
       },
+      {
+        label: "Выплаты",
+        href: "/admin/partner",
+        icon: WalletCardsIcon,
+        activePath: "/admin/partner",
+      },
+      {
+        label: "Инфраструктура",
+        href: "/admin/infrastructure",
+        icon: CreditCardIcon,
+        activePath: "/admin/infrastructure",
+      },
     ],
   },
   {
@@ -131,6 +144,8 @@ function pageTitle(pathname: string) {
   if (pathname.startsWith("/admin/payments")) return "Платежи"
   if (pathname.startsWith("/admin/plans")) return "Тарифы"
   if (pathname.startsWith("/admin/promos")) return "Промокампании"
+  if (pathname.startsWith("/admin/partner")) return "Выплаты"
+  if (pathname.startsWith("/admin/infrastructure")) return "Инфраструктура"
   if (pathname.startsWith("/admin/support")) return "Поддержка"
   if (pathname.startsWith("/admin/telegram")) return "Telegram"
   if (pathname.startsWith("/admin/operations")) return "Операции"
@@ -138,10 +153,7 @@ function pageTitle(pathname: string) {
   return "Pulsar Admin"
 }
 
-function isNavigationItemActive(
-  pathname: string,
-  item: NavigationItem
-) {
+function isNavigationItemActive(pathname: string, item: NavigationItem) {
   if (item.activePath && pathname.startsWith(item.activePath)) return true
   return pathname === item.href
 }
@@ -185,7 +197,7 @@ function AdminAccountMenu({
         render={
           <SidebarMenuButton
             size="lg"
-            className="rounded-[18px] border border-sidebar-border aria-expanded:bg-sidebar-accent group-data-[collapsible=icon]:size-10!"
+            className="rounded-[18px] border border-sidebar-border group-data-[collapsible=icon]:size-10! aria-expanded:bg-sidebar-accent"
             tooltip="Меню администратора"
             aria-label="Открыть меню администратора"
           />
@@ -246,6 +258,8 @@ function AdminAccountMenu({
 
 function AdminHeader({ testMode }: { testMode: boolean }) {
   const pathname = usePathname()
+
+  if (pathname.startsWith("/admin/support/")) return null
 
   return (
     <header className="relative top-4 shrink-0">
@@ -335,9 +349,7 @@ export function AdminShell({
         <SidebarFooter className="p-3">
           <SidebarMenu>
             <SidebarMenuItem>
-              <AdminAccountMenu
-                adminTelegramUsername={adminTelegramUsername}
-              />
+              <AdminAccountMenu adminTelegramUsername={adminTelegramUsername} />
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarFooter>

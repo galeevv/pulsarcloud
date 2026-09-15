@@ -97,6 +97,13 @@ enum ReferralRewardStatus {
   MANUAL_REVIEW
 }
 
+enum PartnerCommissionStatus {
+  AVAILABLE
+  PAID_OUT
+  REVERSED
+  MANUAL_REVIEW
+}
+
 enum WalletLedgerType {
   REFERRAL_REWARD
   REFERRAL_REWARD_REVERSAL
@@ -105,6 +112,11 @@ enum WalletLedgerType {
   PAYOUT_RELEASE
   PAYOUT_PAID
   ADMIN_ADJUSTMENT
+  PARTNER_COMMISSION
+  PARTNER_COMMISSION_REVERSAL
+  PARTNER_PAYOUT_RESERVE
+  PARTNER_PAYOUT_RELEASE
+  PARTNER_PAYOUT_PAID
 }
 
 enum PayoutStatus {
@@ -167,6 +179,12 @@ enum DeliveryStatus {
   SKIPPED
 }
 
+enum InfrastructurePaymentStatus {
+  PLANNED
+  PAID
+  CANCELED
+}
+
 enum JobStatus {
   PENDING
   PROCESSING
@@ -188,37 +206,40 @@ enum PromoCampaignStatus {
 }
 
 model User {
-  id                      String                      @id @default(cuid())
-  role                    UserRole                    @default(USER)
-  status                  UserStatus                  @default(ACTIVE)
-  isTest                  Boolean                     @default(false)
-  createdAt               DateTime                    @default(now())
-  updatedAt               DateTime                    @updatedAt
-  lastLoginAt             DateTime?
-  identities              AuthIdentity[]
-  sessions                Session[]
-  loginChallenges         LoginChallenge[]            @relation("ChallengeRequester")
-  wallet                  WalletAccount?
-  referralProfile         ReferralProfile?
-  invitedReferral         ReferralInvite?             @relation("InvitedUser")
-  sentInvites             ReferralInvite[]            @relation("Inviter")
-  referralRewards         ReferralReward[]            @relation("RewardInviter")
-  receivedReferralRewards ReferralReward[]            @relation("RewardInvited")
+  id                                  String                       @id @default(cuid())
+  role                                UserRole                     @default(USER)
+  status                              UserStatus                   @default(ACTIVE)
+  isTest                              Boolean                      @default(false)
+  createdAt                           DateTime                     @default(now())
+  updatedAt                           DateTime                     @updatedAt
+  lastLoginAt                         DateTime?
+  identities                          AuthIdentity[]
+  sessions                            Session[]
+  loginChallenges                     LoginChallenge[]             @relation("ChallengeRequester")
+  wallet                              WalletAccount?
+  referralProfile                     ReferralProfile?
+  partnerEnrollment                   PartnerEnrollment?
+  invitedReferral                     ReferralInvite?              @relation("InvitedUser")
+  sentInvites                         ReferralInvite[]             @relation("Inviter")
+  referralRewards                     ReferralReward[]             @relation("RewardInviter")
+  receivedReferralRewards             ReferralReward[]             @relation("RewardInvited")
   referralSubscriptionRewards         ReferralSubscriptionReward[] @relation("SubscriptionRewardInviter")
   receivedReferralSubscriptionRewards ReferralSubscriptionReward[] @relation("SubscriptionRewardInvited")
-  subscription            Subscription?
-  subscriptionEvents      SubscriptionEvent[]         @relation("SubscriptionActor")
-  trialGrant              TrialGrant?
-  payments                Payment[]
-  payouts                 PayoutRequest[]             @relation("PayoutOwner")
-  reviewedPayouts         PayoutRequest[]             @relation("PayoutReviewer")
-  supportConversation     SupportConversation?
-  supportMessages         SupportMessage[]
-  telegramProfile         TelegramProfile?
-  broadcasts              TelegramBroadcast[]
-  broadcastDeliveries     TelegramBroadcastDelivery[]
-  createdPromoCampaigns   PromoCampaign[]             @relation("PromoCampaignCreator")
-  promoClaims             PromoClaim[]
+  partnerCommissions                  PartnerCommission[]          @relation("PartnerCommissionInviter")
+  receivedPartnerCommissions          PartnerCommission[]          @relation("PartnerCommissionInvited")
+  subscription                        Subscription?
+  subscriptionEvents                  SubscriptionEvent[]          @relation("SubscriptionActor")
+  trialGrant                          TrialGrant?
+  payments                            Payment[]
+  payouts                             PayoutRequest[]              @relation("PayoutOwner")
+  reviewedPayouts                     PayoutRequest[]              @relation("PayoutReviewer")
+  supportConversation                 SupportConversation?
+  supportMessages                     SupportMessage[]
+  telegramProfile                     TelegramProfile?
+  broadcasts                          TelegramBroadcast[]
+  broadcastDeliveries                 TelegramBroadcastDelivery[]
+  createdPromoCampaigns               PromoCampaign[]              @relation("PromoCampaignCreator")
+  promoClaims                         PromoClaim[]
 
   @@index([createdAt])
   @@index([status, role])
@@ -310,39 +331,40 @@ model PricingSettings {
 }
 
 model Payment {
-  id                     String              @id @default(cuid())
-  userId                 String
-  provider               String
-  externalPaymentId      String?             @unique
-  idempotencyKey         String              @unique
-  status                 PaymentStatus       @default(CREATED)
-  purpose                PaymentPurpose      @default(SUBSCRIPTION)
-  amountMinor            Int
-  currency               String              @default("RUB")
-  durationDays           Int
-  deviceLimit            Int
-  lteEnabled             Boolean
-  basePriceMinor         Int
-  extraDevicesPriceMinor Int
-  ltePriceMinor          Int
-  discountMinor          Int
-  priceSnapshotJson      String
-  pricingVersion         Int
-  checkoutUrl            String?
-  providerCreatedAt      DateTime?
-  confirmedAt            DateTime?
-  refundedAt             DateTime?
-  expiresAt              DateTime?
-  supersededAt           DateTime?
-  supersededByPaymentId  String?
-  isTest                 Boolean             @default(false)
-  createdAt              DateTime            @default(now())
-  updatedAt              DateTime            @updatedAt
-  user                   User                @relation(fields: [userId], references: [id], onDelete: Restrict)
-  webhookLogs            PaymentWebhookLog[]
-  subscriptionEvents     SubscriptionEvent[]
-  referralReward         ReferralReward?
+  id                         String                      @id @default(cuid())
+  userId                     String
+  provider                   String
+  externalPaymentId          String?                     @unique
+  idempotencyKey             String                      @unique
+  status                     PaymentStatus               @default(CREATED)
+  purpose                    PaymentPurpose              @default(SUBSCRIPTION)
+  amountMinor                Int
+  currency                   String                      @default("RUB")
+  durationDays               Int
+  deviceLimit                Int
+  lteEnabled                 Boolean
+  basePriceMinor             Int
+  extraDevicesPriceMinor     Int
+  ltePriceMinor              Int
+  discountMinor              Int
+  priceSnapshotJson          String
+  pricingVersion             Int
+  checkoutUrl                String?
+  providerCreatedAt          DateTime?
+  confirmedAt                DateTime?
+  refundedAt                 DateTime?
+  expiresAt                  DateTime?
+  supersededAt               DateTime?
+  supersededByPaymentId      String?
+  isTest                     Boolean                     @default(false)
+  createdAt                  DateTime                    @default(now())
+  updatedAt                  DateTime                    @updatedAt
+  user                       User                        @relation(fields: [userId], references: [id], onDelete: Restrict)
+  webhookLogs                PaymentWebhookLog[]
+  subscriptionEvents         SubscriptionEvent[]
+  referralReward             ReferralReward?
   referralSubscriptionReward ReferralSubscriptionReward?
+  partnerCommission          PartnerCommission?
 
   @@index([userId, createdAt])
   @@index([status, createdAt])
@@ -483,19 +505,20 @@ model ReferralProfile {
 }
 
 model ReferralInvite {
-  id                      String               @id @default(cuid())
+  id                      String                      @id @default(cuid())
   inviterUserId           String
-  invitedUserId           String               @unique
+  invitedUserId           String                      @unique
   inviteCodeSnapshot      String
-  status                  ReferralInviteStatus @default(REGISTERED)
-  firstConfirmedPaymentId String?              @unique
-  createdAt               DateTime             @default(now())
+  status                  ReferralInviteStatus        @default(REGISTERED)
+  firstConfirmedPaymentId String?                     @unique
+  createdAt               DateTime                    @default(now())
   convertedAt             DateTime?
-  inviter                 User                 @relation("Inviter", fields: [inviterUserId], references: [id], onDelete: Restrict)
-  invited                 User                 @relation("InvitedUser", fields: [invitedUserId], references: [id], onDelete: Restrict)
+  inviter                 User                        @relation("Inviter", fields: [inviterUserId], references: [id], onDelete: Restrict)
+  invited                 User                        @relation("InvitedUser", fields: [invitedUserId], references: [id], onDelete: Restrict)
   trialGrant              TrialGrant?
   reward                  ReferralReward?
   subscriptionReward      ReferralSubscriptionReward?
+  partnerCommissions      PartnerCommission[]
 
   @@index([inviterUserId, createdAt])
 }
@@ -532,6 +555,46 @@ model ReferralSubscriptionReward {
   payment       Payment        @relation(fields: [paymentId], references: [id], onDelete: Restrict)
 
   @@index([inviterUserId, createdAt])
+}
+
+model PartnerEnrollment {
+  id           String              @id @default(cuid())
+  userId       String              @unique
+  enabled      Boolean             @default(false)
+  rateBps      Int                 @default(4000)
+  termsVersion Int                 @default(1)
+  enabledAt    DateTime?
+  disabledAt   DateTime?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  commissions  PartnerCommission[]
+
+  @@index([enabled, updatedAt])
+}
+
+model PartnerCommission {
+  id              String                  @id @default(cuid())
+  enrollmentId    String
+  inviteId        String
+  inviterUserId   String
+  invitedUserId   String
+  paymentId       String                  @unique
+  baseAmountMinor Int
+  amountMinor     Int
+  currency        String                  @default("RUB")
+  rateBps         Int
+  status          PartnerCommissionStatus @default(AVAILABLE)
+  reversedAt      DateTime?
+  createdAt       DateTime                @default(now())
+  enrollment      PartnerEnrollment       @relation(fields: [enrollmentId], references: [id], onDelete: Restrict)
+  invite          ReferralInvite          @relation(fields: [inviteId], references: [id], onDelete: Restrict)
+  inviter         User                    @relation("PartnerCommissionInviter", fields: [inviterUserId], references: [id], onDelete: Restrict)
+  invited         User                    @relation("PartnerCommissionInvited", fields: [invitedUserId], references: [id], onDelete: Restrict)
+  payment         Payment                 @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  @@index([inviterUserId, status, createdAt])
+  @@index([invitedUserId, createdAt])
 }
 
 model WalletAccount {
@@ -584,18 +647,18 @@ model PayoutRequest {
 }
 
 model SupportConversation {
-  id            String               @id @default(cuid())
-  userId        String               @unique
-  status        SupportStatus        @default(OPEN)
-  workflowState SupportWorkflowState @default(NEW)
-  channel       SupportChannel       @default(WEB)
-  topic         String               @default("Обращение в поддержку")
-  lastMessageAt DateTime             @default(now())
+  id             String               @id @default(cuid())
+  userId         String               @unique
+  status         SupportStatus        @default(OPEN)
+  workflowState  SupportWorkflowState @default(NEW)
+  channel        SupportChannel       @default(WEB)
+  topic          String               @default("Обращение в поддержку")
+  lastMessageAt  DateTime             @default(now())
   userLastReadAt DateTime?
-  createdAt     DateTime             @default(now())
-  updatedAt     DateTime             @updatedAt
-  user          User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
-  messages      SupportMessage[]
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  user           User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages       SupportMessage[]
 
   @@index([status, lastMessageAt])
   @@index([workflowState, lastMessageAt])
@@ -710,6 +773,23 @@ model AuditLog {
 
   @@index([entityType, entityId, createdAt])
   @@index([actorId, createdAt])
+}
+
+model InfrastructurePayment {
+  id          String                       @id @default(cuid())
+  title       String
+  vendor      String
+  amountMinor Int
+  currency    String                       @default("RUB")
+  dueAt       DateTime
+  status      InfrastructurePaymentStatus @default(PLANNED)
+  note        String?
+  paidAt      DateTime?
+  createdAt   DateTime                     @default(now())
+  updatedAt   DateTime                     @updatedAt
+
+  @@index([status, dueAt])
+  @@index([dueAt])
 }
 
 model IntegrationLog {

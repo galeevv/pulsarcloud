@@ -600,6 +600,15 @@ test("referral happy path is idempotent through provisioning", async () => {
     where: { userId: inviter.id },
     data: { isEnabled: true, enabledAt: new Date() },
   })
+  await modules.db.partnerEnrollment.create({
+    data: {
+      userId: inviter.id,
+      enabled: true,
+      rateBps: 4_000,
+      termsVersion: 1,
+      enabledAt: new Date(),
+    },
+  })
   const requested = await modules.auth.requestEmailChallenge({
     email: "friend@example.com",
     inviteCode: profile.inviteCode,
@@ -649,6 +658,10 @@ test("referral happy path is idempotent through provisioning", async () => {
     where: { paymentId: payment.id },
   })
   assert.equal(reward?.days, 10)
+  const commission = await modules.db.partnerCommission.findUnique({
+    where: { paymentId: payment.id },
+  })
+  assert.equal(commission?.amountMinor, 4_760)
   const inviterSubscription = await modules.db.subscription.findUniqueOrThrow({
     where: { userId: inviter.id },
   })

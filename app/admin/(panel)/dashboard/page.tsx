@@ -65,20 +65,8 @@ function relativeTime(value: Date, now: Date) {
   }).format(value)
 }
 
-function percentChange(current: number, previous: number) {
-  if (previous === 0) return current > 0 ? 100 : 0
-  return Math.round(((current - previous) / previous) * 100)
-}
-
-function trendLabel(value: number, period: string) {
-  const arrow = value > 0 ? "↑" : value < 0 ? "↓" : "→"
-  return `${arrow} ${Math.abs(value)}% ${period}`
-}
-
-function trendTone(value: number) {
-  if (value > 0) return "positive" as const
-  if (value < 0) return "negative" as const
-  return "neutral" as const
+function trendLabel(value: number | string, period: string, suffix = "") {
+  return `+ ${value}${suffix} ${period}`
 }
 
 function MetricCard({
@@ -151,14 +139,6 @@ export default async function AdminDashboardPage() {
   if (!session || session.user.role !== "ADMIN") redirect("/admin")
 
   const dashboard = await getAdminDashboardView()
-  const userTrend = percentChange(
-    dashboard.metrics.newUsersThisWeek,
-    dashboard.metrics.newUsersPreviousWeek
-  )
-  const revenueTrend = percentChange(
-    dashboard.metrics.revenueThisMonthMinor,
-    dashboard.metrics.revenuePreviousMonthMinor
-  )
   const attentionItems = [
     {
       label: "Обращения поддержки",
@@ -192,8 +172,8 @@ export default async function AdminDashboardPage() {
         <MetricCard
           label="Пользователи"
           value={dashboard.metrics.totalUsers}
-          trend={trendLabel(userTrend, "за 7 дней")}
-          trendTone={trendTone(userTrend)}
+          trend={trendLabel(dashboard.metrics.newUsersThisWeek, "за неделю")}
+          trendTone={dashboard.metrics.newUsersThisWeek > 0 ? "positive" : "neutral"}
           icon={UsersIcon}
         />
         <MetricCard
@@ -203,13 +183,15 @@ export default async function AdminDashboardPage() {
           icon={ActivityIcon}
         />
         <MetricCard
-          label="Выручка за месяц"
-          value={formatPreviewRub(
-            dashboard.metrics.revenueThisMonthMinor / 100
+          label="Выручка за все время"
+          value={formatPreviewRub(dashboard.metrics.revenueAllTimeMinor / 100)}
+          trend={trendLabel(
+            formatPreviewRub(dashboard.metrics.revenueThisMonthMinor / 100),
+            "за месяц",
+            ""
           )}
-          trend={trendLabel(revenueTrend, "за месяц")}
-          trendTone={trendTone(revenueTrend)}
           icon={CreditCardIcon}
+          trendTone={dashboard.metrics.revenueThisMonthMinor > 0 ? "positive" : "neutral"}
         />
         <MetricCard
           label="Требуют внимания"

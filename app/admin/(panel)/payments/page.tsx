@@ -187,8 +187,9 @@ export default async function AdminPaymentsPage({
         className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"
       >
         <MetricCard
-          label="Оборот за месяц"
-          value={formatPreviewRub(view.metrics.revenueThisMonthMinor / 100)}
+          label="Средний чек"
+          value={formatPreviewRub(view.metrics.averageCheckMinor / 100)}
+          note="Подтверждённые оплаты за месяц"
           icon={CreditCardIcon}
         />
         <MetricCard

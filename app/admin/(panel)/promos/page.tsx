@@ -5,13 +5,10 @@ import {
   GiftIcon,
   RadioTowerIcon,
   SmartphoneIcon,
-  TicketPercentIcon,
-  TriangleAlertIcon,
   UsersIcon,
 } from "lucide-react"
 import Link from "next/link"
 
-import { PulsarIconContainer } from "@/components/app/pulsar-primitives"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -78,72 +75,11 @@ function syncBadge(
   return <Badge variant="outline">Нет данных</Badge>
 }
 
-function SummaryCard({
-  description,
-  icon: Icon,
-  label,
-  value,
-}: {
-  description: string
-  icon: typeof GiftIcon
-  label: string
-  value: string | number
-}) {
-  return (
-    <Card className="h-full gap-0 rounded-3xl border border-border/70 bg-card/40 py-0 shadow-none! ring-0!">
-      <CardHeader className="gap-0 p-4 pb-0">
-        <CardDescription className="text-sm font-medium">
-          {label}
-        </CardDescription>
-        <CardAction>
-          <PulsarIconContainer icon={Icon} />
-        </CardAction>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-2 p-4 pt-2">
-        <CardTitle className="truncate text-3xl leading-none font-semibold tracking-tight tabular-nums">
-          {value}
-        </CardTitle>
-        <p className="text-xs text-muted-foreground">{description}</p>
-      </CardContent>
-    </Card>
-  )
-}
-
 export default async function AdminPromosPage() {
   const view = await getAdminPromosView()
 
   return (
     <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-4 px-4 pt-8 pb-4 md:px-6 md:pb-6">
-      <section
-        aria-label="Сводка по промокампаниям"
-        className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"
-      >
-        <SummaryCard
-          label="Активная кампания"
-          value={view.metrics.activeCampaignName ?? "Нет"}
-          description="Только одна кампания может выдавать подписки"
-          icon={TicketPercentIcon}
-        />
-        <SummaryCard
-          label="Выдано"
-          value={view.metrics.totalGranted}
-          description="Всего промоподписок в текущем окружении"
-          icon={UsersIcon}
-        />
-        <SummaryCard
-          label="Осталось мест"
-          value={view.metrics.remaining}
-          description="В текущей активной кампании"
-          icon={GiftIcon}
-        />
-        <SummaryCard
-          label="Ошибки синхронизации"
-          value={view.metrics.failedSyncs}
-          description="Требуют проверки worker и Remnawave"
-          icon={TriangleAlertIcon}
-        />
-      </section>
-
       <Card className="gap-0 rounded-3xl border border-border/70 bg-card/40 py-0 shadow-none! ring-0!">
         <CardHeader className="gap-0 p-4">
           <CardTitle>Промокампании</CardTitle>

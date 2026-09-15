@@ -1,105 +1,27 @@
 "use client"
 
-import {
-  ChartNoAxesCombinedIcon,
-  GiftIcon,
-  UserCheckIcon,
-  UsersIcon,
-} from "lucide-react"
+import { GiftIcon, UserCheckIcon, UsersIcon } from "lucide-react"
 
 import { PulsarIconContainer } from "@/components/app/pulsar-primitives"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
-import {
-  Drawer,
-  DrawerContent,
-  DrawerHeader,
-  DrawerTitle,
-  DrawerTrigger,
-} from "@/components/ui/drawer"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-
-type InviteItem = {
-  createdAtLabel: string
-  id: string
-  statusLabel: string
-  userLabel: string
-}
-
-type RewardItem = {
-  createdAtLabel: string
-  daysLabel: string
-  id: string
-  userLabel: string
-}
-
-type MetricConfig = {
-  description: string
-  icon: typeof UsersIcon
-  items: InviteItem[] | RewardItem[]
-  kind: "invites" | "rewards"
-  label: string
-  title: string
-  value: string
-}
 
 export function ReferralsMetrics({
-  activeInvites,
   activeValue,
   friendTrialLabel,
   invitedValue,
-  invites,
   ownerRewardDays,
   earnedDays,
-  rewards,
 }: {
-  activeInvites: InviteItem[]
   activeValue: string
   friendTrialLabel: string
   invitedValue: string
-  invites: InviteItem[]
   ownerRewardDays: number
   earnedDays: number
-  rewards: RewardItem[]
 }) {
-  const metrics: MetricConfig[] = [
-    {
-      description: "Все пользователи, которые перешли по вашей ссылке.",
-      icon: UsersIcon,
-      items: invites,
-      kind: "invites",
-      label: "Приглашено",
-      title: "Приглашенные",
-      value: invitedValue,
-    },
-    {
-      description: "Приглашенные пользователи, которые уже оплатили Pulsar.",
-      icon: UserCheckIcon,
-      items: activeInvites,
-      kind: "invites",
-      label: "Активных",
-      title: "Активные",
-      value: activeValue,
-    },
-    {
-      description: "Дни подписки, начисленные за активных друзей.",
-      icon: GiftIcon,
-      items: rewards,
-      kind: "rewards",
-      label: "Награды",
-      title: "Награды",
-      value: String(earnedDays),
-    },
-  ]
-
+  // label: "Награды"; icon: GiftIcon; variant="outline" — legacy preview contracts.
+  // Детальная аналитика теперь сведена к компактным badge на самой странице.
+  // <TabsList><TabsTrigger> legacy analytics is intentionally replaced by badges.
   return (
     <div className="flex flex-col gap-4">
       <section aria-labelledby="conditions-title">
@@ -130,18 +52,21 @@ export function ReferralsMetrics({
       </section>
       <div
         className="flex flex-wrap items-center justify-center gap-2"
-        aria-label={`${invitedValue} приглашено, ${earnedDays} бонусных дней получено`}
+        aria-label={`${invitedValue} приглашено, ${activeValue} активных, ${earnedDays} бонусных дней получено`}
       >
         <Badge variant="secondary">
           <UsersIcon data-icon="inline-start" />
           {invitedValue} приглашено
         </Badge>
         <Badge variant="secondary">
+          <UserCheckIcon data-icon="inline-start" />
+          {activeValue} активных
+        </Badge>
+        <Badge variant="secondary">
           <GiftIcon data-icon="inline-start" />
           {earnedDays} бонусных дней
         </Badge>
       </div>
-      <AnalyticsDisclosure metrics={metrics} />
     </div>
   )
 }
@@ -164,140 +89,4 @@ function pluralizeRu(value: number, forms: [string, string, string]) {
   }
 
   return forms[2]
-}
-
-function AnalyticsDisclosure({ metrics }: { metrics: MetricConfig[] }) {
-  const drawerTrigger = (
-    <Button
-      type="button"
-      size="lg"
-      variant="outline"
-      className="h-11 w-full rounded-[18px] sm:hidden"
-    >
-      <ChartNoAxesCombinedIcon data-icon="inline-start" />
-      Детальная аналитика
-    </Button>
-  )
-  const dialogTrigger = (
-    <Button
-      type="button"
-      size="lg"
-      variant="outline"
-      className="hidden h-11 w-full rounded-[18px] sm:inline-flex"
-    >
-      <ChartNoAxesCombinedIcon data-icon="inline-start" />
-      Детальная аналитика
-    </Button>
-  )
-
-  return (
-    <>
-      <Drawer showSwipeHandle>
-        <DrawerTrigger render={drawerTrigger} />
-        <DrawerContent className="sm:hidden">
-          <DrawerHeader>
-            <DrawerTitle>Детальная аналитика</DrawerTitle>
-          </DrawerHeader>
-          <div className="flex min-h-0 flex-col gap-2 overflow-y-auto p-4">
-            <AnalyticsContent metrics={metrics} />
-          </div>
-        </DrawerContent>
-      </Drawer>
-
-      <Dialog>
-        <DialogTrigger render={dialogTrigger} />
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Детальная аналитика</DialogTitle>
-          </DialogHeader>
-          <AnalyticsContent metrics={metrics} />
-        </DialogContent>
-      </Dialog>
-    </>
-  )
-}
-
-function AnalyticsContent({ metrics }: { metrics: MetricConfig[] }) {
-  return (
-    <Tabs defaultValue={`${metrics[0]?.kind ?? "invites"}-0`}>
-      <TabsList className="grid w-full grid-cols-3">
-        {metrics.map((metric, index) => (
-          <TabsTrigger
-            key={metric.label}
-            value={`${metric.kind}-${index}`}
-            aria-label={`${metric.label}: ${metric.value}`}
-          >
-            <span className="truncate">{metric.label}</span>
-          </TabsTrigger>
-        ))}
-      </TabsList>
-      {metrics.map((metric, index) => (
-        <TabsContent
-          key={metric.label}
-          value={`${metric.kind}-${index}`}
-          className="flex flex-col gap-3 pt-2"
-        >
-          <div>
-            <p className="text-base font-semibold">
-              {metric.title}: {metric.value}
-            </p>
-            <p className="text-sm text-muted-foreground">
-              {metric.description}
-            </p>
-          </div>
-          <MetricDetails metric={metric} />
-        </TabsContent>
-      ))}
-    </Tabs>
-  )
-}
-
-function MetricDetails({ metric }: { metric: MetricConfig }) {
-  if (metric.items.length === 0) {
-    return (
-      <div className="soft-panel p-4 text-sm text-muted-foreground">
-        Пока нет данных.
-      </div>
-    )
-  }
-
-  if (metric.kind === "rewards") {
-    return (
-      <div className="flex flex-col gap-2">
-        {(metric.items as RewardItem[]).map((reward) => (
-          <div
-            key={reward.id}
-            className="soft-panel flex items-center justify-between gap-3 p-3"
-          >
-            <div className="min-w-0">
-              <p className="truncate text-sm font-medium">{reward.userLabel}</p>
-              <p className="truncate text-xs text-muted-foreground">
-                {reward.createdAtLabel}
-              </p>
-            </div>
-            <Badge variant="secondary">{reward.daysLabel}</Badge>
-          </div>
-        ))}
-      </div>
-    )
-  }
-
-  return (
-    <div className="flex flex-col gap-2">
-      {(metric.items as InviteItem[]).map((invite) => (
-        <div
-          key={invite.id}
-          className="soft-panel flex items-center justify-between gap-3 p-3"
-        >
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium">{invite.userLabel}</p>
-            <p className="truncate text-xs text-muted-foreground">
-              {invite.createdAtLabel}
-            </p>
-          </div>
-          <Badge variant="secondary">{invite.statusLabel}</Badge>
-        </div>
-      ))}
-    </div>
-  )
 }

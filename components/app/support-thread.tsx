@@ -32,8 +32,10 @@ export type { SupportThreadMessage } from "@/components/app/support-message"
 
 export function SupportThread({
   messages: initialMessages,
+  live = true,
 }: {
   messages: SupportThreadMessage[]
+  live?: boolean
 }) {
   const router = useRouter()
   const markedThrough = React.useRef<string | null>(null)
@@ -74,10 +76,12 @@ export function SupportThread({
   )
 
   React.useEffect(() => {
+    if (!live) return
     void markRenderedRepliesRead(messages)
-  }, [markRenderedRepliesRead, messages])
+  }, [live, markRenderedRepliesRead, messages])
 
   React.useEffect(() => {
+    if (!live) return
     let active = true
 
     const refresh = async () => {
@@ -120,7 +124,7 @@ export function SupportThread({
       window.removeEventListener(SUPPORT_MESSAGES_REFRESH_EVENT, handleRefresh)
       window.clearInterval(timer)
     }
-  }, [initialMessages, markRenderedRepliesRead])
+  }, [initialMessages, live, markRenderedRepliesRead])
 
   return (
     <MessageScrollerProvider autoScroll defaultScrollPosition="end">

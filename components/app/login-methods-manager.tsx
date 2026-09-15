@@ -39,17 +39,27 @@ export function LoginMethodsManager({
   email,
   telegramId,
   telegramUsername,
+  autoOpen,
 }: {
   email: string | null
   telegramId: string | null
   telegramUsername: string | null
+  autoOpen?: "email" | "telegram"
 }) {
   const router = useRouter()
-  const [emailDialogOpen, setEmailDialogOpen] = React.useState(false)
+  const [emailDialogOpen, setEmailDialogOpen] = React.useState(
+    () => autoOpen === "email" && !email
+  )
   const [challengeId, setChallengeId] = React.useState<string>()
   const [otp, setOtp] = React.useState("")
   const [pending, setPending] = React.useState(false)
   const otpRef = React.useRef<HTMLInputElement>(null)
+
+  React.useEffect(() => {
+    if (autoOpen === "telegram" && !telegramId) void linkTelegram()
+    // The profile page passes this only after an explicit card click.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpen])
 
   function changeEmailDialog(open: boolean) {
     setEmailDialogOpen(open)

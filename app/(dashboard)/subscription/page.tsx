@@ -144,6 +144,7 @@ export default async function SubscriptionPage() {
           deviceLimit={subscription.deviceLimit}
           maxDeviceLimit={settings.maxDeviceLimit}
           deviceLimitUpgradePriceRub={settings.deviceLimitUpgradePriceRub}
+          subscriptionExpiresAt={subscription.expiresAt ?? new Date()}
           pricingVersion={settings.pricingVersion}
           paymentsUnavailable={paymentsUnavailable}
         />

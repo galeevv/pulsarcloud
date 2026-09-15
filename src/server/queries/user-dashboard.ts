@@ -142,6 +142,7 @@ export async function getReferralsView(userId: string) {
     where: { id: userId },
     select: {
       referralProfile: true,
+      partnerEnrollment: true,
       sentInvites: {
         include: {
           invited: { include: { identities: true } },
@@ -190,5 +191,61 @@ export async function getReferralSummaryView(userId: string) {
     invitedUsers,
     activeUsers,
     rewardDays: rewards._sum.days ?? 0,
+  }
+}
+
+export async function getPartnerView(userId: string) {
+  const [enrollment, wallet, commissions, payouts, settings] =
+    await Promise.all([
+      db.partnerEnrollment.findUnique({ where: { userId } }),
+      db.walletAccount.findUnique({ where: { userId } }),
+      db.partnerCommission.findMany({
+        where: { inviterUserId: userId },
+        include: {
+          invited: {
+            include: {
+              telegramProfile: {
+                select: { username: true, firstName: true, lastName: true },
+              },
+              identities: {
+                select: {
+                  provider: true,
+                  providerSubject: true,
+                  emailNormalized: true,
+                  telegramUsername: true,
+                },
+              },
+            },
+          },
+          payment: {
+            select: { amountMinor: true, currency: true, confirmedAt: true },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 200,
+      }),
+      db.payoutRequest.findMany({
+        where: { userId },
+        select: {
+          id: true,
+          amountMinor: true,
+          payoutDetailsMasked: true,
+          status: true,
+          createdAt: true,
+          updatedAt: true,
+          rejectionReason: true,
+        },
+        orderBy: { createdAt: "desc" },
+        take: 20,
+      }),
+      db.pricingSettings.findUniqueOrThrow({ where: { key: "default" } }),
+    ])
+
+  return {
+    enrollment,
+    wallet: wallet ?? { availableMinor: 0, reservedMinor: 0 },
+    commissions,
+    payouts,
+    minimalPayoutMinor: settings.minimalPayoutMinor,
   }
 }

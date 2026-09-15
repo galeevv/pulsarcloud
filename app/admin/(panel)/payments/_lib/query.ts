@@ -140,6 +140,9 @@ export async function getAdminPaymentsView(input: {
     }),
     db.payment.count({ where }),
   ])
+  const averageCheckMinor = successful
+    ? Math.round((revenue._sum.amountMinor ?? 0) / successful)
+    : 0
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const page = Math.min(Math.max(1, input.page), totalPages)
@@ -175,6 +178,7 @@ export async function getAdminPaymentsView(input: {
       successfulThisMonth: successful,
       pending,
       failedThisMonth: failed,
+      averageCheckMinor,
     },
     page,
     pageSize: PAGE_SIZE,

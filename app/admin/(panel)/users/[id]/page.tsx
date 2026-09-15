@@ -7,10 +7,11 @@ import {
   CreditCardIcon,
   GiftIcon,
   HeadphonesIcon,
-  HistoryIcon,
   KeyRoundIcon,
   MailIcon,
+  PercentIcon,
   RadioTowerIcon,
+  SendIcon,
   ShieldCheckIcon,
   SmartphoneIcon,
   UserRoundIcon,
@@ -19,6 +20,9 @@ import Link from "next/link"
 import { notFound } from "next/navigation"
 
 import { AdminSubscriptionDialog } from "@/components/admin/admin-subscription-dialog"
+import { PartnerEnrollmentControls } from "@/components/admin/partner-enrollment-controls"
+import { ReferralProgramToggle } from "@/components/admin/referral-program-toggle"
+import { CopyButton } from "@/components/app/copy-button"
 import { PulsarIconContainer } from "@/components/app/pulsar-primitives"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -76,6 +80,7 @@ export default async function AdminUserDetailsPage({
         take: 50,
       },
       referralProfile: true,
+      partnerEnrollment: true,
       invitedReferral: {
         include: {
           inviter: { include: { identities: true, telegramProfile: true } },
@@ -99,10 +104,7 @@ export default async function AdminUserDetailsPage({
   const [auditLogs, referralCount, paidReferralCount] = await Promise.all([
     db.auditLog.findMany({
       where: {
-        OR: [
-          { actorId: id },
-          { entityType: "User", entityId: id },
-        ],
+        OR: [{ actorId: id }, { entityType: "User", entityId: id }],
       },
       orderBy: { createdAt: "desc" },
       take: 100,
@@ -135,13 +137,6 @@ export default async function AdminUserDetailsPage({
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="truncate text-xl font-semibold">{title}</h2>
-                <Badge
-                  variant={
-                    user.status === "ACTIVE" ? "secondary" : "destructive"
-                  }
-                >
-                  {user.status === "ACTIVE" ? "Активен" : "Заблокирован"}
-                </Badge>
                 {user.isTest ? <Badge variant="outline">TEST</Badge> : null}
               </div>
               <p className="truncate text-sm text-muted-foreground">
@@ -161,31 +156,6 @@ export default async function AdminUserDetailsPage({
         </CardContent>
       </Card>
 
-      <section
-        aria-label="Сводка по пользователю"
-        className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"
-      >
-        <SummaryCard
-          label="Аккаунт"
-          value={user.status === "ACTIVE" ? "Активен" : "Заблокирован"}
-          note={`Создан ${date(user.createdAt)}`}
-          icon={UserRoundIcon}
-        />
-        <SummaryCard
-          label="Подписка"
-          value={subscription.label}
-          note={subscription.note}
-          icon={RadioTowerIcon}
-          attention={subscription.attention}
-        />
-        <SummaryCard
-          label="Рефералы"
-          value={referralCount}
-          note={referralCountLabel(referralCount)}
-          icon={GiftIcon}
-        />
-      </section>
-
       <Tabs defaultValue="overview" className="gap-4">
         <TabsList
           variant="line"
@@ -203,6 +173,19 @@ export default async function AdminUserDetailsPage({
               icon={SmartphoneIcon}
               label="Telegram"
               value={telegram ?? "Телеграм не привязан"}
+              action={
+                telegram ? (
+                  <Button
+                    nativeButton={false}
+                    size="sm"
+                    variant="outline"
+                    render={<Link href={`https://t.me/${telegram.replace(/^@/, "")}`} target="_blank" rel="noreferrer" />}
+                  >
+                    <SendIcon data-icon="inline-start" />
+                    Написать в Telegram
+                  </Button>
+                ) : undefined
+              }
             />
             <DetailRow
               icon={MailIcon}
@@ -273,10 +256,10 @@ export default async function AdminUserDetailsPage({
                   }
                 />
                 <DetailRow
-                  icon={HistoryIcon}
-                  label="Синхронизация"
-                  value={syncLabel(user.subscription.syncStatus)}
-                  attention={user.subscription.syncStatus === "FAILED"}
+                  icon={KeyRoundIcon}
+                  label="Ключ подписки"
+                  value={user.subscription.subscriptionUrl ?? "Ключ ещё не создан"}
+                  action={user.subscription.subscriptionUrl ? <CopyButton value={user.subscription.subscriptionUrl} iconOnly label="Скопировать ключ" /> : undefined}
                 />
               </>
             ) : (
@@ -288,11 +271,14 @@ export default async function AdminUserDetailsPage({
             )}
           </SectionCard>
 
-          <SectionCard title="Реферальная программа">
+          <SectionCard
+            title="Реферальная программа"
+          >
             <DetailRow
               icon={GiftIcon}
               label="Статус"
               value={user.referralProfile?.isEnabled ? "Включена" : "Выключена"}
+              action={<ReferralProgramToggle userId={user.id} enabled={Boolean(user.referralProfile?.isEnabled)} />}
             />
             <DetailRow
               icon={UserRoundIcon}
@@ -312,6 +298,22 @@ export default async function AdminUserDetailsPage({
               icon={CreditCardIcon}
               label="Оплатили"
               value={`${paidReferralCount}`}
+            />
+            <DetailRow
+              icon={PercentIcon}
+              label="Партнёрская ставка"
+              value={
+                user.partnerEnrollment?.enabled
+                  ? `${user.partnerEnrollment.rateBps / 100}%`
+                  : "Партнёрка выключена"
+              }
+              action={
+                <PartnerEnrollmentControls
+                  userId={user.id}
+                  enabled={user.partnerEnrollment?.enabled ?? false}
+                  rateBps={user.partnerEnrollment?.rateBps ?? 4000}
+                />
+              }
             />
           </SectionCard>
 
@@ -344,7 +346,6 @@ export default async function AdminUserDetailsPage({
               empty="Платежей пока нет."
             />
           </SectionCard>
-
         </TabsContent>
 
         <TabsContent value="history" className="flex flex-col gap-4">
@@ -410,37 +411,6 @@ export default async function AdminUserDetailsPage({
   )
 }
 
-function SummaryCard({
-  label,
-  value,
-  note,
-  icon: Icon,
-  attention = false,
-}: {
-  label: string
-  value: string | number
-  note: string
-  icon: LucideIcon
-  attention?: boolean
-}) {
-  return (
-    <Card className={cardClass}>
-      <CardHeader className="gap-0 p-4 pb-0">
-        <p className="text-sm font-medium text-muted-foreground">{label}</p>
-        <CardAction>
-          <PulsarIconContainer icon={Icon} />
-        </CardAction>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-1 p-4 pt-2">
-        <CardTitle className={attention ? "text-destructive" : undefined}>
-          {value}
-        </CardTitle>
-        <p className="text-xs text-muted-foreground">{note}</p>
-      </CardContent>
-    </Card>
-  )
-}
-
 function SectionCard({
   title,
   action,
@@ -463,14 +433,16 @@ function SectionCard({
 }
 
 function DetailRow({
+  action,
   icon: Icon,
   label,
   value,
   attention = false,
 }: {
+  action?: ReactNode
   icon: LucideIcon
   label: string
-  value: string
+  value: ReactNode
   attention?: boolean
 }) {
   return (
@@ -484,6 +456,7 @@ function DetailRow({
           {value}
         </span>
       </span>
+      {action ? <span className="shrink-0">{action}</span> : null}
     </div>
   )
 }
@@ -628,13 +601,6 @@ function subscriptionView(
   }
 }
 
-function syncLabel(value: string) {
-  if (value === "SYNCED") return "Синхронизирована"
-  if (value === "PENDING") return "В очереди"
-  if (value === "FAILED") return "Ошибка"
-  return "Не требуется"
-}
-
 function notificationLabel(
   profile: {
     transactionalNotificationsEnabled: boolean
@@ -647,15 +613,6 @@ function notificationLabel(
     profile.newsNotificationsEnabled && "новости",
   ].filter(Boolean)
   return enabled.length ? `Включены: ${enabled.join(", ")}` : "Выключены"
-}
-
-function referralCountLabel(count: number) {
-  const lastTwo = Math.abs(count) % 100
-  const last = Math.abs(count) % 10
-  if (last === 1 && lastTwo !== 11) return "приглашённый пользователь"
-  if (last >= 2 && last <= 4 && (lastTwo < 12 || lastTwo > 14))
-    return "приглашённых пользователя"
-  return "приглашённых пользователей"
 }
 
 function initials(value: string) {

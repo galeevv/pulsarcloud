@@ -1,6 +1,8 @@
 import type { Metadata } from "next"
-import { GiftIcon, Link2Icon } from "lucide-react"
+import { GiftIcon, Link2Icon, PercentIcon } from "lucide-react"
+import Link from "next/link"
 import { CopyButton } from "@/components/app/copy-button"
+import { InviteFriendButton } from "@/components/app/invite-friend-button"
 import {
   PulsarAssetCard,
   PulsarActionRow,
@@ -15,6 +17,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty"
+import { Button } from "@/components/ui/button"
 import {
   getPricingView,
   getLastPurchasePreferencesView,
@@ -73,6 +76,18 @@ export default async function ReferralsPage() {
                 initialLteEnabled={lastPurchase?.lteEnabled}
                 paymentsUnavailable={paymentsUnavailable}
               />
+              {user.partnerEnrollment?.enabled ? (
+                <Button
+                  nativeButton={false}
+                  variant="outline"
+                  size="lg"
+                  className="h-11 w-full rounded-[18px]"
+                  render={<Link href="/partner" />}
+                >
+                  <PercentIcon data-icon="inline-start" />
+                  For Partners
+                </Button>
+              ) : null}
             </EmptyContent>
           </Empty>
         </PulsarAssetCard>
@@ -95,20 +110,6 @@ export default async function ReferralsPage() {
   const activeInviteItems = inviteItems.filter(
     (_, index) => user.sentInvites[index]?.status === "PAID"
   )
-  const rewardItems = user.sentInvites.flatMap((invite) => {
-    if (!invite.subscriptionReward) return []
-    return [
-      {
-        id: invite.subscriptionReward.id,
-        daysLabel: `+${formatDaysLabel(invite.subscriptionReward.days)}`,
-        createdAtLabel: formatDate(invite.subscriptionReward.createdAt),
-        userLabel:
-          invite.invited.identities.find(
-            (identity) => identity.provider === "EMAIL"
-          )?.providerSubject ?? "Пользователь Pulsar",
-      },
-    ]
-  })
   const earnedDays = user.sentInvites.reduce(
     (sum, invite) => sum + (invite.subscriptionReward?.days ?? 0),
     0
@@ -151,15 +152,27 @@ export default async function ReferralsPage() {
           </section>
         ) : null}
         <ReferralsMetrics
-          activeInvites={activeInviteItems}
           activeValue={String(activeInviteItems.length)}
           friendTrialLabel={formatDaysLabel(settings.referralTrialDays)}
           invitedValue={String(inviteItems.length)}
-          invites={inviteItems}
           ownerRewardDays={settings.referralRewardDays}
           earnedDays={earnedDays}
-          rewards={rewardItems}
         />
+        {inviteUrl ? <InviteFriendButton inviteUrl={inviteUrl} /> : null}
+        {user.partnerEnrollment?.enabled ? (
+          <>
+            <Button
+              nativeButton={false}
+              variant="outline"
+              size="lg"
+              className="h-11 w-full rounded-[18px]"
+              render={<Link href="/partner" />}
+            >
+              <PercentIcon data-icon="inline-start" />
+              For Partners
+            </Button>
+          </>
+        ) : null}
       </PulsarAssetCard>
     </main>
   )

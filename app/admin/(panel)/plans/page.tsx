@@ -1,12 +1,6 @@
 import { randomUUID } from "node:crypto"
 import type { Metadata } from "next"
-import {
-  CalendarDaysIcon,
-  CreditCardIcon,
-  HistoryIcon,
-  RadioTowerIcon,
-  SmartphoneIcon,
-} from "lucide-react"
+import { HistoryIcon, RadioTowerIcon } from "lucide-react"
 
 import { PulsarIconContainer } from "@/components/app/pulsar-primitives"
 import { Badge } from "@/components/ui/badge"
@@ -54,38 +48,6 @@ export default async function AdminPlansPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-4 px-4 pt-8 pb-4 md:px-6 md:pb-6">
-      <section
-        aria-label="Сводка по тарифам"
-        className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"
-      >
-        <SummaryCard
-          label="Версия цен"
-          value={`v${view.pricing.version}`}
-          description={`Обновлено ${formatDate(view.pricing.updatedAt)}`}
-          icon={HistoryIcon}
-        />
-        <SummaryCard
-          label="База за месяц"
-          value={formatPreviewRub(view.pricing.baseMonthlyPriceMinor / 100)}
-          description={`От ${view.pricing.minDeviceLimit} устройства`}
-          icon={CreditCardIcon}
-        />
-        <SummaryCard
-          label="Доп. устройство"
-          value={formatPreviewRub(
-            view.pricing.extraDeviceMonthlyPriceMinor / 100
-          )}
-          description={`Лимит до ${view.pricing.maxDeviceLimit}`}
-          icon={SmartphoneIcon}
-        />
-        <SummaryCard
-          label="Действующие подписки"
-          value={view.activeSubscriptions}
-          description="Активные и пробные в текущем окружении"
-          icon={CalendarDaysIcon}
-        />
-      </section>
-
       <Card className="gap-0 rounded-3xl border border-border/70 bg-card/40 py-0 shadow-none! ring-0!">
         <CardHeader className="gap-0 p-4">
           <CardTitle>Тарифы</CardTitle>
@@ -250,33 +212,3 @@ export default async function AdminPlansPage() {
   )
 }
 
-function SummaryCard({
-  description,
-  icon: Icon,
-  label,
-  value,
-}: {
-  description: string
-  icon: typeof HistoryIcon
-  label: string
-  value: React.ReactNode
-}) {
-  return (
-    <Card className="h-full gap-0 rounded-3xl border border-border/70 bg-card/40 py-0 shadow-none! ring-0!">
-      <CardHeader className="gap-0 p-4 pb-0">
-        <CardDescription className="text-sm font-medium">
-          {label}
-        </CardDescription>
-        <CardAction>
-          <PulsarIconContainer icon={Icon} />
-        </CardAction>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-2 p-4 pt-2">
-        <CardTitle className="text-3xl leading-none font-semibold tracking-tight tabular-nums">
-          {value}
-        </CardTitle>
-        <p className="text-xs text-muted-foreground">{description}</p>
-      </CardContent>
-    </Card>
-  )
-}

@@ -36,8 +36,15 @@ export const metadata: Metadata = {
   title: { absolute: "PULSAR" },
 }
 
-export default async function ProfilePage() {
+export default async function ProfilePage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}) {
   const session = await requireWebSession("USER")
+  const params = await searchParams
+  const requestedLink = Array.isArray(params.link) ? params.link[0] : params.link
+  const autoOpen = requestedLink === "email" || requestedLink === "telegram" ? requestedLink : undefined
   const [user, hasUnreadSupport] = await Promise.all([
     getProfileView(session.userId),
     hasUnreadSupportReply(session.userId),
@@ -69,6 +76,7 @@ export default async function ProfilePage() {
           email={email}
           telegramId={telegramId}
           telegramUsername={telegramUsername}
+          autoOpen={autoOpen}
         />
 
         <Link href="/support" className="group block">

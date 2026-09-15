@@ -63,6 +63,7 @@ type SubscriptionDevicesCardProps = {
   deviceLimit: number
   maxDeviceLimit: number
   deviceLimitUpgradePriceRub: number
+  subscriptionExpiresAt: Date
   pricingVersion: number
   /** Демо-аккаунт: оплата апгрейда недоступна. */
   paymentsUnavailable?: boolean
@@ -82,6 +83,7 @@ export function SubscriptionDevicesCard({
   deviceLimit,
   maxDeviceLimit,
   deviceLimitUpgradePriceRub,
+  subscriptionExpiresAt,
   pricingVersion,
   paymentsUnavailable = false,
 }: SubscriptionDevicesCardProps) {
@@ -168,7 +170,7 @@ export function SubscriptionDevicesCard({
                 key={`free-${index}`}
                 icon={CircleDashedIcon}
                 title={`Свободный слот ${visibleDevices.length + index + 1}`}
-                description="Подключите новое устройство через Happ"
+                description="Подключите новое устройство через Happ/Incy"
               />
             ))}
           </>
@@ -181,6 +183,7 @@ export function SubscriptionDevicesCard({
               currentDeviceLimit={deviceLimit}
               maxDeviceLimit={maximum}
               deviceLimitUpgradePriceRub={deviceLimitUpgradePriceRub}
+              subscriptionExpiresAt={subscriptionExpiresAt}
               pricingVersion={pricingVersion}
               paymentsUnavailable={paymentsUnavailable}
             />
@@ -278,12 +281,14 @@ function DeviceLimitUpgradeDialog({
   currentDeviceLimit,
   maxDeviceLimit,
   deviceLimitUpgradePriceRub,
+  subscriptionExpiresAt,
   pricingVersion,
   paymentsUnavailable,
 }: {
   currentDeviceLimit: number
   maxDeviceLimit: number
   deviceLimitUpgradePriceRub: number
+  subscriptionExpiresAt: Date
   pricingVersion: number
   paymentsUnavailable: boolean
 }) {
@@ -292,10 +297,19 @@ function DeviceLimitUpgradeDialog({
     currentDeviceLimit + 1
   )
   const [pending, setPending] = React.useState(false)
+  const [nowMs] = React.useState(() => Date.now())
   const idempotencyKey = React.useRef("")
   const addedDevices = targetDeviceLimit - currentDeviceLimit
   const amountMinor =
-    addedDevices * Math.round(deviceLimitUpgradePriceRub * 100)
+    Math.ceil(
+      (addedDevices *
+        Math.round(deviceLimitUpgradePriceRub * 100) *
+        Math.max(
+          1,
+          Math.ceil((subscriptionExpiresAt.getTime() - nowMs) / 86_400_000)
+        )) /
+        30
+    )
 
   React.useEffect(() => {
     idempotencyKey.current = ""
@@ -340,8 +354,8 @@ function DeviceLimitUpgradeDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       <PulsarActionRow
         icon={SmartphoneIcon}
-        title="Дополнительные"
-        description={`За каждое устройство доплата ${formatPreviewRub(deviceLimitUpgradePriceRub)}`}
+        title="Дополнительные устройства"
+        description="Доплата рассчитывается пропорционально оставшемуся сроку"
         action={
           <DialogTrigger
             render={
@@ -391,7 +405,7 @@ function DeviceLimitUpgradeDialog({
             ))}
           </ToggleGroup>
           <p className="text-sm text-muted-foreground">
-            К доплате: {formatPreviewRub(amountMinor / 100)}
+            К доплате за оставшийся срок: {formatPreviewRub(amountMinor / 100)}
           </p>
         </div>
 

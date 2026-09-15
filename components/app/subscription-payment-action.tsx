@@ -303,7 +303,7 @@ function PaymentFlow({
                   </Badge>
                 </div>
                 <p className="truncate text-sm leading-5 text-muted-foreground">
-                  Дополнительные серверы на выбор.
+                  Дополнительные сервера
                 </p>
               </div>
             </div>

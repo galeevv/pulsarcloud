@@ -29,6 +29,8 @@ export async function applyReferralOnRegistration(
     where: { key: "default" },
   })
   const now = input.now ?? new Date()
+  // Реферальный trial — отдельная награда за приглашение и не зависит от
+  // промокампаний из /admin/promos.
   const invite = await tx.referralInvite.create({
     data: {
       inviterUserId: profile.userId,

@@ -4,7 +4,6 @@ import { getConfig } from "@/src/server/config"
 import { db } from "@/src/server/infrastructure/db/client"
 import { requireWebSession } from "@/src/server/transport/web/session"
 
-const DAY_MS = 86_400_000
 const SCOPED_ENTITY_TYPES = new Set([
   "User",
   "Payment",
@@ -118,8 +117,10 @@ export async function getAdminDashboardView() {
   await requireWebSession("ADMIN")
 
   const now = new Date()
-  const weekStart = new Date(now.getTime() - 7 * DAY_MS)
-  const previousWeekStart = new Date(now.getTime() - 14 * DAY_MS)
+  const weekStart = new Date(now)
+  const daysSinceMonday = (weekStart.getDay() + 6) % 7
+  weekStart.setDate(weekStart.getDate() - daysSinceMonday)
+  weekStart.setHours(0, 0, 0, 0)
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
   const previousMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1)
   const previousMonthComparableEnd = new Date(
@@ -133,9 +134,9 @@ export async function getAdminDashboardView() {
   const [
     totalUsers,
     newUsersThisWeek,
-    newUsersPreviousWeek,
     activeSubscriptions,
     trialSubscriptions,
+    revenueAllTime,
     revenueThisMonth,
     revenuePreviousMonth,
     openSupportConversations,
@@ -156,13 +157,6 @@ export async function getAdminDashboardView() {
         createdAt: { gte: weekStart },
       },
     }),
-    db.user.count({
-      where: {
-        role: "USER",
-        isTest: config.testMode,
-        createdAt: { gte: previousWeekStart, lt: weekStart },
-      },
-    }),
     db.subscription.count({
       where: {
         status: "ACTIVE",
@@ -180,6 +174,16 @@ export async function getAdminDashboardView() {
           is: { role: "USER", isTest: config.testMode },
         },
       },
+    }),
+    db.payment.aggregate({
+      where: {
+        status: "CONFIRMED",
+        isTest: config.testMode,
+        user: {
+          is: { role: "USER", isTest: config.testMode },
+        },
+      },
+      _sum: { amountMinor: true },
     }),
     db.payment.aggregate({
       where: {
@@ -419,9 +423,9 @@ export async function getAdminDashboardView() {
     metrics: {
       totalUsers,
       newUsersThisWeek,
-      newUsersPreviousWeek,
       activeSubscriptions,
       trialSubscriptions,
+      revenueAllTimeMinor: revenueAllTime._sum.amountMinor ?? 0,
       revenueThisMonthMinor: revenueThisMonth._sum.amountMinor ?? 0,
       revenuePreviousMonthMinor: revenuePreviousMonth._sum.amountMinor ?? 0,
       attentionTotal,

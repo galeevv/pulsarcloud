@@ -29,6 +29,12 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupTextarea,
+} from "@/components/ui/input-group"
 
 import {
   addSupportInternalNote,
@@ -41,11 +47,9 @@ const initialState: SupportActionState = { status: "idle", message: "" }
 
 export function SupportReplyForm({
   conversationId,
-  channel,
   initialIdempotencyKey,
 }: {
   conversationId: string
-  channel: "WEB" | "TELEGRAM" | "EMAIL"
   initialIdempotencyKey: string
 }) {
   const [state, action, pending] = React.useActionState(
@@ -73,36 +77,34 @@ export function SupportReplyForm({
         name="idempotencyKey"
         defaultValue={initialIdempotencyKey}
       />
-      <FieldGroup>
-        <Field data-invalid={Boolean(state.fieldErrors?.body)}>
-          <FieldLabel htmlFor="support-reply">Ответ пользователю</FieldLabel>
-          <Textarea
+      <Field data-invalid={Boolean(state.fieldErrors?.body)}>
+        <InputGroup className="min-h-11 rounded-[22px] border border-border/70 bg-background/40">
+          <InputGroupAddon align="inline-end">
+            <InputGroupButton
+              type="submit"
+              variant="secondary"
+              size="icon-sm"
+              aria-label="Отправить ответ"
+              disabled={pending}
+            >
+              <SendIcon />
+            </InputGroupButton>
+          </InputGroupAddon>
+          <InputGroupTextarea
             id="support-reply"
             name="body"
             minLength={2}
             maxLength={1000}
-            rows={5}
+            rows={1}
             required
             disabled={pending}
             aria-invalid={Boolean(state.fieldErrors?.body)}
             placeholder="Напишите ответ…"
+            className="max-h-28 min-h-11 overflow-y-auto py-3"
           />
-          <FieldDescription>
-            {channel === "WEB"
-              ? "Ответ появится в диалоге пользователя."
-              : `Ответ будет доставлен через ${
-                  channel === "TELEGRAM" ? "Telegram" : "email"
-                } и сохранён в истории.`}
-          </FieldDescription>
-          <FieldError>{state.fieldErrors?.body}</FieldError>
-        </Field>
-        <Field orientation="horizontal" className="justify-end">
-          <Button type="submit" disabled={pending}>
-            <SendIcon data-icon="inline-start" />
-            {pending ? "Сохраняем…" : "Ответить"}
-          </Button>
-        </Field>
-      </FieldGroup>
+        </InputGroup>
+        <FieldError>{state.fieldErrors?.body}</FieldError>
+      </Field>
     </form>
   )
 }
