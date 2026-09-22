@@ -87,6 +87,20 @@ export async function grantPartnerCommission(
       createdAt: now,
     },
   })
+  await tx.outboxJob.create({
+    data: {
+      type: "SEND_TELEGRAM_NOTIFICATION",
+      aggregateType: "PartnerCommission",
+      aggregateId: commission.id,
+      payloadJson: JSON.stringify({
+        userId: invite.inviterUserId,
+        template: "PARTNER_COMMISSION_CREATED",
+        commissionId: commission.id,
+      }),
+      dedupeKey: `telegram:partner-commission:${commission.id}`,
+      maxAttempts: 5,
+    },
+  })
   return commission
 }
 

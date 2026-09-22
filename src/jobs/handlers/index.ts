@@ -91,6 +91,53 @@ const PAYMENT_POLL_DELAYS_MS = [
   2 * 60 * 60_000,
 ]
 
+function escapeTelegramHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+}
+
+function formatTelegramRub(minor: number) {
+  return `${new Intl.NumberFormat("ru-RU", {
+    maximumFractionDigits: 0,
+  }).format(Math.floor(minor / 100))} ₽`
+}
+
+function formatTelegramDateTime(value: Date | null) {
+  return new Intl.DateTimeFormat("ru-RU", {
+    dateStyle: "short",
+    timeStyle: "short",
+    timeZone: "Asia/Yekaterinburg",
+  }).format(value ?? new Date())
+}
+
+function telegramUserLabel(user: {
+  telegramProfile: {
+    username: string | null
+    firstName: string | null
+    lastName: string | null
+  } | null
+  identities: Array<{
+    emailNormalized: string | null
+    telegramUsername: string | null
+  }>
+}) {
+  const telegram =
+    user.telegramProfile?.username ??
+    user.identities.find((item) => item.telegramUsername)?.telegramUsername
+  if (telegram) return telegram.startsWith("@") ? telegram : `@${telegram}`
+  const name = [user.telegramProfile?.firstName, user.telegramProfile?.lastName]
+    .filter(Boolean)
+    .join(" ")
+  if (name) return name
+  return (
+    user.identities.find((item) => item.emailNormalized)?.emailNormalized ??
+    "Пользователь Pulsar"
+  )
+}
+
 async function applyDueSubscriptionParameters(now: Date) {
   const due = await db.subscription.findMany({
     where: {
@@ -870,26 +917,98 @@ export async function handleJob(job: Job) {
       SUPPORT_REPLY:
         "💬 <b>PulsarVPN — Поддержка</b>\n\nВам ответила поддержка PULSAR.\nОткройте сайт, чтобы прочитать сообщение.",
     }
-    const supportUrl =
+    let text = messages[template] ?? "Важное уведомление Pulsar."
+    let parseMode: "HTML" | undefined =
+      template === "SUPPORT_REPLY" ? "HTML" : undefined
+    let button:
+      | { text: string; returnTo: "/referrals" | "/support" | "/partner" }
+      | null =
       template === "SUPPORT_REPLY"
-        ? (
-            await issueTelegramWebsiteLogin({
-              telegramId: profile.telegramId,
-              chatId: profile.chatId,
-              returnTo: "/support",
-            })
-          ).url
+        ? { text: "💬 Прочитать ответ ↗", returnTo: "/support" }
         : null
+
+    if (template === "REFERRAL_REGISTERED") {
+      const invite = await db.referralInvite.findUnique({
+        where: { id: String(payload.inviteId) },
+        include: {
+          invited: {
+            include: {
+              telegramProfile: {
+                select: { username: true, firstName: true, lastName: true },
+              },
+              identities: {
+                select: {
+                  emailNormalized: true,
+                  telegramUsername: true,
+                },
+              },
+            },
+          },
+        },
+      })
+      if (!invite || invite.inviterUserId !== String(payload.userId)) return
+      text = [
+        "🎁 <b>PulsarVPN — Новый реферал</b>",
+        "",
+        `<b>${escapeTelegramHtml(telegramUserLabel(invite.invited))}</b> зарегистрировался по вашей реферальной ссылке.`,
+        `Когда: <b>${formatTelegramDateTime(invite.createdAt)}</b>`,
+      ].join("\n")
+      parseMode = "HTML"
+      button = { text: "🎁 Открыть рефералы ↗", returnTo: "/referrals" }
+    }
+
+    if (template === "PARTNER_COMMISSION_CREATED") {
+      const commission = await db.partnerCommission.findUnique({
+        where: { id: String(payload.commissionId) },
+        include: {
+          invited: {
+            include: {
+              telegramProfile: {
+                select: { username: true, firstName: true, lastName: true },
+              },
+              identities: {
+                select: {
+                  emailNormalized: true,
+                  telegramUsername: true,
+                },
+              },
+            },
+          },
+          payment: { select: { confirmedAt: true } },
+        },
+      })
+      if (!commission || commission.inviterUserId !== String(payload.userId))
+        return
+      text = [
+        "🤝 <b>PulsarVPN — Партнёрский доход</b>",
+        "",
+        `Пользователь: <b>${escapeTelegramHtml(telegramUserLabel(commission.invited))}</b>`,
+        `Оплата: <b>${formatTelegramDateTime(commission.payment.confirmedAt)}</b>`,
+        `Платёж: <b>${formatTelegramRub(commission.baseAmountMinor)}</b>`,
+        `Доход: <b>+${formatTelegramRub(commission.amountMinor)}</b>`,
+      ].join("\n")
+      parseMode = "HTML"
+      button = { text: "🤝 Открыть партнёрку ↗", returnTo: "/partner" }
+    }
+
+    const actionUrl = button
+      ? (
+          await issueTelegramWebsiteLogin({
+            telegramId: profile.telegramId,
+            chatId: profile.chatId,
+            returnTo: button.returnTo,
+          })
+        ).url
+      : null
     try {
       await getTelegramGateway().sendMessage({
         chatId: profile.chatId,
-        text:
-          messages[template] ?? "Важное уведомление Pulsar.",
-        parseMode: template === "SUPPORT_REPLY" ? "HTML" : undefined,
-        replyMarkup: supportUrl
+        text,
+        parseMode,
+        replyMarkup: actionUrl && button
           ? {
               inline_keyboard: [
-                [{ text: "💬 Прочитать ответ ↗", url: supportUrl }],
+                [{ text: button.text, url: actionUrl }],
               ],
             }
           : undefined,

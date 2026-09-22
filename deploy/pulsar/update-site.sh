@@ -31,7 +31,7 @@ RELEASES="$BASE/releases"
 CURRENT="$BASE/current"
 BACKUPS="$BASE/backups"
 ENV_FILE="/etc/pulsar/pulsar.env"
-DB_FILE="/var/lib/pulsar/pulsar-vps-test.db"
+DB_FILE=""
 APP_USER="pulsar"
 HEALTH_URL="http://127.0.0.1:3000/"
 KEEP_RELEASES=5
@@ -43,6 +43,17 @@ die()  { printf "\n\033[1;31mОШИБКА: %s\033[0m\n" "$*" >&2; exit 1; }
 [ -f "$ENV_FILE" ]   || die "нет env-файла $ENV_FILE"
 command -v git >/dev/null || die "нет git"
 command -v npm >/dev/null || die "нет npm"
+
+# The same updater is used for production and the isolated VPS test mode.
+# Read the database path from the protected environment instead of guessing
+# it, so a production deploy cannot accidentally back up the test database.
+set -a
+. "$ENV_FILE"
+set +a
+case "${DATABASE_URL:-}" in
+  file:/*) DB_FILE="${DATABASE_URL#file:}" ;;
+  *) die "DATABASE_URL должен быть абсолютным SQLite file:/... URL" ;;
+esac
 
 TS="$(date +%Y%m%dT%H%M%SZ)"
 REL="$RELEASES/${TS}-$(printf '%s' "$REF" | tr '/' '-')"
@@ -67,8 +78,7 @@ SHA="$(git -c safe.directory='*' -C "$REL" rev-parse --short HEAD)"
 log "Разворачиваю $REF @ $SHA (текущий: $([ -n "$PREV" ] && basename "$PREV" || echo '—'))"
 
 ### --- 3. сборка -------------------------------------------------------- ###
-# грузим DATABASE_URL и прочее из pulsar.env, чтобы миграции/сборка видели БД
-set -a; . "$ENV_FILE"; set +a
+# DATABASE_URL и прочие production-параметры уже загружены из pulsar.env.
 cd "$REL"
 log "npm ci (+devDeps: tsx нужен воркеру)"
 npm ci --include=dev --no-audit --no-fund

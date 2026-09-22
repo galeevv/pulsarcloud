@@ -21,6 +21,7 @@ import { notFound } from "next/navigation"
 
 import { AdminSubscriptionDialog } from "@/components/admin/admin-subscription-dialog"
 import { PartnerEnrollmentControls } from "@/components/admin/partner-enrollment-controls"
+import { ReferralAssignmentForm } from "@/components/admin/referral-assignment-form"
 import { ReferralProgramToggle } from "@/components/admin/referral-program-toggle"
 import { CopyButton } from "@/components/app/copy-button"
 import { PulsarIconContainer } from "@/components/app/pulsar-primitives"
@@ -101,7 +102,7 @@ export default async function AdminUserDetailsPage({
 
   if (!user) notFound()
 
-  const [auditLogs, referralCount, paidReferralCount] = await Promise.all([
+  const [auditLogs, referralCount, paidReferralCount, referralOwners] = await Promise.all([
     db.auditLog.findMany({
       where: {
         OR: [{ actorId: id }, { entityType: "User", entityId: id }],
@@ -112,6 +113,21 @@ export default async function AdminUserDetailsPage({
     db.referralInvite.count({ where: { inviterUserId: id } }),
     db.referralInvite.count({
       where: { inviterUserId: id, status: "PAID" },
+    }),
+    db.user.findMany({
+      where: {
+        role: "USER",
+        isTest: getConfig().testMode,
+        status: "ACTIVE",
+        id: { not: id },
+        referralProfile: { isEnabled: true },
+      },
+      include: {
+        identities: true,
+        telegramProfile: { select: { username: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 200,
     }),
   ])
 
@@ -289,6 +305,28 @@ export default async function AdminUserDetailsPage({
                   : "Самостоятельная регистрация"
               }
             />
+            {!user.invitedReferral ? (
+              <div className="rounded-2xl border border-border/70 bg-background/20 p-3">
+                <ReferralAssignmentForm
+                  invitedUserId={user.id}
+                  owners={referralOwners.map((owner) => {
+                    const label = userLabel(owner)
+                    const searchText = [
+                      label,
+                      owner.telegramProfile?.username,
+                      ...owner.identities.flatMap((identity) => [
+                        identity.emailNormalized,
+                        identity.telegramUsername,
+                        identity.providerSubject,
+                      ]),
+                    ]
+                      .filter(Boolean)
+                      .join(" ")
+                    return { id: owner.id, label, searchText }
+                  })}
+                />
+              </div>
+            ) : null}
             <DetailRow
               icon={GiftIcon}
               label="Приглашено"

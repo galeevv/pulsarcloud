@@ -3,6 +3,44 @@ import { BusinessError } from "@/src/server/application/errors"
 
 const DAY = 86_400_000
 
+export async function assignReferralInvite(
+  tx: Prisma.TransactionClient,
+  input: { invitedUserId: string; inviterUserId: string; now?: Date }
+) {
+  if (input.invitedUserId === input.inviterUserId)
+    throw new BusinessError("REFERRAL_INVALID_INVITE")
+
+  const [invited, profile, existing] = await Promise.all([
+    tx.user.findUnique({ where: { id: input.invitedUserId } }),
+    tx.referralProfile.findUnique({
+      where: { userId: input.inviterUserId },
+      include: { user: true },
+    }),
+    tx.referralInvite.findUnique({
+      where: { invitedUserId: input.invitedUserId },
+    }),
+  ])
+  if (!invited || !profile || !profile.isEnabled || profile.user.status !== "ACTIVE")
+    throw new BusinessError("REFERRAL_INVALID_INVITE")
+  if (
+    invited.role !== "USER" ||
+    profile.user.role !== "USER" ||
+    invited.isTest !== profile.user.isTest
+  )
+    throw new BusinessError("REFERRAL_INVALID_INVITE")
+  if (existing) throw new BusinessError("REFERRAL_ALREADY_ASSIGNED")
+
+  return tx.referralInvite.create({
+    data: {
+      inviterUserId: profile.userId,
+      invitedUserId: invited.id,
+      inviteCodeSnapshot: profile.inviteCode,
+      status: "REGISTERED",
+      createdAt: input.now,
+    },
+  })
+}
+
 export async function applyReferralOnRegistration(
   tx: Prisma.TransactionClient,
   input: { invitedUserId: string; inviteCode?: string | null; now?: Date }
@@ -77,6 +115,20 @@ export async function applyReferralOnRegistration(
         syncVersion: 1,
       }),
       dedupeKey: `subscription:${subscription.id}:sync:1`,
+    },
+  })
+  await tx.outboxJob.create({
+    data: {
+      type: "SEND_TELEGRAM_NOTIFICATION",
+      aggregateType: "ReferralInvite",
+      aggregateId: invite.id,
+      payloadJson: JSON.stringify({
+        userId: invite.inviterUserId,
+        template: "REFERRAL_REGISTERED",
+        inviteId: invite.id,
+      }),
+      dedupeKey: `telegram:referral-registered:${invite.id}`,
+      maxAttempts: 5,
     },
   })
   return invite

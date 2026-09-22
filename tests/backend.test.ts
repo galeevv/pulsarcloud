@@ -600,6 +600,26 @@ test("referral happy path is idempotent through provisioning", async () => {
     where: { userId: inviter.id },
     data: { isEnabled: true, enabledAt: new Date() },
   })
+  await modules.db.authIdentity.create({
+    data: {
+      userId: inviter.id,
+      provider: "TELEGRAM",
+      providerSubject: "900000501",
+      telegramId: "900000501",
+      telegramUsername: "partner_owner",
+      verifiedAt: new Date(),
+    },
+  })
+  await modules.db.telegramProfile.create({
+    data: {
+      userId: inviter.id,
+      telegramId: "900000501",
+      chatId: "900000501",
+      username: "partner_owner",
+      firstName: "Партнёр",
+      canReceiveMessages: true,
+    },
+  })
   await modules.db.partnerEnrollment.create({
     data: {
       userId: inviter.id,
@@ -628,6 +648,25 @@ test("referral happy path is idempotent through provisioning", async () => {
       })
     ).lteEnabled,
     true
+  )
+  const invite = await modules.db.referralInvite.findUniqueOrThrow({
+    where: { invitedUserId: login.userId },
+  })
+  const referralNotificationJob =
+    await modules.db.outboxJob.findFirstOrThrow({
+      where: { dedupeKey: `telegram:referral-registered:${invite.id}` },
+    })
+  modules.telegramGateway.resetTestTelegramGatewayEvents()
+  await modules.jobs.handleJob({ ...referralNotificationJob, attempts: 1 })
+  const referralNotification = modules.telegramGateway
+    .getTestTelegramGatewayEvents()
+    .find((item) => item.type === "sendMessage")
+  assert.equal(referralNotification?.type, "sendMessage")
+  assert.match(referralNotification.text, /Новый реферал/)
+  assert.match(referralNotification.text, /friend@example.com/)
+  assert.match(
+    JSON.stringify(referralNotification.replyMarkup),
+    /returnTo=%2Freferrals/
   )
   const payment = await modules.billing.createCheckout({
     userId: login.userId,
@@ -662,6 +701,22 @@ test("referral happy path is idempotent through provisioning", async () => {
     where: { paymentId: payment.id },
   })
   assert.equal(commission?.amountMinor, 4_760)
+  const partnerNotificationJob = await modules.db.outboxJob.findFirstOrThrow({
+    where: { dedupeKey: `telegram:partner-commission:${commission!.id}` },
+  })
+  modules.telegramGateway.resetTestTelegramGatewayEvents()
+  await modules.jobs.handleJob({ ...partnerNotificationJob, attempts: 1 })
+  const partnerNotification = modules.telegramGateway
+    .getTestTelegramGatewayEvents()
+    .find((item) => item.type === "sendMessage")
+  assert.equal(partnerNotification?.type, "sendMessage")
+  assert.match(partnerNotification.text, /Партнёрский доход/)
+  assert.match(partnerNotification.text, /Платёж: <b>119 ₽<\/b>/)
+  assert.match(partnerNotification.text, /Доход: <b>\+47 ₽<\/b>/)
+  assert.match(
+    JSON.stringify(partnerNotification.replyMarkup),
+    /returnTo=%2Fpartner/
+  )
   const inviterSubscription = await modules.db.subscription.findUniqueOrThrow({
     where: { userId: inviter.id },
   })

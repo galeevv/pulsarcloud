@@ -58,8 +58,13 @@ Telegram retries non-2xx webhook responses, while duplicate `update_id` values d
 ## Notifications and news
 
 Service notifications are enabled by default and are sent through the existing
-outbox for approaching expiry, expiry, referral payout state, and support
-replies. Payment confirmation and provisioning success/failure are
+outbox for referral registrations, partner commissions, approaching expiry,
+expiry, referral payout state, and support replies. A referral registration
+notification is sent once per created `ReferralInvite` and links to
+`/referrals`. A partner commission notification is sent only when the inviter
+has an enabled `PartnerEnrollment`; it uses the stored `PartnerCommission`
+amounts shown in `/partner` → “Доход от приглашённых” and links to
+`/partner`. Payment confirmation and provisioning success/failure are
 intentionally silent. A support notification never copies the private reply
 text into Telegram; it provides a fresh authenticated URL button to
 `/support`. News use `TelegramBroadcast` and small

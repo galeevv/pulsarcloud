@@ -6,12 +6,13 @@ import { z } from "zod"
 import { BusinessError, toFriendlyError } from "@/src/server/application/errors"
 import { getConfig } from "@/src/server/config"
 import { db } from "@/src/server/infrastructure/db/client"
+import { assignReferralInvite } from "@/src/server/domain/referrals/service"
 import { correlationId } from "@/src/server/infrastructure/security/crypto"
 import { requireWebSession } from "@/src/server/transport/web/session"
 
 const subscriptionManagementSchema = z.object({
   userId: z.string().min(8).max(100),
-  daysToAdd: z.coerce.number().int().min(0).max(3650),
+  daysToAdd: z.coerce.number().int().min(-3650).max(3650),
   deviceLimit: z.coerce.number().int().min(1).max(5),
   lteEnabled: z.enum(["true", "false"]).transform((value) => value === "true"),
   comment: z.string().trim().min(5).max(500),
@@ -50,7 +51,7 @@ export async function manageUserSubscription(
       message: "Проверьте параметры подписки и обязательный комментарий.",
       fieldErrors: {
         daysToAdd: errors.daysToAdd?.length
-          ? "Укажите целое число дней от 0 до 3650."
+          ? "Укажите целое число дней от -3650 до 3650."
           : undefined,
         deviceLimit: errors.deviceLimit?.length
           ? "Лимит должен быть от 1 до 5 устройств."
@@ -89,7 +90,7 @@ export async function manageUserSubscription(
         current !== null &&
         current.expiresAt > now &&
         (current.status === "ACTIVE" || current.status === "TRIAL")
-      if ((!current || !currentTermIsLive) && parsed.data.daysToAdd === 0)
+      if ((!current || !currentTermIsLive) && parsed.data.daysToAdd <= 0)
         throw new BusinessError("INVALID_INPUT")
 
       const parametersChanged =
@@ -105,7 +106,14 @@ export async function manageUserSubscription(
               Math.max(now.getTime(), current?.expiresAt.getTime() ?? 0) +
                 parsed.data.daysToAdd * 86_400_000
             )
-          : current!.expiresAt
+          : parsed.data.daysToAdd < 0
+            ? new Date(
+                Math.max(
+                  now.getTime(),
+                  current!.expiresAt.getTime() + parsed.data.daysToAdd * 86_400_000
+                )
+              )
+            : current!.expiresAt
       const syncVersion = (current?.syncVersion ?? 0) + 1
       const subscription = current
         ? await tx.subscription.update({
@@ -141,7 +149,9 @@ export async function manageUserSubscription(
           type:
             parsed.data.daysToAdd > 0
               ? "ADMIN_EXTENDED"
-              : "ADMIN_PARAMETERS_UPDATED",
+              : parsed.data.daysToAdd < 0
+                ? "ADMIN_REDUCED"
+                : "ADMIN_PARAMETERS_UPDATED",
           actorUserId: session.userId,
           previousStateJson: current ? JSON.stringify(current) : null,
           newStateJson: JSON.stringify(subscription),
@@ -193,7 +203,7 @@ export async function manageUserSubscription(
       return {
         status: "error",
         message:
-          "Для новой, истёкшей или приостановленной подписки добавьте хотя бы один день.",
+          "Для новой, истёкшей или приостановленной подписки укажите положительное число дней.",
       }
     if (error instanceof BusinessError && error.code === "CONFLICT")
       return {
@@ -300,6 +310,41 @@ export async function setReferralProgram(formData: FormData) {
     })
   })
   revalidatePath(`/admin/users/${parsed.data.userId}`)
+  revalidatePath("/referrals")
+}
+
+const assignReferralInviteSchema = z.object({
+  invitedUserId: z.string().min(8).max(100),
+  inviterUserId: z.string().min(8).max(100),
+})
+
+export async function assignUserReferral(formData: FormData) {
+  const session = await requireWebSession("ADMIN")
+  const parsed = assignReferralInviteSchema.safeParse({
+    invitedUserId: formData.get("invitedUserId"),
+    inviterUserId: formData.get("inviterUserId"),
+  })
+  if (!parsed.success) throw new BusinessError("INVALID_INPUT")
+
+  await db.$transaction(async (tx) => {
+    const invite = await assignReferralInvite(tx, parsed.data)
+    await tx.auditLog.create({
+      data: {
+        actorType: "ADMIN",
+        actorId: session.userId,
+        action: "REFERRAL_INVITE_ASSIGNED_BY_ADMIN",
+        entityType: "ReferralInvite",
+        entityId: invite.id,
+        metadataJson: JSON.stringify({
+          inviterUserId: parsed.data.inviterUserId,
+          invitedUserId: parsed.data.invitedUserId,
+        }),
+        correlationId: correlationId(),
+      },
+    })
+  })
+  revalidatePath(`/admin/users/${parsed.data.invitedUserId}`)
+  revalidatePath(`/admin/users/${parsed.data.inviterUserId}`)
   revalidatePath("/referrals")
 }
 

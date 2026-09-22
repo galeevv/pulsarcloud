@@ -8,7 +8,7 @@ import {
 import { getConfig } from "@/src/server/config"
 
 const challengeIdPattern = /^[A-Za-z0-9_-]{8,128}$/
-const userReturnPaths = new Set(["/home", "/referrals", "/support"])
+const userReturnPaths = new Set(["/home", "/referrals", "/support", "/partner"])
 
 export async function GET(request: Request) {
   try {

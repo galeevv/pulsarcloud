@@ -145,14 +145,14 @@ export function AdminSubscriptionDialog({
 
             <Field data-invalid={Boolean(daysError)}>
               <FieldLabel htmlFor={`subscription-days-${userId}`}>
-                Добавить дней
+                Изменение срока в днях
               </FieldLabel>
               <Input
                 id={`subscription-days-${userId}`}
                 name="daysToAdd"
                 type="number"
                 inputMode="numeric"
-                min={0}
+                min={-3650}
                 max={3650}
                 step={1}
                 value={daysToAdd}
@@ -179,6 +179,7 @@ export function AdminSubscriptionDialog({
                 ))}
               </ToggleGroup>
               <FieldDescription>
+                Положительное число добавит дни, отрицательное уменьшит срок.
                 Укажите 0, если нужно изменить только параметры действующей
                 подписки.
               </FieldDescription>

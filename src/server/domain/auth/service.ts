@@ -574,7 +574,7 @@ export async function ensureTelegramBotUser(
 export async function issueTelegramWebsiteLogin(input: {
   telegramId: string
   chatId: string
-  returnTo: "/home" | "/referrals" | "/support"
+  returnTo: "/home" | "/referrals" | "/support" | "/partner"
 }) {
   if (input.chatId !== input.telegramId)
     throw new BusinessError("AUTH_FORBIDDEN", 403)
