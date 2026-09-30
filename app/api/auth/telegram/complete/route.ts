@@ -8,7 +8,18 @@ import {
 import { getConfig } from "@/src/server/config"
 
 const challengeIdPattern = /^[A-Za-z0-9_-]{8,128}$/
-const userReturnPaths = new Set(["/home", "/referrals", "/support", "/partner"])
+const userReturnPaths = new Set([
+  "/home",
+  "/instructions",
+  "/referrals",
+  "/support",
+  "/partner",
+])
+
+const privateRedirectHeaders = {
+  "Cache-Control": "private, no-store, max-age=0",
+  "Referrer-Policy": "no-referrer",
+}
 
 export async function GET(request: Request) {
   try {
@@ -32,12 +43,13 @@ export async function GET(request: Request) {
         : userReturnPaths.has(requestedReturnTo)
           ? requestedReturnTo
           : "/home"
-    return NextResponse.redirect(
-      `${getConfig().appUrl}${returnTo}`
-    )
+    return NextResponse.redirect(`${getConfig().appUrl}${returnTo}`, {
+      headers: privateRedirectHeaders,
+    })
   } catch {
     return NextResponse.redirect(
-      `${getConfig().appUrl}/auth/verify?error=expired`
+      `${getConfig().appUrl}/auth/verify?error=expired`,
+      { headers: privateRedirectHeaders }
     )
   }
 }

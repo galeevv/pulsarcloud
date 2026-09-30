@@ -101,12 +101,17 @@ export interface ProvisioningProvider {
     remoteUserId: string
   }): Promise<{ subscriptionUrl: string }>
   getSubscriberState(remoteUserId: string): Promise<RemoteSubscriberState>
-  getSubscriberDevices(remoteUserId: string): Promise<SubscriberDevice[]>
+  getSubscriberDevices(
+    remoteUserId: string,
+    options?: { timeoutMs?: number }
+  ): Promise<SubscriberDevice[]>
   deleteSubscriberDevice(input: {
     remoteUserId: string
     hwid: string
   }): Promise<SubscriberDevice[]>
 }
+
+const mockSubscriberDevices = new Map<string, SubscriberDevice[]>()
 
 class MockProvisioningProvider implements ProvisioningProvider {
   async upsertSubscriber(input: { localUserId: string }) {
@@ -130,12 +135,33 @@ class MockProvisioningProvider implements ProvisioningProvider {
       subscriptionUrl: "",
     }
   }
-  async getSubscriberDevices() {
-    return []
+  async getSubscriberDevices(remoteUserId: string) {
+    return [...(mockSubscriberDevices.get(remoteUserId) ?? [])]
   }
-  async deleteSubscriberDevice(): Promise<SubscriberDevice[]> {
-    throw new SubscriberDeviceNotFoundError()
+  async deleteSubscriberDevice(input: {
+    remoteUserId: string
+    hwid: string
+  }): Promise<SubscriberDevice[]> {
+    const current = mockSubscriberDevices.get(input.remoteUserId) ?? []
+    if (!current.some((device) => device.hwid === input.hwid))
+      throw new SubscriberDeviceNotFoundError()
+    const remaining = current.filter((device) => device.hwid !== input.hwid)
+    mockSubscriberDevices.set(input.remoteUserId, remaining)
+    return [...remaining]
   }
+}
+
+export function setMockSubscriberDevicesForTests(
+  remoteUserId: string,
+  devices: SubscriberDevice[]
+) {
+  if (!getConfig().localAuthAdaptersEnabled)
+    throw new Error("Mock subscriber devices are test-only")
+  mockSubscriberDevices.set(remoteUserId, [...devices])
+}
+
+export function resetMockSubscriberDevicesForTests() {
+  if (getConfig().localAuthAdaptersEnabled) mockSubscriberDevices.clear()
 }
 
 export type RemnawaveHttpProviderOptions = {
@@ -248,12 +274,16 @@ export class RemnawaveHttpProvider implements ProvisioningProvider {
     return this.toState(user)
   }
 
-  async getSubscriberDevices(remoteUserId: string) {
+  async getSubscriberDevices(
+    remoteUserId: string,
+    options?: { timeoutMs?: number }
+  ) {
     return this.requestDevices(
       `/api/hwid/devices/${encodeURIComponent(remoteUserId)}`,
       "GET",
       undefined,
-      "get subscriber devices"
+      "get subscriber devices",
+      options?.timeoutMs
     )
   }
 
@@ -335,9 +365,17 @@ export class RemnawaveHttpProvider implements ProvisioningProvider {
     path: string,
     method: "GET" | "POST",
     body: Record<string, unknown> | undefined,
-    operation: string
+    operation: string,
+    timeoutMs?: number
   ) {
-    const payload = await this.request(path, method, body, operation)
+    const payload = await this.request(
+      path,
+      method,
+      body,
+      operation,
+      false,
+      timeoutMs
+    )
     const parsed = remoteDevicesEnvelopeSchema.safeParse(payload)
     if (!parsed.success)
       throw new Error(`Remnawave API ${operation} returned invalid devices`)
@@ -349,10 +387,14 @@ export class RemnawaveHttpProvider implements ProvisioningProvider {
     method: "GET" | "POST" | "PATCH",
     body: Record<string, unknown> | undefined,
     operation: string,
-    allowNotFound = false
+    allowNotFound = false,
+    timeoutMs = this.timeoutMs
   ): Promise<unknown | null> {
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), this.timeoutMs)
+    const timeout = setTimeout(
+      () => controller.abort(),
+      Math.max(250, Math.min(timeoutMs, this.timeoutMs))
+    )
     let response: Response
     try {
       response = await this.fetchImplementation(new URL(path, this.baseUrl), {

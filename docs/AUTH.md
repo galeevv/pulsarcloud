@@ -10,7 +10,7 @@ Sessions use 32-byte random cookie tokens; only HMAC hashes are stored. USER and
 
 An authenticated request to `/` checks the separate ADMIN cookie first, then USER: ADMIN redirects to `/admin`, USER redirects to `/home`, and a browser holding both is sent to `/admin`.
 
-The Telegram completion URL can also be opened in any browser. It includes the challenge ID and a one-use token; both must match the stored challenge, and completion expires after five minutes. A mismatched challenge does not consume the valid token.
+The Telegram bot creates a fresh website-login challenge only after an authenticated private-chat callback. The completion URL can be opened in any browser and may return only to `/home`, `/instructions`, `/support`, or `/partner`. It includes the challenge ID and a one-use token; both must match the stored HMAC-only challenge, and completion expires after five minutes. A mismatched challenge does not consume the valid token. The completion response is `no-store` with `Referrer-Policy: no-referrer`; the exact Nginx location disables access logging so the query token is not retained or leaked through a subsequent `Referer` header.
 
 The no-op email sender, Telegram simulator, and development OTP response are enabled only when test mode runs outside production. An explicitly approved production test-mode runtime still creates `isTest=true` users, but requires real Resend and Telegram credentials, sends users to the real `t.me` bot, and never returns `devOtp` to the client.
 

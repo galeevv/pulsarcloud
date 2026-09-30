@@ -1,575 +1,335 @@
-# PULSAR Telegram Bot — Product & UX Specification
+# PULSAR VPN Telegram Bot — Product & UX Specification
 
-> Живой документ. Здесь поэтапно фиксируются экраны, тексты, кнопки,
-> состояния, бизнес-логика и переходы Telegram-бота PULSAR.
+## 1. Product status
 
-## 1. Статус документа
+- Bot: `@pulsarcloud_bot`.
+- Format: ordinary Telegram Bot API bot with webhook and inline keyboards.
+- Mini App / `web_app`: not used.
+- Published commands: only `/start — Запустить бота`.
+- Data: shared website database and domain services.
+- Navigation: one photo message whose caption and keyboard are edited.
+- Current release: `IMPLEMENTED`; live Telegram acceptance is required before
+  changing a screen to `VERIFIED`.
 
-- Продукт: `@pulsarcloud_bot`
-- Формат: обычный Telegram-бот, без Mini App
-- Единственная публичная команда: `/start`
-- Источник данных: общая база и общие domain services сайта
-- Визуальное направление: премиальный минимализм PULSAR
-- Текущий этап: реализация согласованной версии
+The style is premium minimalism: one task per screen, short copy, no provider
+terminology, and a clear next action. All user values are HTML-escaped.
 
-Статусы экранов:
+## 2. Screen map
 
-- `DRAFT` — обсуждаем;
-- `APPROVED` — согласовано;
-- `IMPLEMENTED` — реализовано;
-- `VERIFIED` — проверено в Telegram.
+| ID  | Screen                        | Status      |
+| --- | ----------------------------- | ----------- |
+| 01  | Main                          | IMPLEMENTED |
+| 02  | Device management             | IMPLEMENTED |
+| 03  | Device deletion confirmation  | IMPLEMENTED |
+| 04  | Device-limit upgrade          | IMPLEMENTED |
+| 05  | Subscription renewal          | IMPLEMENTED |
+| 06  | Invite friends                | IMPLEMENTED |
+| 07  | Authorized website transition | IMPLEMENTED |
+| 08  | Notifications and news        | IMPLEMENTED |
 
-## 2. Принципы интерфейса
+Repeated `/start`, `/help`, and an unknown private message return to screen 01.
+Group messages are ignored. Every callback is answered exactly once.
 
-### 2.1. Премиальный минимализм
+## 3. Screen 01 — Main
 
-- один экран — одна понятная задача;
-- короткие тексты без технических терминов;
-- много воздуха между смысловыми блоками;
-- статус пользователя виден сразу;
-- главные действия находятся выше второстепенных;
-- названия кнопок короткие и однозначные;
-- технические состояния Remnawave, outbox и БД не показываются пользователю
-  напрямую;
-- бренд в интерфейсе пишется как `PulsarVPN` или `PULSAR` в зависимости от
-  контекста.
-
-### 2.2. Навигация
-
-- бот держит один основной интерфейсный photo message и обновляет его подпись
-  через `editMessageCaption`;
-- внутренние переходы используют `callback_data`;
-- внешние переходы используют обычные URL-кнопки;
-- на вложенных экранах есть кнопка `‹ Назад`;
-- повторный `/start` всегда возвращает пользователя на главный экран;
-- неизвестное сообщение также возвращает на главный экран;
-- каждый callback завершается через `answerCallbackQuery`;
-- Mini App и поле `web_app` не используются.
-
-### 2.3. Тон коммуникации
-
-- спокойный;
-- уверенный;
-- лаконичный;
-- без канцелярита;
-- без лишних объяснений внутренних процессов;
-- ошибка всегда содержит понятное следующее действие.
-
-## 3. Карта экранов
-
-| ID | Экран | Статус |
-| --- | --- | --- |
-| 01 | Главная | IMPLEMENTED |
-| 02 | Реферальная программа | IMPLEMENTED |
-| 03 | Авторизованный переход на сайт | IMPLEMENTED |
-| 04 | Вход через Telegram | IMPLEMENTED |
-| 05 | Привязка Telegram | IMPLEMENTED |
-| 06 | Уведомления | IMPLEMENTED |
-| 07 | Новости | IMPLEMENTED |
-| 08 | Служебные состояния | IMPLEMENTED |
-
-Отдельные экраны `Пробный период`, `Подписка настраивается` и
-`Ошибка настройки` не создаются. Эти состояния адаптируют содержимое главной
-страницы или обрабатываются сервисными уведомлениями.
-
----
-
-# Экран 01 — Главная
-
-Статус: `IMPLEMENTED`
-
-## 4. Роль экрана
-
-Главная страница бота — компактный личный кабинет пользователя. Она показывает
-самое важное о текущем доступе и ведёт в основные сценарии без копирования всего
-сайта.
-
-Над подписью используется фирменное изображение `public/tg/tg3.png`. Оно
-отправляется методом `sendPhoto`; весь персональный текст находится в безопасно
-экранированной HTML-подписи, а не в самом изображении.
-
-За несколько секунд экран должен отвечать на вопросы:
-
-1. Есть ли активная подписка?
-2. Какой срок был приобретён и сколько дней осталось?
-3. До какой даты действует доступ?
-4. Сколько устройств подключено и каков лимит?
-5. Есть ли LTE-доступ?
-6. Можно ли прямо сейчас получить ключ подписки?
-
-## 5. Когда открывается
-
-- первое нажатие `Start`;
-- команда `/start`;
-- `/help` или неизвестное сообщение;
-- кнопка `‹ Назад` с вложенного экрана;
-- повторный вход пользователя в бота.
-
-`/start <token>` сначала открывает отдельный сценарий подтверждения входа или
-привязки. `/start ref_<inviteCode>` открывает реферальный сценарий регистрации.
-
-## 6. Логика загрузки
-
-1. Принять действие только из private chat.
-2. Взять Telegram ID исключительно из проверенного `from.id`.
-3. Найти общую `AuthIdentity` типа `TELEGRAM`.
-4. Если пользователя нет — создать общий пользовательский граф:
-   `User`, `AuthIdentity`, `TelegramProfile`, `WalletAccount`,
-   `ReferralProfile`.
-5. Загрузить из общей БД:
-   - отображаемое имя;
-   - Telegram username для отображения;
-   - effective status подписки;
-   - длительность последнего применённого платного периода;
-   - дату окончания;
-   - оставшиеся дни;
-   - фактическое количество подключённых устройств;
-   - лимит устройств;
-   - LTE-доступ;
-   - готовый subscription URL.
-6. Собрать актуальное состояние главного экрана.
-
-Username не участвует в авторизации и используется только как display metadata.
-Главный экран не выполняет синхронный запрос в Remnawave: количество устройств и
-другие данные читаются из локального read model, который обновляет worker.
-
-Регистрация происходит автоматически при первом обычном `/start`. Пользователь
-бота сразу становится пользователем сервиса PULSAR в общей базе. Отдельного
-подтверждения регистрации и отдельной Telegram-базы нет.
-
-## 7. Состояния главной страницы
-
-### 7.1. Активная подписка
+Example with email and an active subscription:
 
 ```text
-🪐 **PulsarVPN — Личный кабинет**
+🪐 PULSAR VPN
 
-👤 **GALEEV** · @galeev66
+👤 GALEEV · @galeev66
+✉️ user@email.com
 
-🟢 **3 месяца · осталось 78 дней**
-Подписка активна до **9 октября 2026 г.**
+🟢 Осталось 30 дней
+Подписка активна до 30 октября 2026 г.
 
-📱 Подключено устройств: **1/3**
-⚡ LTE-доступ: **есть**
+📱 Подключено устройств: 1 / 5
+⚡️ Доступ Plus: есть
 ```
 
-Клавиатура:
+The email line is omitted when there is no EMAIL identity. Telegram username is
+metadata only. `Plus` is the Telegram product name for `lteEnabled`.
+
+Keyboard:
 
 ```text
-[ 🔗 Подключиться ]
-[ 💎 Продлить подписку ]
-[ 🎁 Рефералы ] [ 🌐 Сайт ]
+[🔗 Подключиться]
+[📱 Устройства] [💎 Продлить]
+[🎁 Пригласить] [💬 Поддержка]
+[🛰 PULSAR VPN NEWS] [🌐 Сайт]
 ```
 
-`🔗 Подключиться` — обычная URL-кнопка с персональным ключом подписки:
+- `Подключиться` creates a fresh login to `/instructions`.
+- `Устройства`, `Продлить`, and `Пригласить` stay inside Telegram.
+- `Поддержка` creates a fresh login to `/support`.
+- News opens `https://t.me/pulsarvpn_news`.
+- `Сайт` creates a fresh login to `/home`.
+
+### Main state table
+
+| State                    | Copy/behavior                                              |
+| ------------------------ | ---------------------------------------------------------- |
+| No subscription          | `⚪ Подписка не оформлена`; renewal flow remains available |
+| Active, over 3 days      | green remaining-days status                                |
+| Three days or less       | orange remaining-days status                               |
+| Expired                  | `🔴 Подписка истекла`; button is `💎 Возобновить подписку` |
+| Sync pending             | `🟡 Настраиваем подписку`; show limit and Plus             |
+| Sync failed              | friendly automatic-retry state and support button          |
+| Device count unavailable | `📱 Лимит устройств: до N`, never `0 / N`                  |
+| Suspended legacy row     | support only; no payment CTA                               |
+
+Actual device usage is loaded by the outbox worker through the existing
+Remnawave service only for an active, synced subscription. A provider failure
+does not prevent the rest of the main screen from opening.
+
+## 4. Screens 02–04 — Devices
+
+Normal list:
 
 ```text
-https://sub.pulsar-cloud.space/{subscription-key}
+📱 Управление устройствами
+
+🟢 Подключено устройств: 1 / 5
+
+Нажмите на устройство, чтобы удалить его.
 ```
 
-Кнопка появляется только если доступ фактически активен, срок не истёк и
-`subscriptionUrl` уже получен. В `callback_data` ключ не передаётся.
-
-### 7.2. Подписки ещё не было
+Buttons use one row per connected device:
 
 ```text
-🪐 **PulsarVPN — Личный кабинет**
-
-👤 **GALEEV** · @galeev66
-
-⚪ **Подписка не оформлена**
-Выберите тариф, чтобы подключить защищённый доступ.
+[📱 Android (Pixel 10)]
+[🍏 iPhone]
+[💻 Windows]
+[🖥 macOS]
+[🐧 Linux]
+[🔒 Устройство]
+[➕ Дополнительное устройство]
+[‹ Вернуться в главное меню]
 ```
 
-Клавиатура:
+The additional-device button is omitted at the maximum configured limit. At a
+full current limit, the screen explains that the limit is reached; upgrade is
+still offered when the configured maximum is higher.
+
+Deletion confirmation:
 
 ```text
-[ 💎 Купить подписку ]
-[ 🎁 Рефералы ] [ 🌐 Сайт ]
+🗑 Удалить устройство?
+
+Android (Pixel 10)
+
+После удаления это устройство потеряет доступ. Его можно будет подключить
+заново, если лимит свободен.
 ```
 
-### 7.3. Подписка закончилась
-
 ```text
-🪐 **PulsarVPN — Личный кабинет**
-
-👤 **GALEEV** · @galeev66
-
-🔴 **Подписка закончилась**
-Доступ был активен до **9 октября 2026 г.**
-
-📱 Лимит устройств: **3**
-⚡ LTE-доступ: **был подключён**
+[🗑 Удалить]
+[‹ Назад к устройствам]
 ```
 
-Клавиатура:
+Device actions resolve a user-bound HMAC tag to the freshly loaded owned list.
+The raw HWID is never sent to Telegram. Deletion calls the existing
+subscription/Remnawave service and then reloads the list.
+
+Handled states: no active subscription, no devices, provider unavailable, sync
+pending, sync failed, reached current limit, and maximum limit.
+
+### Device-limit upgrade
+
+The screen shows current/max limits and one server-priced button per available
+target. The amount uses the website rule: each added slot is prorated by the
+remaining subscription days. Review fixes amount and pricing version; payment
+uses the common external checkout. A stale quote asks the user to refresh.
+
+## 5. Screen 05 — Renewal
+
+### 5.1 Duration
 
 ```text
-[ 💎 Возобновить подписку ]
-[ 🎁 Рефералы ] [ 🌐 Сайт ]
+💎 Продление подписки
+
+Выберите срок:
 ```
 
-### 7.4. Остальные состояния в той же композиции
+Buttons are built from the enabled pricing durations, normally 1, 3, 6, and 12
+months, followed by `‹ Назад`.
 
-Отдельных экранов `Пробный период`, `Подписка настраивается` и
-`Ошибка настройки` нет. Главная страница сохраняет одну композицию, а статусный
-блок и CTA адаптируются.
-
-| Состояние | Статусная строка | Основной CTA |
-| --- | --- | --- |
-| `ACTIVE` | `🟢 {период} · осталось {N дней}` | `💎 Продлить подписку` |
-| `TRIAL` | `🟢 Доступ активен · осталось {N дней}` | `💎 Купить подписку` |
-| `EXPIRED` | `🔴 Подписка закончилась` | `💎 Возобновить подписку` |
-| `SUSPENDED` | `🔴 Доступ приостановлен` | `💎 Возобновить подписку` |
-| подписки нет | `⚪ Подписка не оформлена` | `💎 Купить подписку` |
-| sync `PENDING` | основной продуктовый статус без технических деталей | CTA по product status |
-| sync `FAILED` | основной продуктовый статус без технических деталей | CTA по product status |
-
-При `PENDING` и `FAILED` кнопка `🔗 Подключиться` скрыта, пока нет готового
-subscription URL. Технические проблемы сообщаются отдельным сервисным
-уведомлением и доступны поддержке, но не превращают главную в экран ошибки.
-
-## 8. Кнопки и callback-контракт
-
-| Кнопка | Тип | Значение |
-| --- | --- | --- |
-| 🔗 Подключиться | URL | персональный `subscriptionUrl` |
-| 💎 Купить подписку | callback | `menu:site-login` |
-| 💎 Продлить подписку | callback | `menu:site-login` |
-| 💎 Возобновить подписку | callback | `menu:site-login` |
-| 🎁 Рефералы | callback | `menu:referrals` |
-| 🌐 Сайт | callback | `menu:site-login` |
-| Pulsar VPN News | URL | `https://t.me/pulsarvpn_news` |
-
-CTA покупки/продления и кнопка `🌐 Сайт` используют один безопасный сценарий
-авторизации на сайте. После авторизации сайт сам показывает актуальное действие
-для состояния подписки.
-
-## 9. Правила отображения
-
-- в заголовке показывается только `TelegramProfile.firstName`;
-- имя выводится в верхнем регистре, чтобы длинная фамилия не перегружала экран;
-- если `firstName` отсутствует, используется `ПОЛЬЗОВАТЕЛЬ`;
-- `@username` показывается только при наличии и не используется для
-  авторизации;
-- период определяется по применённому платёжному snapshot:
-  `30 → 1 месяц`, `90 → 3 месяца`, `180 → 6 месяцев`,
-  `365 → 12 месяцев`;
-- если период надёжно определить нельзя, выводится `Подписка активна`;
-- дата форматируется по-русски: `9 октября 2026 г.`;
-- при одном дне: `остался 1 день`;
-- при 2–4 днях: `осталось 3 дня`;
-- при остальных значениях: `осталось 25 дней`;
-- если осталось меньше суток, выводится `заканчивается сегодня`;
-- подключённые устройства отображаются как `{used}/{limit}`;
-- фактический `used` берётся из локального синхронизированного read model, а не
-  сетевым вызовом во время `/start`;
-- если фактическое число временно неизвестно, не выводится фиктивное `0/{limit}`;
-  используется честная строка `📱 Доступно устройств: **до {limit}**`;
-- LTE показывается как `есть`, `нет` или `был подключён` для истёкшего доступа;
-- состояние `FAILED` не раскрывает техническую ошибку;
-- если данные временно недоступны, значения не выдумываются.
-
-Для форматирования сообщения используется безопасно экранированный HTML или
-MarkdownV2. Пользовательские имена и username обязательно экранируются перед
-передачей в Telegram.
-
-## 10. Что сознательно не размещаем на главной
-
-- Telegram ID;
-- Remnawave ID и sync version;
-- баланс;
-- реферальную ссылку;
-- историю операций;
-- настройки уведомлений;
-- новости и рекламные баннеры;
-- технические сообщения provisioning.
-
-Эти данные принадлежат вложенным экранам и сервисным уведомлениям.
-
----
-
-# Экран 02 — Реферальная программа
-
-Статус: `IMPLEMENTED`
-
-## 11. Содержимое экрана
+### 5.2 Device limit
 
 ```text
-🎁 **PulsarVPN — Рефералы**
+📱 Количество устройств
 
-👥 Приглашено: **12**
-🟢 Активных: **8**
-💰 Баланс: **750 ₽**
+Выберите лимит устройств:
+```
+
+Buttons cover every configured integer from `minDeviceLimit` through
+`maxDeviceLimit`, capped at five.
+
+### 5.3 Plus
+
+```text
+⚡️ Доступ Plus
+
+Plus добавляет LTE и расширенный доступ.
+```
+
+```text
+[⚡️ Добавить Plus]
+[Без Plus]
+[‹ Назад]
+```
+
+### 5.4 Review and checkout
+
+```text
+🧾 Проверьте заказ
+
+Срок: 3 месяца
+Устройства: 3
+Доступ Plus: да
+
+Итого: 1 990 ₽
+```
+
+```text
+[💳 Оплатить]
+[‹ Изменить]
+[🏠 Главное меню]
+```
+
+After checkout creation the callback screen contains an ordinary
+`💳 Перейти к оплате ↗` URL. Telegram Payments are not used. The billing
+service remains authoritative for price changes, identical-checkout reuse,
+changed-order superseding, active-term extension, and expired-term restart.
+
+## 6. Screen 06 — Invite friends
+
+```text
+🎁 Пригласить друзей
+
+Приглашено: 12
+Активных: 5
+Начислено дней: 10
 
 Ваша ссылка:
-https://pulsar-cloud.space/?invite={inviteCode}
+https://pulsar-cloud.space/?invite=...
 
-Ссылка для Telegram:
-https://t.me/pulsarcloud_bot?start=ref_{inviteCode}
+Telegram-ссылка:
+https://t.me/pulsarcloud_bot?start=ref_...
 ```
 
-Клавиатура:
+When supported by the value length, buttons are:
 
 ```text
-[ 💸 Вывести ]
-[ ‹ Назад ]
+[📋 Скопировать ссылку сайта]
+[📋 Скопировать Telegram-ссылку]
+[‹ Вернуться в главное меню]
 ```
 
-Показываются только три показателя:
+Both links use one enabled `ReferralProfile`. A referral bot start creates the
+normal shared account, applies the same trial/inviter logic as the website, and
+queues one inviter notification. Existing users cannot replace their inviter.
 
-- `Приглашено` — все пользователи, закреплённые за inviter;
-- `Активных` — приглашённые с действующим доступом;
-- `Баланс` — доступная к выводу сумма `WalletAccount.availableMinor` без копеек.
+## 7. Screen 07 — Authorized website transition
 
-История начислений, reserved balance, реквизиты и payout history остаются на
-сайте.
-
-## 12. Две реферальные ссылки
-
-Экран `🎁 Рефералы` должен показывать две ссылки одного `ReferralProfile`.
-
-Ссылка на сайт:
+All website buttons begin as callbacks because a stored URL would become stale.
+The callback verifies the private chat and Telegram identity, creates a
+five-minute completion challenge, stores only its HMAC, and renders:
 
 ```text
-https://pulsar-cloud.space/?invite={inviteCode}
-```
-
-Ссылка на Telegram-бота:
-
-```text
-https://t.me/pulsarcloud_bot?start=ref_{inviteCode}
-```
-
-Telegram deep link использует зарезервированный префикс `ref_`, чтобы отличаться
-от токена входа или привязки.
-
-При `/start ref_{inviteCode}`:
-
-1. Telegram ID берётся только из `from.id`.
-2. Код сохраняется до атомарного завершения регистрации.
-3. Для нового пользователя применяется существующая referral business logic.
-4. Существующий пользователь не может заменить inviter.
-5. Повторное открытие ссылки не создаёт второй invite, trial или вознаграждение.
-6. Website- и Telegram-ссылка используют один invite code и одну статистику.
-
-Обе ссылки выводятся отдельными строками. Отдельные кнопки копирования не
-добавляются: Telegram позволяет выделить или открыть ссылку прямо из текста.
-
-## 13. Сценарий кнопки «Вывести»
-
-`💸 Вывести` работает по той же безопасной схеме, что и кнопка `🌐 Сайт`:
-
-1. callback проверяет private chat и `from.id`;
-2. создаётся fresh one-time login link на 5 минут;
-3. показывается промежуточный экран авторизованного перехода;
-4. после создания USER session пользователь перенаправляется на страницу
-   рефералов/вывода сайта;
-5. сумма и реквизиты не передаются через Telegram callback или URL.
-
----
-
-# Экран 03 — Авторизованный переход на сайт
-
-Статус: `IMPLEMENTED`
-
-## 14. Сценарий кнопки «Сайт»
-
-Кнопка `🌐 Сайт` сначала является callback, а не постоянной URL-ссылкой.
-
-1. Проверить private chat и Telegram `from.id`.
-2. Найти общую Telegram identity.
-3. Создать одноразовый login challenge на 5 минут.
-4. Сохранить в БД только HMAC токена.
-5. Показать промежуточный экран:
-
-```text
-🪐 **PulsarVPN — Сайт**
+🪐 PULSAR VPN — Сайт / Подключение / Поддержка
 
 🔐 Вход подготовлен.
 ⏳ Ссылка действует 5 минут.
 ```
 
-Клавиатура:
+The ordinary URL button opens in any browser, consumes the token once, creates
+the normal web session, and redirects only to the server allowlist. No Mini App
+state or Telegram browser cookie is required.
+
+## 8. Screen 08 — Notifications and news
+
+Allowed service events:
+
+- subscription expiring in roughly three days or one day;
+- subscription expired;
+- support reply;
+- new registration from a referral link;
+- partner commission when `PartnerEnrollment.enabled=true`.
+
+Intentionally silent:
+
+- payment confirmed;
+- subscription ready;
+- provisioning failed.
+- payout approved, paid, or rejected.
+
+Subscription notifications:
 
 ```text
-[ 🌐 Открыть личный кабинет ↗ ]
-[ ‹ Назад ]
+⏳ Подписка скоро закончится
+
+Осталось 3 дня. Продлите подписку, чтобы сохранить доступ к PULSAR VPN.
 ```
 
-`Открыть личный кабинет ↗` — обычная URL-кнопка. Переход поглощает одноразовый
-токен, создаёт USER session сайта и перенаправляет на `/home`. Ссылка не является
-Mini App, не хранится в открытом виде в БД, действует 5 минут и не срабатывает
-повторно.
-
-Для кнопок покупки и продления используется тот же процесс, но после создания
-сессии сайт может перенаправить пользователя в соответствующий блок `/home`.
-
----
-
-# Уведомления
-
-Статус: `IMPLEMENTED`
-
-## 15. Разрешённые сервисные уведомления
-
-Бот не отправляет отдельные уведомления:
-
-- `Платёж подтверждён`;
-- `Подписка готова`;
-- `Не удалось выдать подписку`.
-
-Остаются:
-
-- новый пользователь зарегистрировался по реферальной ссылке;
-- партнёр получил доход с платежа приглашённого пользователя;
-- подписка закончится через 3 дня;
-- подписка закончится через 1 день;
-- подписка закончилась;
-- реферальная выплата одобрена;
-- реферальная выплата выполнена;
-- реферальная выплата отклонена;
-- новый ответ поддержки.
-
-### 15.1. Новый ответ поддержки
-
-Когда администратор PULSAR отвечает в общей support conversation, в outbox
-создаётся Telegram-уведомление:
+Button: `💎 Продлить подписку` → in-bot renewal.
 
 ```text
-💬 **PulsarVPN — Поддержка**
+🟠 Остался 1 день
 
-Вам ответила поддержка PULSAR.
-Откройте сайт, чтобы прочитать сообщение.
+Подписка PULSAR VPN закончится завтра.
 ```
 
-Клавиатура:
+Button: `💎 Продлить подписку` → in-bot renewal.
 
 ```text
-[ 💬 Прочитать ответ ↗ ]
+🔴 Подписка закончилась
+
+Доступ PULSAR VPN приостановлен. Возобновите подписку, чтобы снова подключиться.
 ```
 
-Кнопка использует fresh one-time login flow и после создания сессии
-перенаправляет пользователя на `/support`. Текст ответа в Telegram не
-дублируется.
+Button: `💎 Возобновить подписку` → in-bot renewal.
 
-Поддержка не является отдельным разделом меню бота. Она работает как
-уведомление о новом ответе администратора.
-
-### 15.2. Новый реферал
-
-Когда новый пользователь регистрируется по referral deep link или обычной
-реферальной ссылке, владельцу `ReferralProfile` отправляется Telegram-
-уведомление через outbox:
+Referral registration:
 
 ```text
-🎁 **PulsarVPN — Новый реферал**
+🎁 Новый пользователь по вашей ссылке
 
-{Пользователь} зарегистрировался по вашей реферальной ссылке.
-Когда: {дата и время}
+@galeev66 зарегистрировался по вашей реферальной ссылке.
 ```
 
-Кнопка:
+Partner commission:
 
 ```text
-[ 🎁 Открыть рефералы ↗ ]
+🤝 Партнёрское начисление
+
+@galeev66 оплатил подписку.
+Сумма оплаты: 1 990 ₽
+Ваш доход: 597 ₽
 ```
 
-Кнопка использует fresh one-time login flow и открывает `/referrals`.
-Повторное открытие referral link существующим пользователем не создаёт
-дубликат `ReferralInvite` и не отправляет повторное уведомление.
+Its `🤝 Открыть партнёрку` button creates a fresh login to `/partner`. Partner amounts are read from
+the immutable commission row, not recalculated in the Telegram worker.
 
-### 15.3. Партнёрский доход
+Support notifications do not copy the reply body; the `💬 Прочитать ответ`
+button creates a fresh login to `/support`. Admin news is plain text, delivered in bounded outbox batches to
+reachable active users with news enabled. A blocked/unavailable recipient is
+marked once and skipped afterwards.
 
-Если у владельца реферальной ссылки включён `PartnerEnrollment`, после
-подтверждённого платежа приглашённого пользователя создаётся
-`PartnerCommission`, и владельцу приходит Telegram-уведомление:
+## 9. Security and acceptance
 
-```text
-🤝 **PulsarVPN — Партнёрский доход**
+- Webhook secret header is timing-safely verified.
+- Input is stopped at 256 KB and `update_id` is unique.
+- Stored updates are normalized and exclude bearer tokens/full payloads.
+- Telegram ID comes only from a safe numeric `from.id`, then becomes a string.
+- Private chat equality is mandatory for auth/menu callbacks.
+- Callback data is allowlisted ASCII and at most 64 bytes.
+- Every callback receives one `answerCallbackQuery`.
+- Provider/payment work happens in the worker, outside webhook transactions.
+- Magic links are one-use, five-minute, HMAC-only, `no-store`, and
+  `no-referrer`; Nginx does not log the completion route.
 
-Пользователь: {Пользователь}
-Оплата: {дата и время}
-Платёж: {baseAmountMinor}
-Доход: +{amountMinor}
-```
-
-Значения `Платёж` и `Доход` берутся из `PartnerCommission` и форматируются так
-же, как блок `/partner` → **Доход от приглашённых**. Комиссия не
-пересчитывается в Telegram worker, чтобы история не менялась при будущей смене
-ставки партнёра.
-
-Кнопка:
-
-```text
-[ 🤝 Открыть партнёрку ↗ ]
-```
-
-Кнопка использует fresh one-time login flow и открывает `/partner`.
-
----
-
-# Новости
-
-Статус: `IMPLEMENTED`
-
-## 16. Рассылка из admin
-
-Администратор создаёт в PULSAR Admin обычную текстовую новость и ставит её в
-очередь. Worker отправляет текст всем доступным пользователям бота небольшими
-batches через существующий Telegram outbox.
-
-На первом этапе новость содержит только plain text:
-
-```text
-{Текст новости, введённый администратором}
-```
-
-Правила:
-
-- получатель должен иметь `TelegramProfile.chatId`;
-- `canReceiveMessages` должен быть включён;
-- заблокировавшие бота пользователи пропускаются;
-- одна рассылка не отправляется одному пользователю повторно;
-- отправка выполняется worker, а не admin HTTP request;
-- ошибки отдельных получателей не останавливают всю рассылку;
-- Mini App и обязательные кнопки в новости не используются.
-
----
-
-## 17. Итог проработки
-
-- Главная: реализована с фирменным изображением `public/tg/tg3.png`.
-- Рефералы: текст, показатели, две ссылки и кнопки реализованы.
-- Авторизованный переход на сайт: реализован.
-- Вход и привязка Telegram: согласованы.
-- Баланс: показывается только в `Рефералы`.
-- Поддержка: только уведомление о новом ответе администратора.
-- Уведомления: сокращённый набор зафиксирован.
-- Новости: plain-text broadcast из admin.
-- Дополнительные самостоятельные экраны на текущем этапе не требуются.
-
-## 18. История решений
-
-| Дата | Решение |
-| --- | --- |
-| 2026-07-24 | Создан документ и первый DRAFT главного экрана |
-| 2026-07-24 | Главная переработана по персональному cabinet-макету |
-| 2026-07-24 | Убраны отдельные экраны trial, настройки и ошибки |
-| 2026-07-24 | Subscription URL вынесен в условную кнопку `Подключиться` |
-| 2026-07-24 | Кнопка `Сайт` переведена на fresh one-time login flow |
-| 2026-07-24 | Добавлен Telegram referral deep link `?start=ref_{code}` |
-| 2026-07-24 | Для истёкшей подписки утверждён CTA `💎 Возобновить подписку` |
-| 2026-07-25 | На главной утверждено только `firstName`, без фамилии |
-| 2026-07-25 | Строка `Выберите раздел` удалена |
-| 2026-07-25 | При неизвестном used devices показывается только честный лимит |
-| 2026-07-25 | Баланс перенесён в экран `Рефералы` |
-| 2026-07-25 | Утверждён экран `Рефералы` с кнопками `Вывести` и `Назад` |
-| 2026-07-25 | Поддержка работает как уведомление об ответе admin |
-| 2026-07-25 | Удалены уведомления payment/provisioning, добавлена поддержка |
-| 2026-07-25 | Новости определены как plain-text broadcast из admin |
-| 2026-07-25 | Главный экран реализован как photo message с `public/tg/tg3.png` |
-| 2026-07-26 | Изображение главного экрана заменено на `public/tg/tg3.png` |
-| 2026-07-26 | На главную добавлена кнопка канала `Pulsar VPN News` |
-| 2026-09-22 | Добавлены Telegram-уведомления о новом реферале и партнёрском доходе |
-| 2026-07-25 | Реализованы referral deep link и fresh one-time вход с кнопок |
+Live acceptance must verify BotFather metadata, `/start`, all main states,
+device removal, renewal and upgrade checkouts, referral deep-link registration,
+copy buttons, support/partner links, broadcast delivery, blocked-bot behavior,
+and absence of any Mini App surface.

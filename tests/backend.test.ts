@@ -62,6 +62,45 @@ async function processTelegramUpdate(updateId: string) {
   })
 }
 
+async function sendTelegramCallback(input: {
+  updateId: number
+  telegramId: number
+  data: string
+  messageId?: number
+}) {
+  modules.telegramGateway.resetTestTelegramGatewayEvents()
+  const response = await modules.telegramWebhook.POST(
+    telegramWebhookRequest({
+      update_id: input.updateId,
+      callback_query: {
+        id: `callback-${input.updateId}`,
+        from: { id: input.telegramId },
+        message: {
+          message_id: input.messageId ?? 77,
+          chat: { id: input.telegramId, type: "private" },
+          photo: [{ file_id: "main-photo" }],
+          caption: "old",
+        },
+        data: input.data,
+      },
+    })
+  )
+  assert.equal(response.status, 200)
+  await processTelegramUpdate(String(input.updateId))
+  const events = modules.telegramGateway.getTestTelegramGatewayEvents()
+  const callbackAnswers = events.filter(
+    (event) => event.type === "answerCallbackQuery"
+  )
+  assert.equal(callbackAnswers.length, 1)
+  assert.equal(
+    callbackAnswers[0]?.type === "answerCallbackQuery"
+      ? callbackAnswers[0].callbackQueryId
+      : null,
+    `callback-${input.updateId}`
+  )
+  return events
+}
+
 async function loadModules() {
   const [
     { db, initializeDatabase, withBusyRetry },
@@ -75,6 +114,8 @@ async function loadModules() {
     subscriptions,
     telegramWebhook,
     telegramGateway,
+    telegramService,
+    remnawave,
     security,
     userDashboard,
   ] = await Promise.all([
@@ -89,6 +130,8 @@ async function loadModules() {
     import("@/src/server/domain/subscriptions/service"),
     import("@/app/api/integrations/telegram/webhook/route"),
     import("@/src/server/infrastructure/telegram/gateway"),
+    import("@/src/server/domain/telegram/service"),
+    import("@/src/server/infrastructure/remnawave/provider"),
     import("@/src/server/infrastructure/security/crypto"),
     import("@/src/server/queries/user-dashboard"),
   ])
@@ -137,6 +180,8 @@ async function loadModules() {
     subscriptions,
     telegramWebhook,
     telegramGateway,
+    telegramService,
+    remnawave,
     security,
     userDashboard,
   }
@@ -652,21 +697,25 @@ test("referral happy path is idempotent through provisioning", async () => {
   const invite = await modules.db.referralInvite.findUniqueOrThrow({
     where: { invitedUserId: login.userId },
   })
-  const referralNotificationJob =
-    await modules.db.outboxJob.findFirstOrThrow({
-      where: { dedupeKey: `telegram:referral-registered:${invite.id}` },
-    })
+  const referralNotificationJob = await modules.db.outboxJob.findFirstOrThrow({
+    where: { dedupeKey: `telegram:referral-registered:${invite.id}` },
+  })
   modules.telegramGateway.resetTestTelegramGatewayEvents()
   await modules.jobs.handleJob({ ...referralNotificationJob, attempts: 1 })
   const referralNotification = modules.telegramGateway
     .getTestTelegramGatewayEvents()
     .find((item) => item.type === "sendMessage")
   assert.equal(referralNotification?.type, "sendMessage")
-  assert.match(referralNotification.text, /Новый реферал/)
-  assert.match(referralNotification.text, /friend@example.com/)
+  assert.match(referralNotification.text, /Новый пользователь по вашей ссылке/)
+  assert.match(referralNotification.text, /Пользователь PULSAR/)
+  assert.doesNotMatch(referralNotification.text, /friend@example.com/)
   assert.match(
     JSON.stringify(referralNotification.replyMarkup),
     /returnTo=%2Freferrals/
+  )
+  assert.match(
+    JSON.stringify(referralNotification.replyMarkup),
+    /🎁 Открыть рефералы/
   )
   const payment = await modules.billing.createCheckout({
     userId: login.userId,
@@ -710,12 +759,16 @@ test("referral happy path is idempotent through provisioning", async () => {
     .getTestTelegramGatewayEvents()
     .find((item) => item.type === "sendMessage")
   assert.equal(partnerNotification?.type, "sendMessage")
-  assert.match(partnerNotification.text, /Партнёрский доход/)
-  assert.match(partnerNotification.text, /Платёж: <b>119 ₽<\/b>/)
-  assert.match(partnerNotification.text, /Доход: <b>\+47 ₽<\/b>/)
+  assert.match(partnerNotification.text, /Партнёрское начисление/)
+  assert.match(partnerNotification.text, /Сумма оплаты: <b>119 ₽<\/b>/)
+  assert.match(partnerNotification.text, /Ваш доход: <b>47 ₽<\/b>/)
   assert.match(
     JSON.stringify(partnerNotification.replyMarkup),
     /returnTo=%2Fpartner/
+  )
+  assert.match(
+    JSON.stringify(partnerNotification.replyMarkup),
+    /🤝 Открыть партнёрку/
   )
   const inviterSubscription = await modules.db.subscription.findUniqueOrThrow({
     where: { userId: inviter.id },
@@ -1515,13 +1568,13 @@ test("plain /start registers a shared user graph and reuses it", async () => {
     .getTestTelegramGatewayEvents()
     .find((event) => event.type === "sendPhoto")
   assert.ok(sent && sent.type === "sendPhoto")
-  assert.equal(sent.photo, "http://localhost:3000/tg/tg3.png")
-  assert.match(sent.caption, /PulsarVPN — Личный кабинет/)
+  assert.equal(sent.photo, "http://localhost:3000/tg/tg4.png")
+  assert.match(sent.caption, /PULSAR VPN/)
   assert.match(sent.caption, /ИРИНА/)
   const markup = JSON.stringify(sent.replyMarkup)
-  assert.match(markup, /menu:referrals/)
-  assert.match(markup, /menu:site-login/)
-  assert.match(markup, /Pulsar VPN News/)
+  assert.match(markup, /m:f/)
+  assert.match(markup, /w:h/)
+  assert.match(markup, /PULSAR VPN NEWS/)
   assert.match(markup, /https:\/\/t\.me\/pulsarvpn_news/)
   assert.doesNotMatch(markup, /web_app/)
 
@@ -1534,6 +1587,15 @@ test("plain /start registers a shared user graph and reuses it", async () => {
     })
   )
   await processTelegramUpdate("220002")
+  assert.equal(await modules.db.user.count(), userCount)
+  await modules.telegramWebhook.POST(
+    telegramWebhookRequest({
+      ...update,
+      update_id: 220004,
+      message: { ...update.message, text: "покажи меню" },
+    })
+  )
+  await processTelegramUpdate("220004")
   assert.equal(await modules.db.user.count(), userCount)
   assert.equal(
     (
@@ -1548,6 +1610,15 @@ test("plain /start registers a shared user graph and reuses it", async () => {
 test("Telegram main screen and referrals read the shared database", async () => {
   const identity = await modules.db.authIdentity.findUniqueOrThrow({
     where: { telegramId: "900000201" },
+  })
+  await modules.db.authIdentity.create({
+    data: {
+      userId: identity.userId,
+      provider: "EMAIL",
+      providerSubject: "menu@example.test",
+      emailNormalized: "menu@example.test",
+      verifiedAt: new Date(),
+    },
   })
   await modules.db.referralProfile.update({
     where: { userId: identity.userId },
@@ -1584,10 +1655,12 @@ test("Telegram main screen and referrals read the shared database", async () => 
     .getTestTelegramGatewayEvents()
     .find((event) => event.type === "sendPhoto")
   assert.ok(main?.type === "sendPhoto")
-  assert.match(main.caption, /3 месяца/)
-  assert.match(main.caption, /Доступно устройств: <b>до 4<\/b>/)
-  assert.match(main.caption, /LTE-доступ: <b>есть<\/b>/)
-  assert.match(
+  assert.match(main.caption, /осталось 10 дней/)
+  assert.match(main.caption, /menu@example.test/)
+  assert.match(main.caption, /Лимит устройств: <b>до 4<\/b>/)
+  assert.match(main.caption, /Доступ Plus: <b>есть<\/b>/)
+  assert.match(JSON.stringify(main.replyMarkup), /"callback_data":"w:i"/)
+  assert.doesNotMatch(
     JSON.stringify(main.replyMarkup),
     /https:\/\/sub.pulsar-cloud.space\/test-user/
   )
@@ -1614,10 +1687,10 @@ test("Telegram main screen and referrals read the shared database", async () => 
   const events = modules.telegramGateway.getTestTelegramGatewayEvents()
   const edited = events.find((event) => event.type === "editMessageCaption")
   assert.ok(edited?.type === "editMessageCaption")
-  assert.match(edited.caption, /Получено дней: <b>0<\/b>/)
+  assert.match(edited.caption, /Начислено дней: <b>0<\/b>/)
   assert.match(edited.caption, /http:\/\/localhost:3000\/\?invite=/)
   assert.match(edited.caption, /https:\/\/t.me\/pulsar_test_bot\?start=ref_/)
-  assert.doesNotMatch(JSON.stringify(edited.replyMarkup), /copy_text/)
+  assert.match(JSON.stringify(edited.replyMarkup), /copy_text/)
   assert.ok(
     events.some(
       (event) =>
@@ -1720,6 +1793,423 @@ test("Telegram site button issues a five-minute one-time web login", async () =>
         event.callbackQueryId === "callback-site-login"
     )
   )
+})
+
+test("Telegram callback contract is compact and rejects untrusted values", () => {
+  for (const value of [
+    "m:h",
+    "m:d",
+    "m:r",
+    "m:f",
+    "w:i",
+    "w:s",
+    "w:h",
+    "d:c:0123456789abcdef",
+    "d:x:0123456789abcdef",
+    "d:u",
+    "u:q:5",
+    "u:x:5:7:15000",
+    "r:0",
+    "r:d:3",
+    "r:l:3:4",
+    "r:q:3:4:1",
+    "r:x:3:4:1:7:199000",
+  ]) {
+    assert.ok(modules.telegramService.parseTelegramCallbackAction(value), value)
+    assert.ok(Buffer.byteLength(value) <= 64)
+  }
+  assert.equal(
+    modules.telegramService.parseTelegramCallbackAction("x".repeat(65)),
+    null
+  )
+  assert.equal(
+    modules.telegramService.parseTelegramCallbackAction(
+      "d:x:raw-device-hwid-must-not-pass"
+    ),
+    null
+  )
+})
+
+test("Telegram safely answers unknown and group callbacks exactly once", async () => {
+  for (const [updateId, chat, data] of [
+    [220180, { id: 900000201, type: "private" }, "unsupported:action"],
+    [220181, { id: -100900000201, type: "supergroup" }, "m:h"],
+  ] as const) {
+    modules.telegramGateway.resetTestTelegramGatewayEvents()
+    const response = await modules.telegramWebhook.POST(
+      telegramWebhookRequest({
+        update_id: updateId,
+        callback_query: {
+          id: `callback-${updateId}`,
+          from: { id: 900000201 },
+          message: {
+            message_id: 79,
+            chat,
+            photo: [{ file_id: "main-photo" }],
+          },
+          data,
+        },
+      })
+    )
+    assert.equal(response.status, 200)
+    await processTelegramUpdate(String(updateId))
+    const events = modules.telegramGateway.getTestTelegramGatewayEvents()
+    const answers = events.filter(
+      (event) => event.type === "answerCallbackQuery"
+    )
+    assert.equal(answers.length, 1)
+    assert.equal(
+      answers[0]?.type === "answerCallbackQuery"
+        ? answers[0].callbackQueryId
+        : null,
+      `callback-${updateId}`
+    )
+    assert.equal(
+      answers[0]?.type === "answerCallbackQuery" ? answers[0].showAlert : false,
+      true
+    )
+  }
+})
+
+test("Telegram connect and support buttons create target-specific magic links", async () => {
+  for (const [updateId, data, returnTo] of [
+    [220106, "w:i", "/instructions"],
+    [220107, "w:s", "/support"],
+    [220108, "w:h", "/home"],
+  ] as const) {
+    const events = await sendTelegramCallback({
+      updateId,
+      telegramId: 900000201,
+      data,
+    })
+    const edited = events.find((event) => event.type === "editMessageCaption")
+    assert.ok(edited?.type === "editMessageCaption")
+    const markup = JSON.stringify(edited.replyMarkup)
+    const urlMatch = markup.match(/"url":"([^"]+)"/)
+    assert.ok(urlMatch?.[1])
+    const url = new URL(urlMatch[1])
+    assert.equal(url.searchParams.get("returnTo"), returnTo)
+    const challenge = await modules.db.loginChallenge.findUniqueOrThrow({
+      where: { id: url.searchParams.get("challenge")! },
+    })
+    assert.notEqual(
+      challenge.completionTokenHash,
+      url.searchParams.get("token")
+    )
+    assert.ok(
+      events.some(
+        (event) =>
+          event.type === "answerCallbackQuery" &&
+          event.callbackQueryId === `callback-${updateId}`
+      )
+    )
+  }
+})
+
+test("Telegram devices use opaque references and existing Remnawave services", async () => {
+  const identity = await modules.db.authIdentity.findUniqueOrThrow({
+    where: { telegramId: "900000201" },
+  })
+  const remoteUserId = "mock_telegram_devices"
+  await modules.db.subscription.update({
+    where: { userId: identity.userId },
+    data: { remnawaveUserId: remoteUserId, syncStatus: "SYNCED" },
+  })
+  const now = new Date()
+  modules.remnawave.setMockSubscriberDevicesForTests(remoteUserId, [
+    {
+      hwid: "private-android-hwid",
+      userId: 1,
+      platform: "Android",
+      osVersion: "16",
+      deviceModel: "Pixel 10",
+      userAgent: "Happ/1.0",
+      requestIp: null,
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      hwid: "private-windows-hwid",
+      userId: 1,
+      platform: "Windows",
+      osVersion: "11",
+      deviceModel: null,
+      userAgent: "Happ/1.0",
+      requestIp: null,
+      createdAt: now,
+      updatedAt: now,
+    },
+  ])
+
+  const main = await modules.telegramService.getTelegramMainScreen(
+    identity.userId
+  )
+  assert.match(main.text, /Подключено устройств: <b>2 \/ 4<\/b>/)
+
+  const events = await sendTelegramCallback({
+    updateId: 220109,
+    telegramId: 900000201,
+    data: "m:d",
+  })
+  const list = events.find((event) => event.type === "editMessageCaption")
+  assert.ok(list?.type === "editMessageCaption")
+  assert.match(list.caption, /2 \/ 4/)
+  assert.match(list.caption, /Нажмите на устройство/)
+  const listMarkup = JSON.stringify(list.replyMarkup)
+  assert.match(listMarkup, /Android \(Pixel 10\)/)
+  assert.doesNotMatch(listMarkup, /private-android-hwid/)
+  const confirmationData = listMarkup.match(/d:c:[a-f0-9]{16}/)?.[0]
+  assert.ok(confirmationData)
+
+  const confirmationEvents = await sendTelegramCallback({
+    updateId: 220110,
+    telegramId: 900000201,
+    data: confirmationData,
+  })
+  const confirmation = confirmationEvents.find(
+    (event) => event.type === "editMessageCaption"
+  )
+  assert.ok(confirmation?.type === "editMessageCaption")
+  assert.match(confirmation.caption, /Удалить устройство/)
+  const deleteData = JSON.stringify(confirmation.replyMarkup).match(
+    /d:x:[a-f0-9]{16}/
+  )?.[0]
+  assert.ok(deleteData)
+
+  const deletedEvents = await sendTelegramCallback({
+    updateId: 220111,
+    telegramId: 900000201,
+    data: deleteData,
+  })
+  const deleted = deletedEvents.find(
+    (event) => event.type === "editMessageCaption"
+  )
+  assert.ok(deleted?.type === "editMessageCaption")
+  assert.match(deleted.caption, /1 \/ 4/)
+  assert.equal(
+    (await modules.subscriptions.getSubscriptionDevices(identity.userId))
+      .length,
+    1
+  )
+  const deviceCallbackLogs = await modules.db.telegramUpdateLog.findMany({
+    where: { updateId: { in: ["220110", "220111"] } },
+    select: { payloadJson: true },
+  })
+  assert.equal(
+    deviceCallbackLogs.some((log) =>
+      log.payloadJson.includes("private-android-hwid")
+    ),
+    false
+  )
+})
+
+test("Telegram device-limit upgrade uses the shared billing checkout", async () => {
+  const chooserEvents = await sendTelegramCallback({
+    updateId: 220112,
+    telegramId: 900000201,
+    data: "d:u",
+  })
+  const chooser = chooserEvents.find(
+    (event) => event.type === "editMessageCaption"
+  )
+  assert.ok(chooser?.type === "editMessageCaption")
+  assert.match(chooser.caption, /Текущий лимит: <b>4<\/b>/)
+  assert.match(JSON.stringify(chooser.replyMarkup), /u:q:5/)
+
+  const reviewEvents = await sendTelegramCallback({
+    updateId: 220113,
+    telegramId: 900000201,
+    data: "u:q:5",
+  })
+  const review = reviewEvents.find(
+    (event) => event.type === "editMessageCaption"
+  )
+  assert.ok(review?.type === "editMessageCaption")
+  const checkoutData = JSON.stringify(review.replyMarkup).match(
+    /u:x:5:\d+:\d+/
+  )?.[0]
+  assert.ok(checkoutData)
+
+  const checkoutEvents = await sendTelegramCallback({
+    updateId: 220114,
+    telegramId: 900000201,
+    data: checkoutData,
+  })
+  const checkout = checkoutEvents.find(
+    (event) => event.type === "editMessageCaption"
+  )
+  assert.ok(checkout?.type === "editMessageCaption")
+  assert.match(checkout.caption, /Счёт создан/)
+  const identity = await modules.db.authIdentity.findUniqueOrThrow({
+    where: { telegramId: "900000201" },
+  })
+  const payment = await modules.db.payment.findFirstOrThrow({
+    where: {
+      userId: identity.userId,
+      purpose: "DEVICE_LIMIT_UPGRADE",
+    },
+  })
+  assert.equal(payment.idempotencyKey, "telegram:220114:device-upgrade")
+})
+
+test("Telegram stale device-upgrade quote returns to the device flow", async () => {
+  const events = await sendTelegramCallback({
+    updateId: 220115,
+    telegramId: 900000201,
+    data: "u:x:5:999:15000",
+  })
+  const edited = events.find((event) => event.type === "editMessageCaption")
+  assert.ok(edited?.type === "editMessageCaption")
+  assert.match(edited.caption, /Цена изменилась/)
+  assert.match(JSON.stringify(edited.replyMarkup), /"callback_data":"d:u"/)
+})
+
+test("Telegram renewal creates one shared checkout from the reviewed quote", async () => {
+  const telegramId = 900000250
+  await modules.telegramWebhook.POST(
+    telegramWebhookRequest({
+      update_id: 220120,
+      message: {
+        text: "/start",
+        chat: { id: telegramId, type: "private" },
+        from: { id: telegramId, first_name: "Checkout" },
+      },
+    })
+  )
+  await processTelegramUpdate("220120")
+
+  const durationEvents = await sendTelegramCallback({
+    updateId: 220121,
+    telegramId,
+    data: "m:r",
+  })
+  const duration = durationEvents.find(
+    (event) => event.type === "editMessageCaption"
+  )
+  assert.ok(duration?.type === "editMessageCaption")
+  assert.match(duration.caption, /Выберите срок/)
+
+  const deviceEvents = await sendTelegramCallback({
+    updateId: 220122,
+    telegramId,
+    data: "r:d:3",
+  })
+  const devices = deviceEvents.find(
+    (event) => event.type === "editMessageCaption"
+  )
+  assert.ok(devices?.type === "editMessageCaption")
+  assert.match(devices.caption, /Количество устройств/)
+
+  const plusEvents = await sendTelegramCallback({
+    updateId: 220123,
+    telegramId,
+    data: "r:l:3:3",
+  })
+  const plus = plusEvents.find((event) => event.type === "editMessageCaption")
+  assert.ok(plus?.type === "editMessageCaption")
+  assert.match(plus.caption, /Доступ Plus/)
+
+  const reviewEvents = await sendTelegramCallback({
+    updateId: 220124,
+    telegramId,
+    data: "r:q:3:3:1",
+  })
+  const review = reviewEvents.find(
+    (event) => event.type === "editMessageCaption"
+  )
+  assert.ok(review?.type === "editMessageCaption")
+  assert.match(review.caption, /Проверьте заказ/)
+  assert.match(review.caption, /Доступ Plus: <b>да<\/b>/)
+  const checkoutData = JSON.stringify(review.replyMarkup).match(
+    /r:x:3:3:1:\d+:\d+/
+  )?.[0]
+  assert.ok(checkoutData)
+
+  const checkoutEvents = await sendTelegramCallback({
+    updateId: 220125,
+    telegramId,
+    data: checkoutData,
+  })
+  const checkout = checkoutEvents.find(
+    (event) => event.type === "editMessageCaption"
+  )
+  assert.ok(checkout?.type === "editMessageCaption")
+  assert.match(checkout.caption, /Счёт создан/)
+  assert.match(JSON.stringify(checkout.replyMarkup), /\/test\/checkout\//)
+  const identity = await modules.db.authIdentity.findUniqueOrThrow({
+    where: { telegramId: String(telegramId) },
+  })
+  const payments = await modules.db.payment.findMany({
+    where: { userId: identity.userId },
+  })
+  assert.equal(payments.length, 1)
+  assert.equal(payments[0]?.idempotencyKey, "telegram:220125:subscription")
+
+  await processTelegramUpdate("220125")
+  assert.equal(
+    await modules.db.payment.count({ where: { userId: identity.userId } }),
+    1
+  )
+})
+
+test("Telegram stale checkout quote asks the user to refresh", async () => {
+  const telegramId = 900000251
+  await modules.telegramWebhook.POST(
+    telegramWebhookRequest({
+      update_id: 220130,
+      message: {
+        text: "/start",
+        chat: { id: telegramId, type: "private" },
+        from: { id: telegramId, first_name: "Stale" },
+      },
+    })
+  )
+  await processTelegramUpdate("220130")
+  const events = await sendTelegramCallback({
+    updateId: 220131,
+    telegramId,
+    data: "r:x:1:1:0:999999:11900",
+  })
+  const edited = events.find((event) => event.type === "editMessageCaption")
+  assert.ok(edited?.type === "editMessageCaption")
+  assert.match(edited.caption, /Цена изменилась/)
+  assert.match(JSON.stringify(edited.replyMarkup), /"callback_data":"m:r"/)
+})
+
+test("legacy suspended state cannot bypass support with an old renewal callback", async () => {
+  const identity = await modules.db.authIdentity.findUniqueOrThrow({
+    where: { telegramId: "900000201" },
+  })
+  const paymentCount = await modules.db.payment.count({
+    where: { userId: identity.userId },
+  })
+  await modules.db.subscription.update({
+    where: { userId: identity.userId },
+    data: {
+      status: "SUSPENDED",
+      expiresAt: new Date(Date.now() + 86_400_000),
+    },
+  })
+  try {
+    const events = await sendTelegramCallback({
+      updateId: 220127,
+      telegramId: 900000201,
+      data: "r:x:3:3:1:1:199000",
+    })
+    const edited = events.find((event) => event.type === "editMessageCaption")
+    assert.ok(edited?.type === "editMessageCaption")
+    assert.match(edited.caption, /Поддержка/)
+    assert.match(JSON.stringify(edited.replyMarkup), /returnTo=%2Fsupport/)
+    assert.equal(
+      await modules.db.payment.count({ where: { userId: identity.userId } }),
+      paymentCount
+    )
+  } finally {
+    await modules.db.subscription.update({
+      where: { userId: identity.userId },
+      data: { status: "ACTIVE" },
+    })
+  }
 })
 
 test("/start login token signs in the existing Telegram identity", async () => {
@@ -1834,6 +2324,26 @@ test("Telegram webhook rejects an invalid secret without persisting the update",
   )
 })
 
+test("Telegram webhook stops reading bodies larger than 256 KB", async () => {
+  const response = await modules.telegramWebhook.POST(
+    new Request("http://localhost/api/integrations/telegram/webhook", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-telegram-bot-api-secret-token": process.env.TELEGRAM_WEBHOOK_SECRET!,
+      },
+      body: `{"update_id":220132,"padding":"${"x".repeat(256_001)}"}`,
+    })
+  )
+  assert.equal(response.status, 413)
+  assert.equal(
+    await modules.db.telegramUpdateLog.count({
+      where: { updateId: "220132" },
+    }),
+    0
+  )
+})
+
 test("my_chat_member tracks bot blocking and unblocking", async () => {
   for (const [updateId, status, expected] of [
     [220007, "kicked", false],
@@ -1844,7 +2354,9 @@ test("my_chat_member tracks bot blocking and unblocking", async () => {
         update_id: updateId,
         my_chat_member: {
           chat: { id: 900000201, type: "private" },
-          from: { id: 900000201 },
+          // Telegram identifies the affected private chat by chat.id; the
+          // actor in `from` is not an authentication identity.
+          from: { id: 885112484 },
           new_chat_member: { status },
         },
       })
@@ -1881,6 +2393,7 @@ test("support notification keeps reply text on site and uses fresh login", async
   assert.doesNotMatch(sent.text, /текст ответа/i)
   const markup = JSON.stringify(sent.replyMarkup)
   assert.match(markup, /Прочитать ответ/)
+  assert.doesNotMatch(markup, /Прочитать ответ ↗/)
   assert.match(markup, /returnTo=%2Fsupport/)
 
   modules.telegramGateway.resetTestTelegramGatewayEvents()
@@ -1895,6 +2408,75 @@ test("support notification keeps reply text on site and uses fresh login", async
     aggregateId: "payment",
   })
   assert.equal(modules.telegramGateway.getTestTelegramGatewayEvents().length, 0)
+})
+
+test("subscription notifications use the agreed copy and in-bot renewal", async () => {
+  const identity = await modules.db.authIdentity.findUniqueOrThrow({
+    where: { telegramId: "900000201" },
+  })
+  for (const [template, heading, body, button] of [
+    [
+      "SUBSCRIPTION_EXPIRING_3D",
+      "Подписка скоро закончится",
+      "Осталось 3 дня",
+      "Продлить подписку",
+    ],
+    [
+      "SUBSCRIPTION_EXPIRING_1D",
+      "Остался 1 день",
+      "закончится завтра",
+      "Продлить подписку",
+    ],
+    [
+      "SUBSCRIPTION_EXPIRED",
+      "Подписка закончилась",
+      "Доступ PULSAR VPN приостановлен",
+      "Возобновить подписку",
+    ],
+  ] as const) {
+    modules.telegramGateway.resetTestTelegramGatewayEvents()
+    await modules.jobs.handleJob({
+      id: `notification-${template}`,
+      type: "SEND_TELEGRAM_NOTIFICATION",
+      payloadJson: JSON.stringify({ userId: identity.userId, template }),
+      attempts: 1,
+      aggregateId: template,
+    })
+    const sent = modules.telegramGateway
+      .getTestTelegramGatewayEvents()
+      .find((event) => event.type === "sendMessage")
+    assert.ok(sent?.type === "sendMessage")
+    assert.match(sent.text, new RegExp(heading))
+    assert.match(sent.text, new RegExp(body))
+    assert.equal(sent.parseMode, "HTML")
+    const markup = JSON.stringify(sent.replyMarkup)
+    assert.match(markup, new RegExp(button))
+    assert.match(markup, /"callback_data":"m:r"/)
+  }
+})
+
+test("payout status Telegram notifications are disabled", async () => {
+  const identity = await modules.db.authIdentity.findUniqueOrThrow({
+    where: { telegramId: "900000201" },
+  })
+  for (const template of [
+    "PAYOUT_APPROVED",
+    "PAYOUT_PAID",
+    "PAYOUT_REJECTED",
+  ]) {
+    modules.telegramGateway.resetTestTelegramGatewayEvents()
+    await modules.jobs.handleJob({
+      id: `silent-${template}`,
+      type: "SEND_TELEGRAM_NOTIFICATION",
+      payloadJson: JSON.stringify({ userId: identity.userId, template }),
+      attempts: 1,
+      aggregateId: template,
+    })
+    assert.equal(
+      modules.telegramGateway.getTestTelegramGatewayEvents().length,
+      0
+    )
+  }
 })
 
 test("legacy Telegram broadcasts still skip users who disabled news", async () => {
@@ -3262,4 +3844,29 @@ test("demo account signs in without an email and cannot pay", async () => {
   })
   assert.ok(payment.checkoutUrl, "обычный пользователь платит как раньше")
   assert.equal(await modules.userDashboard.isDemoAccount(regular.id), false)
+})
+
+test("Telegram deployment configures the PULSAR VPN Bot API profile", () => {
+  const script = readFileSync(
+    resolve("deploy/pulsar/configure-telegram-webhook.sh"),
+    "utf8"
+  )
+  const commandPayload = script.slice(
+    script.indexOf('commands="$(jq'),
+    script.indexOf('commands_response="$(curl')
+  )
+  assert.equal((commandPayload.match(/command: "start"/g) ?? []).length, 1)
+  assert.doesNotMatch(
+    commandPayload,
+    /command: "(?:help|account|notifications)"/
+  )
+  assert.match(script, /description: "Запустить бота"/)
+  assert.match(script, /name=PULSAR VPN/)
+  assert.match(script, /PULSAR VPN — подписка и устройства/)
+  assert.match(script, /menu_button=\{"type":"commands"\}/)
+  assert.match(
+    script,
+    /allowed_updates=\["message","callback_query","my_chat_member"\]/
+  )
+  assert.doesNotMatch(script, /web_app/)
 })

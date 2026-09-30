@@ -20,18 +20,36 @@ import {
 } from "@/src/server/domain/auth/service"
 import {
   getTelegramMainScreen,
-  getTelegramScreen,
+  getReferralsScreen,
+  getTelegramCheckoutScreen,
+  getTelegramDeviceConfirmationScreen,
+  getTelegramDeviceUpgradeReviewScreen,
+  getTelegramDeviceUpgradeScreen,
+  getTelegramDevicesScreen,
+  getTelegramPriceChangedScreen,
+  getTelegramRenewalDeviceScreen,
+  getTelegramRenewalDurationScreen,
+  getTelegramRenewalPlusScreen,
+  getTelegramRenewalReviewScreen,
+  getTelegramTemporaryErrorScreen,
   getTelegramWebsiteScreen,
   getTelegramUserId,
-  isTelegramCallbackAction,
+  parseTelegramCallbackAction,
+  resolveTelegramDeviceHwid,
   telegramMainPhotoUrl,
   updateTelegramReachability,
+  type TelegramCallbackAction,
+  type TelegramScreen,
 } from "@/src/server/domain/telegram/service"
 import { getConfig } from "@/src/server/config"
 import {
+  createCheckout,
+  createDeviceLimitUpgradeCheckout,
   expireOverduePendingPayments,
   reconcilePaymentStatus,
 } from "@/src/server/domain/billing/service"
+import { deleteSubscriptionDevice } from "@/src/server/domain/subscriptions/service"
+import { BusinessError } from "@/src/server/application/errors"
 
 type Job = {
   id: string
@@ -105,14 +123,6 @@ function formatTelegramRub(minor: number) {
   }).format(Math.floor(minor / 100))} ₽`
 }
 
-function formatTelegramDateTime(value: Date | null) {
-  return new Intl.DateTimeFormat("ru-RU", {
-    dateStyle: "short",
-    timeStyle: "short",
-    timeZone: "Asia/Yekaterinburg",
-  }).format(value ?? new Date())
-}
-
 function telegramUserLabel(user: {
   telegramProfile: {
     username: string | null
@@ -132,10 +142,161 @@ function telegramUserLabel(user: {
     .filter(Boolean)
     .join(" ")
   if (name) return name
-  return (
-    user.identities.find((item) => item.emailNormalized)?.emailNormalized ??
-    "Пользователь Pulsar"
-  )
+  return "Пользователь PULSAR"
+}
+
+async function editTelegramScreen(input: {
+  chatId: string
+  messageId: string
+  presentation?: "caption" | "text"
+  screen: TelegramScreen
+}) {
+  const gateway = getTelegramGateway()
+  if (input.presentation === "caption")
+    await gateway.editMessageCaption({
+      chatId: input.chatId,
+      messageId: input.messageId,
+      caption: input.screen.text,
+      replyMarkup: input.screen.replyMarkup,
+      parseMode: input.screen.parseMode,
+    })
+  else
+    await gateway.editMessageText({
+      chatId: input.chatId,
+      messageId: input.messageId,
+      text: input.screen.text,
+      replyMarkup: input.screen.replyMarkup,
+      parseMode: input.screen.parseMode,
+    })
+}
+
+async function telegramCallbackScreen(input: {
+  action: TelegramCallbackAction
+  userId: string
+  telegramId: string
+  chatId: string
+  updateId: string
+}): Promise<TelegramScreen> {
+  const { action, userId } = input
+  try {
+    if (action.kind === "renewal" || action.kind.startsWith("renew-")) {
+      const subscription = await db.subscription.findUnique({
+        where: { userId },
+        select: { status: true, expiresAt: true },
+      })
+      if (
+        subscription?.status === "SUSPENDED" &&
+        subscription.expiresAt > new Date()
+      ) {
+        const login = await issueTelegramWebsiteLogin({
+          telegramId: input.telegramId,
+          chatId: input.chatId,
+          returnTo: "/support",
+        })
+        return getTelegramWebsiteScreen(login.url, "support")
+      }
+    }
+    switch (action.kind) {
+      case "home":
+        return getTelegramMainScreen(userId)
+      case "devices":
+        return getTelegramDevicesScreen(userId)
+      case "renewal":
+        return getTelegramRenewalDurationScreen()
+      case "referrals":
+        return getReferralsScreen(userId)
+      case "website": {
+        const returnTo =
+          action.target === "instructions"
+            ? "/instructions"
+            : action.target === "support"
+              ? "/support"
+              : "/home"
+        const login = await issueTelegramWebsiteLogin({
+          telegramId: input.telegramId,
+          chatId: input.chatId,
+          returnTo,
+        })
+        return getTelegramWebsiteScreen(login.url, action.target)
+      }
+      case "device-confirm":
+        return getTelegramDeviceConfirmationScreen(userId, action.deviceRef)
+      case "device-delete": {
+        try {
+          const hwid = await resolveTelegramDeviceHwid(userId, action.deviceRef)
+          await deleteSubscriptionDevice({ userId, hwid })
+        } catch (error) {
+          // A worker retry after the remote delete succeeded is already done.
+          if (!(error instanceof BusinessError && error.code === "NOT_FOUND"))
+            throw error
+        }
+        return getTelegramDevicesScreen(userId)
+      }
+      case "device-upgrade":
+        return getTelegramDeviceUpgradeScreen(userId)
+      case "upgrade-review":
+        return getTelegramDeviceUpgradeReviewScreen(
+          userId,
+          action.targetDeviceLimit
+        )
+      case "upgrade-checkout": {
+        const payment = await createDeviceLimitUpgradeCheckout({
+          userId,
+          targetDeviceLimit: action.targetDeviceLimit,
+          pricingVersion: action.pricingVersion,
+          expectedAmountMinor: action.expectedAmountMinor,
+          idempotencyKey: `telegram:${input.updateId}:device-upgrade`,
+        })
+        if (!payment.checkoutUrl)
+          throw new BusinessError("INTEGRATION_TEMPORARILY_UNAVAILABLE", 503)
+        return getTelegramCheckoutScreen(payment.checkoutUrl)
+      }
+      case "renew-duration":
+        return getTelegramRenewalDeviceScreen(action.durationMonths)
+      case "renew-device-limit":
+        return getTelegramRenewalPlusScreen(
+          action.durationMonths,
+          action.deviceLimit
+        )
+      case "renew-review":
+        return getTelegramRenewalReviewScreen(userId, action)
+      case "renew-checkout": {
+        const payment = await createCheckout({
+          userId,
+          durationMonths: action.durationMonths,
+          deviceLimit: action.deviceLimit,
+          lteEnabled: action.lteEnabled,
+          paymentMethod: "SBP",
+          pricingVersion: action.pricingVersion,
+          expectedAmountMinor: action.expectedAmountMinor,
+          idempotencyKey: `telegram:${input.updateId}:subscription`,
+        })
+        if (!payment.checkoutUrl)
+          throw new BusinessError("INTEGRATION_TEMPORARILY_UNAVAILABLE", 503)
+        return getTelegramCheckoutScreen(payment.checkoutUrl)
+      }
+    }
+  } catch (error) {
+    if (
+      error instanceof BusinessError &&
+      error.code === "PAYMENT_PRICE_CHANGED"
+    )
+      return getTelegramPriceChangedScreen(
+        action.kind.startsWith("upgrade") ? "d:u" : "m:r"
+      )
+    if (
+      error instanceof BusinessError &&
+      [
+        "BILLING_DISABLED",
+        "INTEGRATION_TEMPORARILY_UNAVAILABLE",
+        "CONFLICT",
+      ].includes(error.code)
+    )
+      return getTelegramTemporaryErrorScreen(
+        action.kind.startsWith("upgrade") ? "d:u" : "m:r"
+      )
+    throw error
+  }
 }
 
 async function applyDueSubscriptionParameters(now: Date) {
@@ -710,11 +871,10 @@ export async function handleJob(job: Job) {
       if (
         membership.chat?.type === "private" &&
         membership.chat.id &&
-        membership.from?.id === membership.chat.id &&
         membership.status
       )
         await updateTelegramReachability({
-          telegramId: membership.from.id,
+          telegramId: membership.chat.id,
           chatId: membership.chat.id,
           status: membership.status,
         })
@@ -725,72 +885,76 @@ export async function handleJob(job: Job) {
     const callback = update.callbackQuery
     if (callback) {
       const gateway = getTelegramGateway()
-      let answerText: string | undefined
-      let showAlert = false
-      let processingError: unknown
-      try {
-        const chat = callback.message?.chat
-        const fromId = callback.from?.id
-        if (
-          chat?.type !== "private" ||
-          !chat.id ||
-          !fromId ||
-          chat.id !== fromId ||
-          !callback.message?.messageId
-        ) {
-          answerText = "Меню доступно только в личном чате с ботом."
-          showAlert = true
-        } else if (!isTelegramCallbackAction(callback.action)) {
-          answerText = "Эта кнопка больше не поддерживается. Отправьте /start."
-          showAlert = true
-        } else {
-          const userId = await getTelegramUserId(fromId)
-          if (!userId) {
-            answerText = "Сначала отправьте /start."
-            showAlert = true
-          } else {
-            const screen =
-              callback.action === "menu:site-login"
-                ? getTelegramWebsiteScreen(
-                    (
-                      await issueTelegramWebsiteLogin({
-                        telegramId: fromId,
-                        chatId: chat.id,
-                        returnTo: "/home",
-                      })
-                    ).url
-                  )
-                : await getTelegramScreen(userId, callback.action)
-            if (callback.message.presentation === "caption")
-              await gateway.editMessageCaption({
-                chatId: chat.id,
-                messageId: callback.message.messageId,
-                caption: screen.text,
-                replyMarkup: screen.replyMarkup,
-                parseMode: screen.parseMode,
-              })
-            else
-              await gateway.editMessageText({
-                chatId: chat.id,
-                messageId: callback.message.messageId,
-                text: screen.text,
-                replyMarkup: screen.replyMarkup,
-                parseMode: screen.parseMode,
-              })
-          }
-        }
-      } catch (error) {
-        processingError = error
-        answerText = "Не удалось обновить данные. Попробуйте ещё раз."
-        showAlert = true
+      const chat = callback.message?.chat
+      const fromId = callback.from?.id
+      const action = parseTelegramCallbackAction(callback.action)
+      if (
+        chat?.type !== "private" ||
+        !chat.id ||
+        !fromId ||
+        chat.id !== fromId ||
+        !callback.message?.messageId
+      ) {
+        if (callback.id)
+          await gateway.answerCallbackQuery({
+            callbackQueryId: callback.id,
+            text: "Меню доступно только в личном чате с ботом.",
+            showAlert: true,
+          })
+        await markProcessed()
+        return
       }
+      if (!action) {
+        if (callback.id)
+          await gateway.answerCallbackQuery({
+            callbackQueryId: callback.id,
+            text: "Эта кнопка больше не поддерживается. Отправьте /start.",
+            showAlert: true,
+          })
+        await markProcessed()
+        return
+      }
+      const userId = await getTelegramUserId(fromId)
+      if (!userId) {
+        if (callback.id)
+          await gateway.answerCallbackQuery({
+            callbackQueryId: callback.id,
+            text: "Сначала отправьте /start.",
+            showAlert: true,
+          })
+        await markProcessed()
+        return
+      }
+
+      // Acknowledge before Remnawave or payment-provider work so Telegram does
+      // not leave the client spinner running. Rendering errors are shown in the
+      // same message and never trigger a second callback answer.
       if (callback.id)
         await gateway.answerCallbackQuery({
           callbackQueryId: callback.id,
-          text: answerText,
-          showAlert,
         })
-      if (processingError) throw processingError
+      let screen: TelegramScreen
+      try {
+        screen = await telegramCallbackScreen({
+          action,
+          userId,
+          telegramId: fromId,
+          chatId: chat.id,
+          updateId,
+        })
+      } catch {
+        screen = getTelegramTemporaryErrorScreen(
+          action.kind.startsWith("device") || action.kind.startsWith("upgrade")
+            ? "m:d"
+            : "m:h"
+        )
+      }
+      await editTelegramScreen({
+        chatId: chat.id,
+        messageId: callback.message.messageId,
+        presentation: callback.message.presentation,
+        screen,
+      })
       await markProcessed()
       return
     }
@@ -892,6 +1056,9 @@ export async function handleJob(job: Job) {
         "PAYMENT_CONFIRMED",
         "PROVISIONING_COMPLETED",
         "PROVISIONING_FAILED",
+        "PAYOUT_APPROVED",
+        "PAYOUT_PAID",
+        "PAYOUT_REJECTED",
       ].includes(template)
     )
       return
@@ -906,26 +1073,33 @@ export async function handleJob(job: Job) {
       return
     const messages: Record<string, string> = {
       SUBSCRIPTION_EXPIRING_3D:
-        "Подписка Pulsar закончится примерно через 3 дня. Продлить её можно в личном кабинете.",
+        "⏳ <b>Подписка скоро закончится</b>\n\nОсталось 3 дня. Продлите подписку, чтобы сохранить доступ к PULSAR VPN.",
       SUBSCRIPTION_EXPIRING_1D:
-        "Подписка Pulsar закончится менее чем через сутки. Продлить её можно в личном кабинете.",
+        "🟠 <b>Остался 1 день</b>\n\nПодписка PULSAR VPN закончится завтра.",
       SUBSCRIPTION_EXPIRED:
-        "Срок подписки Pulsar закончился. Возобновить доступ можно в личном кабинете.",
-      PAYOUT_APPROVED: "Заявка на выплату одобрена.",
-      PAYOUT_PAID: "Выплата выполнена.",
-      PAYOUT_REJECTED: "Заявка на выплату отклонена. Подробности доступны в личном кабинете.",
+        "🔴 <b>Подписка закончилась</b>\n\nДоступ PULSAR VPN приостановлен. Возобновите подписку, чтобы снова подключиться.",
       SUPPORT_REPLY:
         "💬 <b>PulsarVPN — Поддержка</b>\n\nВам ответила поддержка PULSAR.\nОткройте сайт, чтобы прочитать сообщение.",
     }
     let text = messages[template] ?? "Важное уведомление Pulsar."
     let parseMode: "HTML" | undefined =
-      template === "SUPPORT_REPLY" ? "HTML" : undefined
+      template === "SUPPORT_REPLY" || template.startsWith("SUBSCRIPTION_")
+        ? "HTML"
+        : undefined
     let button:
-      | { text: string; returnTo: "/referrals" | "/support" | "/partner" }
+      | {
+          text: string
+          returnTo: "/referrals" | "/support" | "/partner"
+        }
+      | { text: string; callbackData: string }
       | null =
       template === "SUPPORT_REPLY"
-        ? { text: "💬 Прочитать ответ ↗", returnTo: "/support" }
-        : null
+        ? { text: "💬 Прочитать ответ", returnTo: "/support" }
+        : template === "SUBSCRIPTION_EXPIRED"
+          ? { text: "💎 Возобновить подписку", callbackData: "m:r" }
+          : template.startsWith("SUBSCRIPTION_EXPIRING_")
+            ? { text: "💎 Продлить подписку", callbackData: "m:r" }
+            : null
 
     if (template === "REFERRAL_REGISTERED") {
       const invite = await db.referralInvite.findUnique({
@@ -948,13 +1122,12 @@ export async function handleJob(job: Job) {
       })
       if (!invite || invite.inviterUserId !== String(payload.userId)) return
       text = [
-        "🎁 <b>PulsarVPN — Новый реферал</b>",
+        "🎁 <b>Новый пользователь по вашей ссылке</b>",
         "",
         `<b>${escapeTelegramHtml(telegramUserLabel(invite.invited))}</b> зарегистрировался по вашей реферальной ссылке.`,
-        `Когда: <b>${formatTelegramDateTime(invite.createdAt)}</b>`,
       ].join("\n")
       parseMode = "HTML"
-      button = { text: "🎁 Открыть рефералы ↗", returnTo: "/referrals" }
+      button = { text: "🎁 Открыть рефералы", returnTo: "/referrals" }
     }
 
     if (template === "PARTNER_COMMISSION_CREATED") {
@@ -974,41 +1147,47 @@ export async function handleJob(job: Job) {
               },
             },
           },
-          payment: { select: { confirmedAt: true } },
         },
       })
       if (!commission || commission.inviterUserId !== String(payload.userId))
         return
       text = [
-        "🤝 <b>PulsarVPN — Партнёрский доход</b>",
+        "🤝 <b>Партнёрское начисление</b>",
         "",
-        `Пользователь: <b>${escapeTelegramHtml(telegramUserLabel(commission.invited))}</b>`,
-        `Оплата: <b>${formatTelegramDateTime(commission.payment.confirmedAt)}</b>`,
-        `Платёж: <b>${formatTelegramRub(commission.baseAmountMinor)}</b>`,
-        `Доход: <b>+${formatTelegramRub(commission.amountMinor)}</b>`,
+        `<b>${escapeTelegramHtml(telegramUserLabel(commission.invited))}</b> оплатил подписку.`,
+        `Сумма оплаты: <b>${formatTelegramRub(commission.baseAmountMinor)}</b>`,
+        `Ваш доход: <b>${formatTelegramRub(commission.amountMinor)}</b>`,
       ].join("\n")
       parseMode = "HTML"
-      button = { text: "🤝 Открыть партнёрку ↗", returnTo: "/partner" }
+      button = { text: "🤝 Открыть партнёрку", returnTo: "/partner" }
     }
 
-    const actionUrl = button
-      ? (
-          await issueTelegramWebsiteLogin({
-            telegramId: profile.telegramId,
-            chatId: profile.chatId,
-            returnTo: button.returnTo,
-          })
-        ).url
-      : null
+    const actionUrl =
+      button && "returnTo" in button
+        ? (
+            await issueTelegramWebsiteLogin({
+              telegramId: profile.telegramId,
+              chatId: profile.chatId,
+              returnTo: button.returnTo,
+            })
+          ).url
+        : null
     try {
       await getTelegramGateway().sendMessage({
         chatId: profile.chatId,
         text,
         parseMode,
-        replyMarkup: actionUrl && button
+        replyMarkup: button
           ? {
               inline_keyboard: [
-                [{ text: button.text, url: actionUrl }],
+                [
+                  "returnTo" in button
+                    ? { text: button.text, url: actionUrl! }
+                    : {
+                        text: button.text,
+                        callback_data: button.callbackData,
+                      },
+                ],
               ],
             }
           : undefined,

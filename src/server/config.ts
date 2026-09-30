@@ -14,6 +14,17 @@ const optionalUrl = z.preprocess(
   z.url().optional()
 )
 
+const optionalTelegramWebhookSecret = z.preprocess(
+  (value) =>
+    typeof value === "string" && value.trim() === "" ? undefined : value,
+  z
+    .string()
+    .min(16)
+    .max(256)
+    .regex(/^[A-Za-z0-9_-]+$/)
+    .optional()
+)
+
 const envSchema = z.object({
   APP_ENV: z.enum(["development", "test", "production"]).default("development"),
   APP_URL: z.url().default("http://localhost:3000"),
@@ -29,7 +40,7 @@ const envSchema = z.object({
   RESEND_FROM_EMAIL: z.string().default("Pulsar <auth@pulsar-cloud.space>"),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_BOT_USERNAME: z.string().optional(),
-  TELEGRAM_WEBHOOK_SECRET: z.string().optional(),
+  TELEGRAM_WEBHOOK_SECRET: optionalTelegramWebhookSecret,
   ADMIN_EMAIL: z.email().transform((value) => value.trim().toLowerCase()),
   // Демо-аккаунт для внешних ревью: входит по фиксированному коду без письма
   // и не может оплачивать. Пока переменные пустые, ничего этого не существует.
@@ -210,8 +221,7 @@ function buildConfig() {
     !usesLocalTestAdapters &&
     (!env.TELEGRAM_BOT_TOKEN ||
       !env.TELEGRAM_BOT_USERNAME ||
-      !env.TELEGRAM_WEBHOOK_SECRET ||
-      env.TELEGRAM_WEBHOOK_SECRET.length < 16)
+      !env.TELEGRAM_WEBHOOK_SECRET)
   ) {
     throw new Error(
       "TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME, and a 16+ character TELEGRAM_WEBHOOK_SECRET are required outside local non-production test mode"

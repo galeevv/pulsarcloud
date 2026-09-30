@@ -18,9 +18,12 @@ async function getOwnedRemoteSubscription(userId: string) {
   return subscription.remnawaveUserId
 }
 
-export async function getSubscriptionDevices(userId: string) {
+export async function getSubscriptionDevices(
+  userId: string,
+  options?: { timeoutMs?: number }
+) {
   const remoteUserId = await getOwnedRemoteSubscription(userId)
-  return getProvisioningProvider().getSubscriberDevices(remoteUserId)
+  return getProvisioningProvider().getSubscriberDevices(remoteUserId, options)
 }
 
 export async function deleteSubscriptionDevice(input: {

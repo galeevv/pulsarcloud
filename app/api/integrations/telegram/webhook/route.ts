@@ -4,10 +4,7 @@ import {
   hashToken,
   safeEqual,
 } from "@/src/server/infrastructure/security/crypto"
-import {
-  isTelegramCallbackAction,
-  type TelegramCallbackAction,
-} from "@/src/server/domain/telegram/service"
+import { isTelegramCallbackAction } from "@/src/server/domain/telegram/service"
 
 type TelegramUpdate = {
   update_id?: number
@@ -33,7 +30,7 @@ type StoredTelegramMessage = {
 
 type StoredTelegramCallback = {
   id?: string
-  action?: TelegramCallbackAction | "other"
+  action?: string
   from?: StoredTelegramFrom
   message?: {
     messageId?: string
@@ -99,7 +96,8 @@ function commandFromText(
   const [rawCommand = "", startToken] = text.trim().split(/\s+/, 2)
   const command = rawCommand.toLowerCase().split("@", 1)[0]
   if (command === "/start") {
-    const referralMatch = startToken?.match(/^ref_([A-Za-z0-9_-]{8,64})$/)
+    // The complete Telegram start parameter is limited to 64 characters.
+    const referralMatch = startToken?.match(/^ref_([A-Za-z0-9_-]{8,60})$/)
     const referralInviteCode = referralMatch?.[1]
     return {
       command: "start",
@@ -135,7 +133,7 @@ export function normalizeTelegramUpdate(update: TelegramUpdate) {
   if (callback) {
     const callbackMessage = record(callback.message)
     const action = isTelegramCallbackAction(callback.data)
-      ? callback.data
+      ? String(callback.data)
       : "other"
     const messageId = telegramId(callbackMessage?.message_id)
     const presentation =
@@ -194,9 +192,8 @@ export async function POST(request: Request) {
     return new Response("Unauthorized", { status: 401 })
   if (Number(request.headers.get("content-length") ?? 0) > 256_000)
     return new Response("Payload too large", { status: 413 })
-  const text = await request.text()
-  if (Buffer.byteLength(text) > 256_000)
-    return new Response("Payload too large", { status: 413 })
+  const text = await readBoundedBody(request, 256_000)
+  if (text === null) return new Response("Payload too large", { status: 413 })
   let update: TelegramUpdate
   try {
     update = JSON.parse(text) as typeof update
@@ -240,4 +237,26 @@ export async function POST(request: Request) {
     })
   )
   return new Response("OK")
+}
+
+async function readBoundedBody(request: Request, maximumBytes: number) {
+  if (!request.body) return ""
+  const reader = request.body.getReader()
+  const chunks: Uint8Array[] = []
+  let bytes = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      bytes += value.byteLength
+      if (bytes > maximumBytes) {
+        await reader.cancel()
+        return null
+      }
+      chunks.push(value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  return Buffer.concat(chunks, bytes).toString("utf8")
 }

@@ -8,6 +8,8 @@ Remnawave Panel 2.8.0, its subscription page, and the Pulsar HTTP provisioning a
 
 Local subscription state is desired state. Every change increments `syncVersion` and creates `subscription:<id>:sync:<version>`. The worker ignores stale versions, records success or failure, keeps friendly errors separate from technical logs, and never rolls back a confirmed payment because provisioning is temporarily unavailable. Standard access maps to the Standard internal squad; LTE adds the LTE squad while retaining Standard. `deviceLimit` maps to Remnawave `hwidDeviceLimit`, unlimited traffic maps to `trafficLimitBytes=0` and `NO_RESET`, and the remote account is always reconciled to `ACTIVE` for a live local term.
 
+The Telegram worker reads and deletes connected devices only through the existing `getSubscriptionDevices` and `deleteSubscriptionDevice` domain boundary. Device lists are fetched on demand for an active, synchronized subscription; a temporary provider failure is shown as an unavailable list or a limit-only summary and never fabricated as a zero count. Callback data never contains an HWID: the bot derives a short user-bound HMAC tag and resolves it against a fresh owned-device list immediately before confirmation or deletion. Repeated deletion is treated idempotently.
+
 Production runs with `BILLING_ENABLED=true` (flipped after the payment-to-usable-Node acceptance flow passed; the safe procedure is `deploy/pulsar/go-live.sh`, which backs up the env file and rolls back on an unhealthy start).
 
 ## Authorized live topology
