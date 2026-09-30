@@ -56,13 +56,12 @@ Keyboard:
 [🔗 Подключиться]
 [📱 Устройства] [💎 Продлить]
 [🎁 Пригласить] [💬 Поддержка]
-[🛰 PULSAR VPN NEWS] [🌐 Сайт]
+[🌐 Сайт]
 ```
 
 - `Подключиться` creates a fresh login to `/instructions`.
 - `Устройства`, `Продлить`, and `Пригласить` stay inside Telegram.
 - `Поддержка` creates a fresh login to `/support`.
-- News opens `https://t.me/pulsarvpn_news`.
 - `Сайт` creates a fresh login to `/home`.
 
 ### Main state table

@@ -232,6 +232,10 @@ function remainingDaysText(expiresAt: Date) {
   return `${days === 1 ? "остался" : "осталось"} ${days} ${plural(days, "день", "дня", "дней")}`
 }
 
+function upperFirst(value: string) {
+  return value.charAt(0).toLocaleUpperCase("ru-RU") + value.slice(1)
+}
+
 function formatRub(minor: number) {
   return `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(Math.floor(minor / 100))} ₽`
 }
@@ -309,8 +313,14 @@ export async function getTelegramMainScreen(
   const lines = [
     "🪐 <b>PULSAR VPN</b>",
     "",
+    "",
     `👤 <b>${name}</b>${username}`,
-    ...(email ? [`✉️ ${escapeHtml(email)}`] : []),
+    ...(email
+      ? [
+          `✉️ <a href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a>`,
+        ]
+      : []),
+    "",
     "",
   ]
   let renewalLabel = "💎 Продлить"
@@ -353,13 +363,11 @@ export async function getTelegramMainScreen(
   } else {
     const soon = remainingDays(subscription.expiresAt) <= 3
     lines.push(
-      `${soon ? "🟠" : "🟢"} <b>${remainingDaysText(subscription.expiresAt)}</b>`,
-      `Подписка активна до <b>${dateFormatter.format(subscription.expiresAt)}</b>.`,
-      "",
+      `${soon ? "🟠" : "🟢"} ${upperFirst(remainingDaysText(subscription.expiresAt))}`,
       usedDevices === null
-        ? `📱 Лимит устройств: <b>до ${subscription.deviceLimit}</b>`
-        : `📱 Подключено устройств: <b>${usedDevices} / ${subscription.deviceLimit}</b>`,
-      `⚡️ Доступ Plus: <b>${subscription.lteEnabled ? "есть" : "нет"}</b>`
+        ? `📱 Лимит устройств: до ${subscription.deviceLimit}`
+        : `📱 Подключено устройств: ${usedDevices} / ${subscription.deviceLimit}`,
+      `⚡️ Доступ Plus: ${subscription.lteEnabled ? "есть" : "нет"}`
     )
   }
 
@@ -375,10 +383,7 @@ export async function getTelegramMainScreen(
       { text: "🎁 Пригласить", callback_data: "m:f" },
       { text: "💬 Поддержка", callback_data: "w:s" },
     ],
-    [
-      { text: "🛰 PULSAR VPN NEWS", url: "https://t.me/pulsarvpn_news" },
-      { text: "🌐 Сайт", callback_data: "w:h" },
-    ],
+    [{ text: "🌐 Сайт", callback_data: "w:h" }],
   ]
 
   return {

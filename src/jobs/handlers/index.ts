@@ -1053,7 +1053,6 @@ export async function handleJob(job: Job) {
     const template = String(payload.template)
     if (
       [
-        "PAYMENT_CONFIRMED",
         "PROVISIONING_COMPLETED",
         "PROVISIONING_FAILED",
         "PAYOUT_APPROVED",
@@ -1099,7 +1098,35 @@ export async function handleJob(job: Job) {
           ? { text: "💎 Возобновить подписку", callbackData: "m:r" }
           : template.startsWith("SUBSCRIPTION_EXPIRING_")
             ? { text: "💎 Продлить подписку", callbackData: "m:r" }
-            : null
+          : null
+
+    if (template === "PAYMENT_CONFIRMED") {
+      const payment = await db.payment.findUnique({
+        where: { id: String(payload.paymentId) },
+        select: {
+          userId: true,
+          idempotencyKey: true,
+          amountMinor: true,
+          purpose: true,
+        },
+      })
+      if (
+        !payment ||
+        payment.userId !== String(payload.userId) ||
+        !payment.idempotencyKey.startsWith("telegram:")
+      )
+        return
+      text = [
+        "✅ <b>Оплата прошла</b>",
+        "",
+        `Платёж на сумму <b>${formatTelegramRub(payment.amountMinor)}</b> получен.`,
+        payment.purpose === "DEVICE_LIMIT_UPGRADE"
+          ? "Обновляем лимит устройств — обычно это занимает несколько секунд."
+          : "Обновляем подписку — обычно это занимает несколько секунд.",
+      ].join("\n")
+      parseMode = "HTML"
+      button = { text: "🏠 Главное меню", callbackData: "m:h" }
+    }
 
     if (template === "REFERRAL_REGISTERED") {
       const invite = await db.referralInvite.findUnique({

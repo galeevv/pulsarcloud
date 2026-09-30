@@ -57,12 +57,11 @@ Button order:
 [🔗 Подключиться]
 [📱 Устройства] [💎 Продлить]
 [🎁 Пригласить] [💬 Поддержка]
-[🛰 PULSAR VPN NEWS] [🌐 Сайт]
+[🌐 Сайт]
 ```
 
 `Подключиться`, `Поддержка`, and `Сайт` are callbacks. Each creates a fresh,
 one-use, five-minute website login for `/instructions`, `/support`, or `/home`.
-The news button is the ordinary URL `https://t.me/pulsarvpn_news`.
 
 ## Devices
 

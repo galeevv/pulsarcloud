@@ -134,6 +134,29 @@ export async function expireOverduePendingPayments(input?: {
 
 type TransactionClient = Parameters<Parameters<typeof db.$transaction>[0]>[0]
 
+async function enqueueTelegramPaymentConfirmation(
+  tx: TransactionClient,
+  payment: Pick<Payment, "id" | "userId" | "idempotencyKey">
+) {
+  if (!payment.idempotencyKey.startsWith("telegram:")) return
+  await tx.outboxJob.upsert({
+    where: { dedupeKey: `telegram:payment-confirmed:${payment.id}` },
+    create: {
+      type: "SEND_TELEGRAM_NOTIFICATION",
+      aggregateType: "Payment",
+      aggregateId: payment.id,
+      payloadJson: JSON.stringify({
+        userId: payment.userId,
+        template: "PAYMENT_CONFIRMED",
+        paymentId: payment.id,
+      }),
+      dedupeKey: `telegram:payment-confirmed:${payment.id}`,
+      maxAttempts: 5,
+    },
+    update: {},
+  })
+}
+
 /**
  * The customer walked away from an unpaid invoice and asked for a different
  * plan. Free the single-open-checkout slot by marking the abandoned payment
@@ -785,6 +808,7 @@ export async function applyPaymentEvent(
         where: { id: payment.id },
         data: { status: "CONFIRMED", confirmedAt: now },
       })
+      await enqueueTelegramPaymentConfirmation(tx, payment)
       const current = await tx.subscription.findUnique({
         where: { userId: payment.userId },
       })

@@ -1574,8 +1574,19 @@ test("plain /start registers a shared user graph and reuses it", async () => {
   const markup = JSON.stringify(sent.replyMarkup)
   assert.match(markup, /m:f/)
   assert.match(markup, /w:h/)
-  assert.match(markup, /PULSAR VPN NEWS/)
-  assert.match(markup, /https:\/\/t\.me\/pulsarvpn_news/)
+  assert.doesNotMatch(markup, /PULSAR VPN NEWS/)
+  const keyboard = sent.replyMarkup as {
+    inline_keyboard: Array<Array<{ text: string }>>
+  }
+  assert.deepEqual(
+    keyboard.inline_keyboard.map((row) => row.map((button) => button.text)),
+    [
+      ["🔗 Подключиться"],
+      ["📱 Устройства", "💎 Продлить"],
+      ["🎁 Пригласить", "💬 Поддержка"],
+      ["🌐 Сайт"],
+    ]
+  )
   assert.doesNotMatch(markup, /web_app/)
 
   const userCount = await modules.db.user.count()
@@ -1655,10 +1666,10 @@ test("Telegram main screen and referrals read the shared database", async () => 
     .getTestTelegramGatewayEvents()
     .find((event) => event.type === "sendPhoto")
   assert.ok(main?.type === "sendPhoto")
-  assert.match(main.caption, /осталось 10 дней/)
-  assert.match(main.caption, /menu@example.test/)
-  assert.match(main.caption, /Лимит устройств: <b>до 4<\/b>/)
-  assert.match(main.caption, /Доступ Plus: <b>есть<\/b>/)
+  assert.match(main.caption, /Осталось 10 дней/)
+  assert.match(main.caption, /href="mailto:menu@example.test"/)
+  assert.match(main.caption, /Лимит устройств: до 4/)
+  assert.match(main.caption, /Доступ Plus: есть/)
   assert.match(JSON.stringify(main.replyMarkup), /"callback_data":"w:i"/)
   assert.doesNotMatch(
     JSON.stringify(main.replyMarkup),
@@ -1944,7 +1955,7 @@ test("Telegram devices use opaque references and existing Remnawave services", a
   const main = await modules.telegramService.getTelegramMainScreen(
     identity.userId
   )
-  assert.match(main.text, /Подключено устройств: <b>2 \/ 4<\/b>/)
+  assert.match(main.text, /Подключено устройств: 2 \/ 4/)
 
   const events = await sendTelegramCallback({
     updateId: 220109,
@@ -2149,6 +2160,40 @@ test("Telegram renewal creates one shared checkout from the reviewed quote", asy
   assert.equal(
     await modules.db.payment.count({ where: { userId: identity.userId } }),
     1
+  )
+
+  const payment = payments[0]!
+  const confirmationEvent = {
+    eventId: "telegram-renewal-confirmed",
+    eventType: "CONFIRMED",
+    externalPaymentId: payment.externalPaymentId!,
+    status: "CONFIRMED" as const,
+    amountMinor: payment.amountMinor,
+    currency: payment.currency,
+    payload: { id: payment.externalPaymentId, status: "CONFIRMED" },
+  }
+  await modules.billing.applyPaymentEvent(confirmationEvent)
+  await modules.billing.applyPaymentEvent(confirmationEvent)
+  const notificationJob = await modules.db.outboxJob.findFirstOrThrow({
+    where: { dedupeKey: `telegram:payment-confirmed:${payment.id}` },
+  })
+  assert.equal(
+    await modules.db.outboxJob.count({
+      where: { dedupeKey: `telegram:payment-confirmed:${payment.id}` },
+    }),
+    1
+  )
+  modules.telegramGateway.resetTestTelegramGatewayEvents()
+  await modules.jobs.handleJob({ ...notificationJob, attempts: 1 })
+  const notification = modules.telegramGateway
+    .getTestTelegramGatewayEvents()
+    .find((event) => event.type === "sendMessage")
+  assert.ok(notification?.type === "sendMessage")
+  assert.match(notification.text, /Оплата прошла/)
+  assert.match(notification.text, /Платёж на сумму/)
+  assert.match(
+    JSON.stringify(notification.replyMarkup),
+    /"callback_data":"m:h"/
   )
 })
 
