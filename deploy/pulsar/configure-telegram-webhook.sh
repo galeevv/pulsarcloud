@@ -17,6 +17,9 @@ fi
 
 webhook_url=https://pulsar-cloud.space/api/integrations/telegram/webhook
 bot_api="https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}"
+bot_name='PULSAR VPN'
+bot_description=$'🪐 PULSAR VPN — Быстрый и надежный VPN\nSite: pulsar-cloud.space\nChannel: t.me/pulsarvpn_news'
+bot_short_description="$bot_description"
 
 commands="$(jq -nc '[
   {command: "start", description: "Запустить бота"}
@@ -47,14 +50,14 @@ unset menu_response
 name_response="$(curl -fsS \
   --request POST \
   "${bot_api}/setMyName" \
-  --data-urlencode 'name=PULSAR VPN')"
+  --data-urlencode "name=${bot_name}")"
 jq -e '.ok == true and .result == true' <<<"$name_response" >/dev/null
 unset name_response
 
 name_response="$(curl -fsS \
   --request POST \
   "${bot_api}/setMyName" \
-  --data-urlencode 'name=PULSAR VPN' \
+  --data-urlencode "name=${bot_name}" \
   --data-urlencode 'language_code=ru')"
 jq -e '.ok == true and .result == true' <<<"$name_response" >/dev/null
 unset name_response
@@ -62,14 +65,14 @@ unset name_response
 description_response="$(curl -fsS \
   --request POST \
   "${bot_api}/setMyDescription" \
-  --data-urlencode 'description=PULSAR VPN — управление подпиской, устройствами и подключением прямо в Telegram.')"
+  --data-urlencode "description=${bot_description}")"
 jq -e '.ok == true and .result == true' <<<"$description_response" >/dev/null
 unset description_response
 
 description_response="$(curl -fsS \
   --request POST \
   "${bot_api}/setMyDescription" \
-  --data-urlencode 'description=PULSAR VPN — управление подпиской, устройствами и подключением прямо в Telegram.' \
+  --data-urlencode "description=${bot_description}" \
   --data-urlencode 'language_code=ru')"
 jq -e '.ok == true and .result == true' <<<"$description_response" >/dev/null
 unset description_response
@@ -77,14 +80,14 @@ unset description_response
 short_description_response="$(curl -fsS \
   --request POST \
   "${bot_api}/setMyShortDescription" \
-  --data-urlencode 'short_description=PULSAR VPN — подписка и устройства')"
+  --data-urlencode "short_description=${bot_short_description}")"
 jq -e '.ok == true and .result == true' <<<"$short_description_response" >/dev/null
 unset short_description_response
 
 short_description_response="$(curl -fsS \
   --request POST \
   "${bot_api}/setMyShortDescription" \
-  --data-urlencode 'short_description=PULSAR VPN — подписка и устройства' \
+  --data-urlencode "short_description=${bot_short_description}" \
   --data-urlencode 'language_code=ru')"
 jq -e '.ok == true and .result == true' <<<"$short_description_response" >/dev/null
 unset short_description_response
@@ -126,31 +129,35 @@ jq -e '.ok == true and .result.type == "commands"' \
 unset configured_menu
 
 configured_name="$(curl -fsS "${bot_api}/getMyName")"
-jq -e '.ok == true and .result.name == "PULSAR VPN"' \
+jq -e --arg expected "$bot_name" '.ok == true and .result.name == $expected' \
   <<<"$configured_name" >/dev/null
 unset configured_name
 
 configured_name="$(curl -fsS "${bot_api}/getMyName?language_code=ru")"
-jq -e '.ok == true and .result.name == "PULSAR VPN"' \
+jq -e --arg expected "$bot_name" '.ok == true and .result.name == $expected' \
   <<<"$configured_name" >/dev/null
 unset configured_name
 
 configured_description="$(curl -fsS "${bot_api}/getMyDescription")"
-jq -e '.ok == true and .result.description == "PULSAR VPN — управление подпиской, устройствами и подключением прямо в Telegram."' \
+jq -e --arg expected "$bot_description" \
+  '.ok == true and .result.description == $expected' \
   <<<"$configured_description" >/dev/null
 unset configured_description
 
 configured_description="$(curl -fsS "${bot_api}/getMyDescription?language_code=ru")"
-jq -e '.ok == true and .result.description == "PULSAR VPN — управление подпиской, устройствами и подключением прямо в Telegram."' \
+jq -e --arg expected "$bot_description" \
+  '.ok == true and .result.description == $expected' \
   <<<"$configured_description" >/dev/null
 unset configured_description
 
 configured_short_description="$(curl -fsS "${bot_api}/getMyShortDescription")"
-jq -e '.ok == true and .result.short_description == "PULSAR VPN — подписка и устройства"' \
+jq -e --arg expected "$bot_short_description" \
+  '.ok == true and .result.short_description == $expected' \
   <<<"$configured_short_description" >/dev/null
 unset configured_short_description
 
 configured_short_description="$(curl -fsS "${bot_api}/getMyShortDescription?language_code=ru")"
-jq -e '.ok == true and .result.short_description == "PULSAR VPN — подписка и устройства"' \
+jq -e --arg expected "$bot_short_description" \
+  '.ok == true and .result.short_description == $expected' \
   <<<"$configured_short_description" >/dev/null
-unset configured_short_description info bot_api
+unset configured_short_description info bot_api bot_name bot_description bot_short_description

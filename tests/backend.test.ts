@@ -1571,6 +1571,8 @@ test("plain /start registers a shared user graph and reuses it", async () => {
   assert.equal(sent.photo, "http://localhost:3000/tg/tg4.png")
   assert.match(sent.caption, /PULSAR VPN/)
   assert.match(sent.caption, /ИРИНА/)
+  assert.match(sent.caption, /✉️ Привяжите почту на сайте/)
+  assert.doesNotMatch(sent.caption, /\n\n\n/)
   const markup = JSON.stringify(sent.replyMarkup)
   assert.match(markup, /m:f/)
   assert.match(markup, /w:h/)
@@ -1699,6 +1701,8 @@ test("Telegram main screen and referrals read the shared database", async () => 
   const edited = events.find((event) => event.type === "editMessageCaption")
   assert.ok(edited?.type === "editMessageCaption")
   assert.match(edited.caption, /Начислено дней: <b>0<\/b>/)
+  assert.match(edited.caption, /Другу <b>1 день бесплатно<\/b>/)
+  assert.match(edited.caption, /Вам <b>\+10 бонусных дней<\/b>/)
   assert.match(edited.caption, /http:\/\/localhost:3000\/\?invite=/)
   assert.match(edited.caption, /https:\/\/t.me\/pulsar_test_bot\?start=ref_/)
   assert.match(JSON.stringify(edited.replyMarkup), /copy_text/)
@@ -3906,8 +3910,10 @@ test("Telegram deployment configures the PULSAR VPN Bot API profile", () => {
     /command: "(?:help|account|notifications)"/
   )
   assert.match(script, /description: "Запустить бота"/)
-  assert.match(script, /name=PULSAR VPN/)
-  assert.match(script, /PULSAR VPN — подписка и устройства/)
+  assert.match(script, /bot_name='PULSAR VPN'/)
+  assert.match(script, /🪐 PULSAR VPN — Быстрый и надежный VPN/)
+  assert.match(script, /Site: pulsar-cloud\.space/)
+  assert.match(script, /Channel: t\.me\/pulsarvpn_news/)
   assert.match(script, /menu_button=\{"type":"commands"\}/)
   assert.match(
     script,

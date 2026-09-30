@@ -41,14 +41,13 @@ Example with email and an active subscription:
 ✉️ user@email.com
 
 🟢 Осталось 30 дней
-Подписка активна до 30 октября 2026 г.
-
 📱 Подключено устройств: 1 / 5
 ⚡️ Доступ Plus: есть
 ```
 
-The email line is omitted when there is no EMAIL identity. Telegram username is
-metadata only. `Plus` is the Telegram product name for `lteEnabled`.
+Without an EMAIL identity, the same line reads `✉️ Привяжите почту на сайте`,
+so the blocks keep the same compact spacing. Telegram username is metadata only.
+`Plus` is the Telegram product name for `lteEnabled`.
 
 Keyboard:
 
@@ -210,6 +209,9 @@ changed-order superseding, active-term extension, and expired-term restart.
 Активных: 5
 Начислено дней: 10
 
+Другу 1 день бесплатно
+Вам +10 бонусных дней
+
 Ваша ссылка:
 https://pulsar-cloud.space/?invite=...
 
@@ -225,9 +227,11 @@ When supported by the value length, buttons are:
 [‹ Вернуться в главное меню]
 ```
 
-Both links use one enabled `ReferralProfile`. A referral bot start creates the
-normal shared account, applies the same trial/inviter logic as the website, and
-queues one inviter notification. Existing users cannot replace their inviter.
+The displayed free-trial and inviter-reward conditions come from the shared
+`PricingSettings`; the numbers above are only an example. Both links use one
+enabled `ReferralProfile`. A referral bot start creates the normal shared
+account, applies the same trial/inviter logic as the website, and queues one
+inviter notification. Existing users cannot replace their inviter.
 
 ## 7. Screen 07 — Authorized website transition
 

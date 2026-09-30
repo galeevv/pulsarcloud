@@ -313,14 +313,10 @@ export async function getTelegramMainScreen(
   const lines = [
     "🪐 <b>PULSAR VPN</b>",
     "",
-    "",
     `👤 <b>${name}</b>${username}`,
-    ...(email
-      ? [
-          `✉️ <a href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a>`,
-        ]
-      : []),
-    "",
+    email
+      ? `✉️ <a href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a>`
+      : "✉️ Привяжите почту на сайте",
     "",
   ]
   let renewalLabel = "💎 Продлить"
@@ -396,13 +392,22 @@ export async function getTelegramMainScreen(
 export async function getReferralsScreen(
   userId: string
 ): Promise<TelegramScreen> {
-  const summary = await getReferralSummaryView(userId)
+  const [summary, pricing] = await Promise.all([
+    getReferralSummaryView(userId),
+    db.pricingSettings.findUniqueOrThrow({
+      where: { key: "default" },
+      select: { referralTrialDays: true, referralRewardDays: true },
+    }),
+  ])
   const lines = [
     "🎁 <b>Пригласить друзей</b>",
     "",
     `Приглашено: <b>${summary.invitedUsers}</b>`,
     `Активных: <b>${summary.activeUsers}</b>`,
     `Начислено дней: <b>${summary.rewardDays}</b>`,
+    "",
+    `Другу <b>${pricing.referralTrialDays} ${plural(pricing.referralTrialDays, "день", "дня", "дней")} бесплатно</b>`,
+    `Вам <b>+${pricing.referralRewardDays} ${plural(pricing.referralRewardDays, "бонусный день", "бонусных дня", "бонусных дней")}</b>`,
   ]
   const keyboard: TelegramButton[][] = []
   if (summary.inviteUrl && summary.telegramInviteUrl) {

@@ -36,9 +36,9 @@ accounts are never merged automatically.
 
 The bot keeps one photo message (`public/tg/tg4.png`) and edits its caption and
 keyboard. The main caption is headed `PULSAR VPN`, shows the Telegram display
-name, optional linked email, effective subscription state, device usage or an
-honest limit fallback, and `Доступ Plus` (the domain field remains
-`lteEnabled`).
+name, linked email or `✉️ Привяжите почту на сайте` in the same position,
+effective subscription state, device usage or an honest limit fallback, and
+`Доступ Plus` (the domain field remains `lteEnabled`).
 
 States:
 
@@ -210,8 +210,8 @@ The script sets and reads back, for default and Russian localization:
 
 - name `PULSAR VPN`;
 - `/start — Запустить бота` as the only command;
-- description `PULSAR VPN — управление подпиской, устройствами и подключением прямо в Telegram.`;
-- short description `PULSAR VPN — подписка и устройства`;
+- description and short description `🪐 PULSAR VPN — Быстрый и надежный VPN`,
+  followed by `Site: pulsar-cloud.space` and `Channel: t.me/pulsarvpn_news`;
 - a `commands` menu button;
 - the production webhook, secret token, and the three allowed update types.
 
