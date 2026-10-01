@@ -98,7 +98,7 @@ test("Incy and Happ instruction flows use the correct links", async () => {
   assert.doesNotMatch(subscription, /incy:\/\/import|happ:\/\/add/)
   assert.match(instructions, /incy:\/\/import\/\$\{subscriptionUrl\}/)
   assert.match(instructions, /happ:\/\/add\/\$\{subscriptionUrl\}/)
-  assert.match(instructions, /React\.useState<VpnApp>\("happ"\)/)
+  assert.match(instructions, /React\.useState<VpnApp>\("incy"\)/)
   assert.match(instructions, /"choose-app"/)
   assert.match(instructions, /Выберите приложение/)
   assert.match(instructions, /Выберите приложение для подключения/)
@@ -106,15 +106,15 @@ test("Incy and Happ instruction flows use the correct links", async () => {
   assert.match(instructions, /Рекомендуем/)
   assert.match(instructions, /Поддерживается/)
   assert.match(instructions, /vpnApp === "happ"/)
-  assert.match(instructions, /option\.value === "happ"/)
+  assert.match(instructions, /option\.value === "incy"/)
   const appOptionsSource = instructions.slice(
     instructions.indexOf("const appOptions"),
     instructions.indexOf("const installLinks")
   )
   assert.ok(
-    appOptionsSource.indexOf('value: "happ"') <
-      appOptionsSource.indexOf('value: "incy"'),
-    "Happ should be shown before Incy"
+    appOptionsSource.indexOf('value: "incy"') <
+      appOptionsSource.indexOf('value: "happ"'),
+    "Incy should be shown before Happ"
   )
   assert.match(instructions, /icon=\{MonitorSmartphoneIcon\}/)
   assert.match(instructions, /icon=\{BlocksIcon\}/)

@@ -57,11 +57,15 @@ Button order:
 [🔗 Подключиться]
 [📱 Устройства] [💎 Продлить]
 [🎁 Пригласить] [💬 Поддержка]
+[🤝 Партнёрская программа]  # only when PartnerEnrollment.enabled=true
 [🌐 Сайт]
 ```
 
 `Подключиться`, `Поддержка`, and `Сайт` are callbacks. Each creates a fresh,
 one-use, five-minute website login for `/instructions`, `/support`, or `/home`.
+The partner button is absent for ordinary users. Its summary reads the shared
+wallet, commission, and payout projections. Commission history uses one bounded
+query with `take: 10`; payout details remain on `/partner` behind a fresh login.
 
 ## Devices
 
@@ -121,8 +125,9 @@ All generated values are ASCII and at most 64 bytes:
 
 | Pattern                                          | Meaning                                     |
 | ------------------------------------------------ | ------------------------------------------- |
-| `m:h`, `m:d`, `m:r`, `m:f`                       | home, devices, renewal, referrals           |
-| `w:h`, `w:i`, `w:s`                              | fresh login for home, instructions, support |
+| `m:h`, `m:d`, `m:r`, `m:f`, `m:p`                | home, devices, renewal, referrals, partner  |
+| `p:h`                                            | latest ten partner commissions              |
+| `w:h`, `w:i`, `w:s`, `w:p`                       | fresh login for site destinations           |
 | `d:c:<tag>`, `d:x:<tag>`, `d:u`                  | device confirm, delete, upgrade             |
 | `u:q:<limit>`                                    | device-limit review                         |
 | `u:x:<limit>:<version>:<amount>`                 | device-limit checkout                       |

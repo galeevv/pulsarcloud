@@ -26,6 +26,8 @@ terminology, and a clear next action. All user values are HTML-escaped.
 | 06  | Invite friends                | IMPLEMENTED |
 | 07  | Authorized website transition | IMPLEMENTED |
 | 08  | Notifications and news        | IMPLEMENTED |
+| 09  | Partner cabinet               | IMPLEMENTED |
+| 10  | Partner commission history    | IMPLEMENTED |
 
 Repeated `/start`, `/help`, and an unknown private message return to screen 01.
 Group messages are ignored. Every callback is answered exactly once.
@@ -55,6 +57,7 @@ Keyboard:
 [🔗 Подключиться]
 [📱 Устройства] [💎 Продлить]
 [🎁 Пригласить] [💬 Поддержка]
+[🤝 Партнёрская программа]  (enabled partners only)
 [🌐 Сайт]
 ```
 
@@ -62,6 +65,7 @@ Keyboard:
 - `Устройства`, `Продлить`, and `Пригласить` stay inside Telegram.
 - `Поддержка` creates a fresh login to `/support`.
 - `Сайт` creates a fresh login to `/home`.
+- `Партнёрская программа` appears only for an enabled `PartnerEnrollment`.
 
 ### Main state table
 
@@ -233,7 +237,31 @@ enabled `ReferralProfile`. A referral bot start creates the normal shared
 account, applies the same trial/inviter logic as the website, and queues one
 inviter notification. Existing users cannot replace their inviter.
 
-## 7. Screen 07 — Authorized website transition
+## 7. Screens 09–10 — Partner cabinet
+
+Only users with `PartnerEnrollment.enabled=true` receive the main-menu button.
+Both partner callbacks verify this flag again before returning financial data.
+
+```text
+🤝 Партнёрская программа
+
+Ваша ставка: 40%
+
+💰 Доступно: 597 ₽
+⏳ В резерве: 0 ₽
+📈 Заработано: 1 194 ₽
+✅ Выплачено: 597 ₽
+```
+
+The screen reads shared `WalletAccount`, `PartnerCommission`, and
+`PayoutRequest` projections. `💳 Вывести средства` creates a fresh magic login
+to `/partner`; bank details and payout creation remain on the website.
+
+`📊 История начислений` performs one descending query with a hard `take: 10`.
+There is no pagination and no full commission list is loaded. Each row contains
+the date, safely displayed invited-user label, amount, and reversal state.
+
+## 8. Screen 07 — Authorized website transition
 
 All website buttons begin as callbacks because a stored URL would become stale.
 The callback verifies the private chat and Telegram identity, creates a
@@ -250,7 +278,7 @@ The ordinary URL button opens in any browser, consumes the token once, creates
 the normal web session, and redirects only to the server allowlist. No Mini App
 state or Telegram browser cookie is required.
 
-## 8. Screen 08 — Notifications and news
+## 9. Screen 08 — Notifications and news
 
 Allowed service events:
 
@@ -300,6 +328,10 @@ Referral registration:
 
 @galeev66 зарегистрировался по вашей реферальной ссылке.
 ```
+
+For registration through email, the same line shows the normalized email
+instead of a Telegram username. If neither identifier is available, it falls
+back to the Telegram display name or `Пользователь PULSAR`.
 
 Partner commission:
 

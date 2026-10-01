@@ -145,22 +145,6 @@ async function loadModules() {
       ...input,
       ...(await billing.getCheckoutExpectation(input)),
     })
-  const archivedWallet = {
-    async adjustWalletBalanceByAdmin(input: unknown) {
-      void input
-      throw new Error("Internal balance is archived")
-      return { applied: false, availableMinor: 0, ledgerEntryId: "archived" }
-    },
-    async createPayout(input: unknown) {
-      void input
-      throw new Error("Payouts are archived")
-      return { id: "archived" }
-    },
-    async transitionPayout(input: unknown) {
-      void input
-      throw new Error("Payouts are archived")
-    },
-  }
   return {
     db,
     initializeDatabase,
@@ -174,7 +158,6 @@ async function loadModules() {
     },
     users,
     referrals,
-    wallet: archivedWallet,
     jobs,
     support,
     subscriptions,
@@ -213,6 +196,83 @@ before(async () => {
 
 after(async () => {
   await modules.db.$disconnect()
+})
+
+test("expiry notifications cover multiple batches and remain idempotent", async () => {
+  const now = new Date()
+  const fixtures = Array.from({ length: 1003 }, (_, index) => {
+    // The first full batch needs no notification, but must not stop the scan.
+    const hours = index < 500 ? 36 : [-12, 12, 60][index % 3]
+    return {
+      id: `expiry-pagination-${String(index).padStart(4, "0")}`,
+      hours,
+      expiresAt: new Date(now.getTime() + hours * 3_600_000),
+    }
+  })
+  const ids = fixtures.map(({ id }) => id)
+  try {
+    await modules.db.user.createMany({
+      data: ids.map((id) => ({ id, isTest: true })),
+    })
+    await modules.db.subscription.createMany({
+      data: fixtures.map(({ id, expiresAt }, index) => ({
+        id,
+        userId: id,
+        status: index % 2 ? "ACTIVE" : "TRIAL",
+        startedAt: new Date(now.getTime() - 7 * 86_400_000),
+        expiresAt,
+        deviceLimit: 1,
+        syncStatus: "SYNCED",
+      })),
+    })
+    const job = {
+      id: "expiry-pagination-maintenance",
+      type: "RECONCILE_SUBSCRIPTIONS",
+      aggregateId: "subscriptions",
+      payloadJson: "{}",
+      attempts: 1,
+    }
+    const where = {
+      type: "SEND_TELEGRAM_NOTIFICATION",
+      aggregateId: { in: ids },
+    }
+    await modules.jobs.handleJob(job)
+    const first = await modules.db.outboxJob.findMany({ where })
+    const expected = fixtures.filter(({ hours }) => hours !== 36)
+    assert.equal(first.length, expected.length)
+    const bySubscription = new Map(
+      first.map((entry) => [entry.aggregateId, entry])
+    )
+    for (const fixture of expected) {
+      const notification = bySubscription.get(fixture.id)
+      assert.ok(notification, `Missing notification for ${fixture.id}`)
+      assert.deepEqual(JSON.parse(notification.payloadJson), {
+        userId: fixture.id,
+        template:
+          fixture.hours < 0
+            ? "SUBSCRIPTION_EXPIRED"
+            : fixture.hours < 24
+              ? "SUBSCRIPTION_EXPIRING_1D"
+              : "SUBSCRIPTION_EXPIRING_3D",
+      })
+    }
+    await modules.db.outboxJob.updateMany({
+      where,
+      data: { status: "COMPLETED", completedAt: now },
+    })
+    await modules.jobs.handleJob(job)
+    const replay = await modules.db.outboxJob.findMany({ where })
+    assert.deepEqual(
+      replay.map(({ id }) => id).sort(),
+      first.map(({ id }) => id).sort()
+    )
+    assert.ok(replay.every(({ status }) => status === "COMPLETED"))
+  } finally {
+    await modules.db.outboxJob.deleteMany({
+      where: { aggregateId: { in: ids } },
+    })
+    await modules.db.user.deleteMany({ where: { id: { in: ids } } })
+  }
 })
 
 test("SQLite adapter busy timeouts are retried without retrying generic timeouts", async () => {
@@ -707,8 +767,8 @@ test("referral happy path is idempotent through provisioning", async () => {
     .find((item) => item.type === "sendMessage")
   assert.equal(referralNotification?.type, "sendMessage")
   assert.match(referralNotification.text, /Новый пользователь по вашей ссылке/)
-  assert.match(referralNotification.text, /Пользователь PULSAR/)
-  assert.doesNotMatch(referralNotification.text, /friend@example.com/)
+  assert.match(referralNotification.text, /<b>friend@example\.com<\/b>/)
+  assert.doesNotMatch(referralNotification.text, /Пользователь PULSAR/)
   assert.match(
     JSON.stringify(referralNotification.replyMarkup),
     /returnTo=%2Freferrals/
@@ -1070,143 +1130,6 @@ test("new internal-balance checkout attempts are rejected", async () => {
   )
 })
 
-test.skip("legacy internal balance checkout is archived", async () => {
-  const user = await modules.db.$transaction((tx) =>
-    modules.users.createUserGraph(tx, { isTest: true })
-  )
-  await modules.db.$transaction(async (tx) => {
-    const wallet = await tx.walletAccount.update({
-      where: { userId: user.id },
-      data: {
-        availableMinor: { increment: 30_000 },
-        version: { increment: 1 },
-      },
-    })
-    await tx.walletLedgerEntry.create({
-      data: {
-        walletAccountId: wallet.id,
-        userId: user.id,
-        type: "ADMIN_ADJUSTMENT",
-        deltaAvailableMinor: 30_000,
-        deltaReservedMinor: 0,
-        referenceType: "Test",
-        referenceId: "wallet-subscription-funding",
-        idempotencyKey: "wallet-subscription-funding",
-      },
-    })
-  })
-
-  const payment = await modules.billing.createCheckout({
-    userId: user.id,
-    durationMonths: 1,
-    deviceLimit: 3,
-    lteEnabled: true,
-    paymentMethod: "WALLET" as never,
-    idempotencyKey: "wallet-subscription-payment",
-  })
-  assert.equal(payment.amountMinor, 19_900)
-  assert.equal(payment.provider, "wallet")
-  assert.equal(payment.status, "CONFIRMED")
-  assert.equal(
-    (
-      await modules.db.walletAccount.findUniqueOrThrow({
-        where: { userId: user.id },
-      })
-    ).availableMinor,
-    10_100
-  )
-  const ledger = await modules.db.walletLedgerEntry.findUniqueOrThrow({
-    where: { idempotencyKey: `wallet-subscription:${payment.id}` },
-  })
-  assert.equal(ledger.deltaAvailableMinor, -19_900)
-  const subscription = await modules.db.subscription.findUniqueOrThrow({
-    where: { userId: user.id },
-  })
-  assert.equal(subscription.deviceLimit, 3)
-  assert.equal(subscription.lteEnabled, true)
-
-  const recoveryUser = await modules.db.$transaction((tx) =>
-    modules.users.createUserGraph(tx, { isTest: true })
-  )
-  await modules.db.walletAccount.update({
-    where: { userId: recoveryUser.id },
-    data: { availableMinor: 30_000 },
-  })
-  const interrupted = await modules.db.payment.create({
-    data: {
-      userId: recoveryUser.id,
-      provider: "wallet",
-      externalPaymentId: "wallet_interrupted_checkout",
-      idempotencyKey: "wallet-interrupted-original",
-      status: "PENDING",
-      amountMinor: 19_900,
-      currency: "RUB",
-      durationDays: 30,
-      deviceLimit: 3,
-      lteEnabled: true,
-      basePriceMinor: 11_900,
-      extraDevicesPriceMinor: 3_000,
-      ltePriceMinor: 5_000,
-      discountMinor: 0,
-      priceSnapshotJson: "{}",
-      pricingVersion: 4,
-      checkoutUrl: "http://localhost:3000/subscription?payment=success",
-      providerCreatedAt: new Date(),
-      expiresAt: new Date(Date.now() + 60_000),
-      isTest: true,
-    },
-  })
-  await modules.db.pricingSettings.update({
-    where: { key: "default" },
-    data: { version: 4 },
-  })
-  const recovered = await modules.billing.rawCreateCheckout({
-    userId: recoveryUser.id,
-    durationMonths: 1,
-    deviceLimit: 3,
-    lteEnabled: true,
-    paymentMethod: "WALLET" as never,
-    expectedAmountMinor: 19_900,
-    pricingVersion: 4,
-    idempotencyKey: "wallet-interrupted-retry",
-  })
-  await modules.db.pricingSettings.update({
-    where: { key: "default" },
-    data: { version: 4 },
-  })
-  assert.equal(recovered.id, interrupted.id)
-  assert.equal(recovered.status, "CONFIRMED")
-  assert.equal(
-    await modules.db.walletLedgerEntry.count({
-      where: { idempotencyKey: `wallet-subscription:${interrupted.id}` },
-    }),
-    1
-  )
-
-  const withoutFunds = await modules.db.$transaction((tx) =>
-    modules.users.createUserGraph(tx, { isTest: true })
-  )
-  await assert.rejects(
-    () =>
-      modules.billing.createCheckout({
-        userId: withoutFunds.id,
-        durationMonths: 1,
-        deviceLimit: 3,
-        lteEnabled: true,
-        paymentMethod: "WALLET" as never,
-        idempotencyKey: "wallet-subscription-insufficient",
-      }),
-    (error: unknown) =>
-      (error as { code?: string }).code === "WALLET_INSUFFICIENT_BALANCE"
-  )
-  assert.equal(
-    await modules.db.walletLedgerEntry.count({
-      where: { userId: withoutFunds.id, type: "SUBSCRIPTION_PAYMENT" },
-    }),
-    0
-  )
-})
-
 test("stale checkout amount or pricing version cannot create a payment", async () => {
   const user = await modules.db.$transaction((tx) =>
     modules.users.createUserGraph(tx, { isTest: true })
@@ -1238,196 +1161,6 @@ test("stale checkout amount or pricing version cannot create a payment", async (
     await modules.db.payment.count({ where: { userId: user.id } }),
     0
   )
-})
-
-test.skip("legacy wallet adjustments are archived", async () => {
-  const admin = await modules.db.user.findFirstOrThrow({
-    where: { role: "ADMIN" },
-  })
-  const user = await modules.db.$transaction((tx) =>
-    modules.users.createUserGraph(tx, { isTest: true })
-  )
-  const firstInput = {
-    adminUserId: admin.id,
-    userId: user.id,
-    deltaMinor: 50_000,
-    comment: "Компенсация пользователю по обращению",
-    idempotencyKey: "11111111-1111-4111-8111-111111111111",
-    correlationId: "wallet-adjustment-test-one",
-  }
-
-  const credited = await modules.wallet.adjustWalletBalanceByAdmin(firstInput)
-  assert.equal(credited.applied, true)
-  assert.equal(credited.availableMinor, 50_000)
-
-  const replayed = await modules.wallet.adjustWalletBalanceByAdmin(firstInput)
-  assert.equal(replayed.applied, false)
-  assert.equal(replayed.ledgerEntryId, credited.ledgerEntryId)
-  assert.equal(replayed.availableMinor, 50_000)
-  assert.equal(
-    await modules.db.walletLedgerEntry.count({
-      where: { userId: user.id, type: "ADMIN_ADJUSTMENT" },
-    }),
-    1
-  )
-  assert.equal(
-    await modules.db.auditLog.count({
-      where: {
-        action: "WALLET_ADMIN_ADJUSTED",
-        entityId: (
-          await modules.db.walletAccount.findUniqueOrThrow({
-            where: { userId: user.id },
-          })
-        ).id,
-      },
-    }),
-    1
-  )
-
-  await assert.rejects(
-    () =>
-      modules.wallet.adjustWalletBalanceByAdmin({
-        ...firstInput,
-        deltaMinor: 40_000,
-      }),
-    (error: unknown) => (error as { code?: string }).code === "CONFLICT"
-  )
-
-  const debited = await modules.wallet.adjustWalletBalanceByAdmin({
-    ...firstInput,
-    deltaMinor: -20_000,
-    comment: "Корректировка ошибочного начисления",
-    idempotencyKey: "22222222-2222-4222-8222-222222222222",
-    correlationId: "wallet-adjustment-test-two",
-  })
-  assert.equal(debited.applied, true)
-  assert.equal(debited.availableMinor, 30_000)
-
-  await assert.rejects(
-    () =>
-      modules.wallet.adjustWalletBalanceByAdmin({
-        ...firstInput,
-        deltaMinor: -40_000,
-        comment: "Попытка списать больше доступного",
-        idempotencyKey: "33333333-3333-4333-8333-333333333333",
-        correlationId: "wallet-adjustment-test-three",
-      }),
-    (error: unknown) =>
-      (error as { code?: string }).code === "WALLET_INSUFFICIENT_BALANCE"
-  )
-  assert.equal(
-    (
-      await modules.db.walletAccount.findUniqueOrThrow({
-        where: { userId: user.id },
-      })
-    ).availableMinor,
-    30_000
-  )
-  assert.equal(
-    await modules.db.walletLedgerEntry.count({
-      where: { userId: user.id, type: "ADMIN_ADJUSTMENT" },
-    }),
-    2
-  )
-
-  await assert.rejects(
-    () =>
-      modules.wallet.adjustWalletBalanceByAdmin({
-        ...firstInput,
-        deltaMinor: 150,
-        idempotencyKey: "44444444-4444-4444-8444-444444444444",
-      }),
-    (error: unknown) => (error as { code?: string }).code === "INVALID_INPUT"
-  )
-  const nonAdmin = await modules.db.$transaction((tx) =>
-    modules.users.createUserGraph(tx, { isTest: true })
-  )
-  await assert.rejects(
-    () =>
-      modules.wallet.adjustWalletBalanceByAdmin({
-        ...firstInput,
-        adminUserId: nonAdmin.id,
-        idempotencyKey: "55555555-5555-4555-8555-555555555555",
-      }),
-    (error: unknown) => (error as { code?: string }).code === "ADMIN_FORBIDDEN"
-  )
-
-  const projection = await modules.db.walletLedgerEntry.aggregate({
-    where: { userId: user.id },
-    _sum: { deltaAvailableMinor: true },
-  })
-  assert.equal(projection._sum.deltaAvailableMinor, 30_000)
-})
-
-test.skip("legacy payouts are archived", async () => {
-  const inviter = await modules.db.$transaction((tx) =>
-    modules.users.createUserGraph(tx, { isTest: true })
-  )
-  await modules.db.$transaction(async (tx) => {
-    const account = await tx.walletAccount.update({
-      where: { userId: inviter.id },
-      data: {
-        availableMinor: { increment: 15_000 },
-        version: { increment: 1 },
-      },
-    })
-    await tx.walletLedgerEntry.create({
-      data: {
-        walletAccountId: account.id,
-        userId: inviter.id,
-        type: "ADMIN_ADJUSTMENT",
-        deltaAvailableMinor: 15_000,
-        deltaReservedMinor: 0,
-        referenceType: "Test",
-        referenceId: "wallet-test",
-        idempotencyKey: "wallet-test-adjust",
-      },
-    })
-  })
-  const admin = await modules.db.user.findFirstOrThrow({
-    where: { role: "ADMIN" },
-  })
-  const first = await modules.wallet.createPayout({
-    userId: inviter.id,
-    amountMinor: 15_000,
-    details: "Test Bank 1234567890",
-    idempotencyKey: "payout-one",
-  })
-  await modules.wallet.transitionPayout({
-    payoutId: first.id,
-    adminUserId: admin.id,
-    action: "REJECT",
-    reason: "test",
-    correlationId: "test-reject",
-  })
-  const second = await modules.wallet.createPayout({
-    userId: inviter.id,
-    amountMinor: 15_000,
-    details: "Test Bank 1234567890",
-    idempotencyKey: "payout-two",
-  })
-  await modules.wallet.transitionPayout({
-    payoutId: second.id,
-    adminUserId: admin.id,
-    action: "APPROVE",
-    correlationId: "test-approve",
-  })
-  await modules.wallet.transitionPayout({
-    payoutId: second.id,
-    adminUserId: admin.id,
-    action: "PAID",
-    correlationId: "test-paid",
-  })
-  const account = await modules.db.walletAccount.findUniqueOrThrow({
-    where: { userId: inviter.id },
-  })
-  const projection = await modules.db.walletLedgerEntry.aggregate({
-    where: { userId: inviter.id },
-    _sum: { deltaAvailableMinor: true, deltaReservedMinor: true },
-  })
-  assert.equal(account.availableMinor, projection._sum.deltaAvailableMinor)
-  assert.equal(account.reservedMinor, projection._sum.deltaReservedMinor)
-  assert.equal(account.reservedMinor, 0)
 })
 
 test("test-mode Telegram challenge uses the local simulator without a bot username", async () => {
@@ -1715,6 +1448,159 @@ test("Telegram main screen and referrals read the shared database", async () => 
   )
 })
 
+test("Telegram partner cabinet is conditional and limits history to ten rows", async () => {
+  const partner = await modules.db.$transaction((tx) =>
+    modules.users.createUserGraph(tx, { isTest: true })
+  )
+  await modules.db.authIdentity.create({
+    data: {
+      userId: partner.id,
+      provider: "TELEGRAM",
+      providerSubject: "900000211",
+      telegramId: "900000211",
+      telegramUsername: "partner_menu",
+      verifiedAt: new Date(),
+    },
+  })
+  await modules.db.telegramProfile.create({
+    data: {
+      userId: partner.id,
+      telegramId: "900000211",
+      chatId: "900000211",
+      username: "partner_menu",
+      firstName: "Партнёр",
+      canReceiveMessages: true,
+    },
+  })
+  const enrollment = await modules.db.partnerEnrollment.create({
+    data: {
+      userId: partner.id,
+      enabled: true,
+      rateBps: 4_000,
+      termsVersion: 1,
+      enabledAt: new Date(),
+    },
+  })
+  const profile = await modules.db.referralProfile.findUniqueOrThrow({
+    where: { userId: partner.id },
+  })
+
+  for (let index = 0; index < 11; index += 1) {
+    const invited = await modules.db.$transaction((tx) =>
+      modules.users.createUserGraph(tx, { isTest: true })
+    )
+    const invite = await modules.db.referralInvite.create({
+      data: {
+        inviterUserId: partner.id,
+        invitedUserId: invited.id,
+        inviteCodeSnapshot: profile.inviteCode,
+        status: "PAID",
+        createdAt: new Date(Date.UTC(2026, 0, index + 1)),
+      },
+    })
+    const payment = await modules.db.payment.create({
+      data: {
+        userId: invited.id,
+        provider: "TEST",
+        idempotencyKey: `telegram-partner-history-${index}`,
+        status: "CONFIRMED",
+        amountMinor: 10_000,
+        durationDays: 30,
+        deviceLimit: 1,
+        lteEnabled: false,
+        basePriceMinor: 10_000,
+        extraDevicesPriceMinor: 0,
+        ltePriceMinor: 0,
+        discountMinor: 0,
+        priceSnapshotJson: "{}",
+        pricingVersion: 1,
+        isTest: true,
+        confirmedAt: new Date(Date.UTC(2026, 0, index + 1)),
+      },
+    })
+    await modules.db.partnerCommission.create({
+      data: {
+        enrollmentId: enrollment.id,
+        inviteId: invite.id,
+        inviterUserId: partner.id,
+        invitedUserId: invited.id,
+        paymentId: payment.id,
+        baseAmountMinor: 10_000,
+        amountMinor: (index + 1) * 10_000,
+        rateBps: 4_000,
+        createdAt: new Date(Date.UTC(2026, 0, index + 1)),
+      },
+    })
+  }
+  await modules.db.walletAccount.create({
+    data: { userId: partner.id, availableMinor: 660_000 },
+  })
+
+  modules.telegramGateway.resetTestTelegramGatewayEvents()
+  await modules.telegramWebhook.POST(
+    telegramWebhookRequest({
+      update_id: 221006,
+      message: {
+        text: "/start",
+        chat: { id: 900000211, type: "private" },
+        from: {
+          id: 900000211,
+          username: "partner_menu",
+          first_name: "Партнёр",
+        },
+      },
+    })
+  )
+  await processTelegramUpdate("221006")
+  const main = modules.telegramGateway
+    .getTestTelegramGatewayEvents()
+    .find((event) => event.type === "sendPhoto")
+  assert.ok(main?.type === "sendPhoto")
+  assert.match(JSON.stringify(main.replyMarkup), /Партнёрская программа/)
+  assert.match(JSON.stringify(main.replyMarkup), /"callback_data":"m:p"/)
+
+  const partnerEvents = await sendTelegramCallback({
+    updateId: 221007,
+    telegramId: 900000211,
+    data: "m:p",
+  })
+  const partnerScreen = partnerEvents.find(
+    (event) => event.type === "editMessageCaption"
+  )
+  assert.ok(partnerScreen?.type === "editMessageCaption")
+  assert.match(partnerScreen.caption, /Ваша ставка: <b>40%<\/b>/)
+  assert.match(partnerScreen.caption, /Доступно: <b>6 600 ₽<\/b>/)
+  assert.match(JSON.stringify(partnerScreen.replyMarkup), /p:h/)
+  assert.match(JSON.stringify(partnerScreen.replyMarkup), /w:p/)
+
+  const historyEvents = await sendTelegramCallback({
+    updateId: 221008,
+    telegramId: 900000211,
+    data: "p:h",
+  })
+  const history = historyEvents.find(
+    (event) => event.type === "editMessageCaption"
+  )
+  assert.ok(history?.type === "editMessageCaption")
+  assert.match(history.caption, /Последние 10 операций/)
+  assert.equal((history.caption.match(/💰 Начислено:/g) ?? []).length, 10)
+  assert.doesNotMatch(history.caption, /\+100 ₽/)
+
+  const websiteEvents = await sendTelegramCallback({
+    updateId: 221009,
+    telegramId: 900000211,
+    data: "w:p",
+  })
+  const website = websiteEvents.find(
+    (event) => event.type === "editMessageCaption"
+  )
+  assert.ok(website?.type === "editMessageCaption")
+  assert.match(website.caption, /Партнёрская программа/)
+  const urlMatch = JSON.stringify(website.replyMarkup).match(/"url":"([^"]+)"/)
+  assert.ok(urlMatch?.[1])
+  assert.equal(new URL(urlMatch[1]).searchParams.get("returnTo"), "/partner")
+})
+
 test("Telegram referral deep link registers a new shared user once", async () => {
   const inviter = await modules.db.authIdentity.findUniqueOrThrow({
     where: { telegramId: "900000201" },
@@ -1816,9 +1702,12 @@ test("Telegram callback contract is compact and rejects untrusted values", () =>
     "m:d",
     "m:r",
     "m:f",
+    "m:p",
+    "p:h",
     "w:i",
     "w:s",
     "w:h",
+    "w:p",
     "d:c:0123456789abcdef",
     "d:x:0123456789abcdef",
     "d:u",

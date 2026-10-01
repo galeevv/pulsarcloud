@@ -46,18 +46,18 @@ const platformOptions = [
 
 const appOptions = [
   {
-    value: "happ" as const,
-    name: "Happ",
-    description: "Лучший выбор для Pulsar.",
-    badge: "Рекомендуем",
-    icon: "/instructions/apps/happ.webp",
-  },
-  {
     value: "incy" as const,
     name: "Incy",
+    description: "Лучший выбор для Pulsar.",
+    badge: "Рекомендуем",
+    icon: "/instructions/apps/incy.webp",
+  },
+  {
+    value: "happ" as const,
+    name: "Happ",
     description: "Альтернативный вариант.",
     badge: "Поддерживается",
-    icon: "/instructions/apps/incy.webp",
+    icon: "/instructions/apps/happ.webp",
   },
 ]
 
@@ -112,7 +112,7 @@ export function InstructionsFlow({
   const [step, setStep] = React.useState<Step>("start")
   const [, setHistory] = React.useState<Step[]>([])
   const [platform, setPlatform] = React.useState<Platform | null>(null)
-  const [vpnApp, setVpnApp] = React.useState<VpnApp>("happ")
+  const [vpnApp, setVpnApp] = React.useState<VpnApp>("incy")
   const selectedAppName = vpnApp === "happ" ? "Happ" : "Incy"
   const connectionUrl = subscriptionUrl
     ? vpnApp === "incy"
@@ -135,7 +135,7 @@ export function InstructionsFlow({
 
   function continueWithPlatform(nextPlatform: Platform) {
     setPlatform(nextPlatform)
-    setVpnApp("happ")
+    setVpnApp("incy")
     go("choose-app")
   }
 
@@ -235,7 +235,7 @@ export function InstructionsFlow({
                           <span className="font-medium">{option.name}</span>
                           <Badge
                             variant={
-                              option.value === "happ" ? "default" : "secondary"
+                              option.value === "incy" ? "default" : "secondary"
                             }
                           >
                             {option.badge}

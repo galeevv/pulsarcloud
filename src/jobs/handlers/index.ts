@@ -20,6 +20,8 @@ import {
 } from "@/src/server/domain/auth/service"
 import {
   getTelegramMainScreen,
+  getTelegramPartnerHistoryScreen,
+  getTelegramPartnerScreen,
   getReferralsScreen,
   getTelegramCheckoutScreen,
   getTelegramDeviceConfirmationScreen,
@@ -123,21 +125,30 @@ function formatTelegramRub(minor: number) {
   }).format(Math.floor(minor / 100))} ₽`
 }
 
-function telegramUserLabel(user: {
-  telegramProfile: {
-    username: string | null
-    firstName: string | null
-    lastName: string | null
-  } | null
-  identities: Array<{
-    emailNormalized: string | null
-    telegramUsername: string | null
-  }>
-}) {
+function telegramUserLabel(
+  user: {
+    telegramProfile: {
+      username: string | null
+      firstName: string | null
+      lastName: string | null
+    } | null
+    identities: Array<{
+      emailNormalized: string | null
+      telegramUsername: string | null
+    }>
+  },
+  options?: { emailFallback?: boolean }
+) {
   const telegram =
     user.telegramProfile?.username ??
     user.identities.find((item) => item.telegramUsername)?.telegramUsername
   if (telegram) return telegram.startsWith("@") ? telegram : `@${telegram}`
+  if (options?.emailFallback) {
+    const email = user.identities.find(
+      (item) => item.emailNormalized
+    )?.emailNormalized
+    if (email) return email
+  }
   const name = [user.telegramProfile?.firstName, user.telegramProfile?.lastName]
     .filter(Boolean)
     .join(" ")
@@ -205,13 +216,19 @@ async function telegramCallbackScreen(input: {
         return getTelegramRenewalDurationScreen()
       case "referrals":
         return getReferralsScreen(userId)
+      case "partner":
+        return getTelegramPartnerScreen(userId)
+      case "partner-history":
+        return getTelegramPartnerHistoryScreen(userId)
       case "website": {
         const returnTo =
           action.target === "instructions"
             ? "/instructions"
             : action.target === "support"
               ? "/support"
-              : "/home"
+              : action.target === "partner"
+                ? "/partner"
+                : "/home"
         const login = await issueTelegramWebsiteLogin({
           telegramId: input.telegramId,
           chatId: input.chatId,
@@ -452,43 +469,53 @@ async function ensureRemoteReconciliationJobs(now: Date) {
 }
 
 async function ensureExpiryNotifications(now: Date) {
-  const subscriptions = await db.subscription.findMany({
-    where: {
-      status: { in: ["ACTIVE", "TRIAL"] },
-      expiresAt: {
-        gt: new Date(now.getTime() - 24 * 60 * 60_000),
-        lte: new Date(now.getTime() + 72 * 60 * 60_000),
+  const batchSize = 500
+  let afterId: string | undefined
+  while (true) {
+    const subscriptions = await db.subscription.findMany({
+      where: {
+        ...(afterId ? { id: { gt: afterId } } : {}),
+        status: { in: ["ACTIVE", "TRIAL"] },
+        expiresAt: {
+          gt: new Date(now.getTime() - 24 * 60 * 60_000),
+          lte: new Date(now.getTime() + 72 * 60 * 60_000),
+        },
       },
-    },
-    take: 500,
-  })
-  for (const subscription of subscriptions) {
-    const hours = (subscription.expiresAt.getTime() - now.getTime()) / 3_600_000
-    const template =
-      hours <= 0
-        ? "SUBSCRIPTION_EXPIRED"
-        : hours <= 24
-          ? "SUBSCRIPTION_EXPIRING_1D"
-          : hours > 48
-            ? "SUBSCRIPTION_EXPIRING_3D"
-            : null
-    if (!template) continue
-    const dedupeKey = `telegram:subscription:${subscription.id}:${subscription.expiresAt.toISOString()}:${template}`
-    await db.outboxJob.upsert({
-      where: { dedupeKey },
-      create: {
-        type: "SEND_TELEGRAM_NOTIFICATION",
-        aggregateType: "Subscription",
-        aggregateId: subscription.id,
-        payloadJson: JSON.stringify({
-          userId: subscription.userId,
-          template,
-        }),
-        dedupeKey,
-        maxAttempts: 5,
-      },
-      update: {},
+      orderBy: { id: "asc" },
+      take: batchSize,
+      select: { id: true, userId: true, expiresAt: true },
     })
+    for (const subscription of subscriptions) {
+      const hours =
+        (subscription.expiresAt.getTime() - now.getTime()) / 3_600_000
+      const template =
+        hours <= 0
+          ? "SUBSCRIPTION_EXPIRED"
+          : hours <= 24
+            ? "SUBSCRIPTION_EXPIRING_1D"
+            : hours > 48
+              ? "SUBSCRIPTION_EXPIRING_3D"
+              : null
+      if (!template) continue
+      const dedupeKey = `telegram:subscription:${subscription.id}:${subscription.expiresAt.toISOString()}:${template}`
+      await db.outboxJob.upsert({
+        where: { dedupeKey },
+        create: {
+          type: "SEND_TELEGRAM_NOTIFICATION",
+          aggregateType: "Subscription",
+          aggregateId: subscription.id,
+          payloadJson: JSON.stringify({
+            userId: subscription.userId,
+            template,
+          }),
+          dedupeKey,
+          maxAttempts: 5,
+        },
+        update: {},
+      })
+    }
+    if (subscriptions.length < batchSize) break
+    afterId = subscriptions[subscriptions.length - 1].id
   }
 }
 
@@ -1151,7 +1178,7 @@ export async function handleJob(job: Job) {
       text = [
         "🎁 <b>Новый пользователь по вашей ссылке</b>",
         "",
-        `<b>${escapeTelegramHtml(telegramUserLabel(invite.invited))}</b> зарегистрировался по вашей реферальной ссылке.`,
+        `<b>${escapeTelegramHtml(telegramUserLabel(invite.invited, { emailFallback: true }))}</b> зарегистрировался по вашей реферальной ссылке.`,
       ].join("\n")
       parseMode = "HTML"
       button = { text: "🎁 Открыть рефералы", returnTo: "/referrals" }

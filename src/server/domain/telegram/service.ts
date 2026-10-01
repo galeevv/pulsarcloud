@@ -19,7 +19,12 @@ export type TelegramCallbackAction =
   | { kind: "devices" }
   | { kind: "renewal" }
   | { kind: "referrals" }
-  | { kind: "website"; target: "home" | "instructions" | "support" }
+  | { kind: "partner" }
+  | { kind: "partner-history" }
+  | {
+      kind: "website"
+      target: "home" | "instructions" | "support" | "partner"
+    }
   | { kind: "device-confirm"; deviceRef: string }
   | { kind: "device-delete"; deviceRef: string }
   | { kind: "device-upgrade" }
@@ -76,9 +81,12 @@ export function parseTelegramCallbackAction(
     "m:d": { kind: "devices" },
     "m:r": { kind: "renewal" },
     "m:f": { kind: "referrals" },
+    "m:p": { kind: "partner" },
+    "p:h": { kind: "partner-history" },
     "w:h": { kind: "website", target: "home" },
     "w:i": { kind: "website", target: "instructions" },
     "w:s": { kind: "website", target: "support" },
+    "w:p": { kind: "website", target: "partner" },
     "d:u": { kind: "device-upgrade" },
     "r:0": { kind: "renewal" },
     "menu:home": { kind: "home" },
@@ -287,6 +295,7 @@ export async function getTelegramMainScreen(
         take: 1,
       },
       subscription: true,
+      partnerEnrollment: { select: { enabled: true } },
     },
   })
   const profile = user.telegramProfile
@@ -379,13 +388,179 @@ export async function getTelegramMainScreen(
       { text: "🎁 Пригласить", callback_data: "m:f" },
       { text: "💬 Поддержка", callback_data: "w:s" },
     ],
-    [{ text: "🌐 Сайт", callback_data: "w:h" }],
   ]
+  if (user.partnerEnrollment?.enabled)
+    keyboard.push([
+      { text: "🤝 Партнёрская программа", callback_data: "m:p" },
+    ])
+  keyboard.push([{ text: "🌐 Сайт", callback_data: "w:h" }])
 
   return {
     text: lines.join("\n"),
     parseMode: "HTML",
     replyMarkup: { inline_keyboard: keyboard },
+  }
+}
+
+function partnerIdentityLabel(user: {
+  telegramProfile: { username: string | null } | null
+  identities: Array<{
+    emailNormalized: string | null
+    telegramUsername: string | null
+  }>
+}) {
+  const username =
+    user.telegramProfile?.username ??
+    user.identities.find((identity) => identity.telegramUsername)
+      ?.telegramUsername
+  if (username) return username.startsWith("@") ? username : `@${username}`
+  const email = user.identities.find(
+    (identity) => identity.emailNormalized
+  )?.emailNormalized
+  if (!email) return "Пользователь PULSAR"
+  const [local = "", domain = ""] = email.split("@")
+  if (!domain) return "Пользователь PULSAR"
+  return `${local.slice(0, 1) || "*"}***@${domain}`
+}
+
+function partnerRateLabel(rateBps: number) {
+  return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(
+    rateBps / 100
+  )
+}
+
+async function enabledPartnerEnrollment(userId: string) {
+  return db.partnerEnrollment.findFirst({
+    where: { userId, enabled: true },
+    select: { id: true, rateBps: true },
+  })
+}
+
+function getPartnerUnavailableScreen(): TelegramScreen {
+  return {
+    text: [
+      "🤝 <b>Партнёрская программа</b>",
+      "",
+      "Партнёрская программа не подключена для вашего аккаунта.",
+    ].join("\n"),
+    parseMode: "HTML",
+    replyMarkup: { inline_keyboard: [[homeButton()]] },
+  }
+}
+
+export async function getTelegramPartnerScreen(
+  userId: string
+): Promise<TelegramScreen> {
+  const enrollment = await enabledPartnerEnrollment(userId)
+  if (!enrollment) return getPartnerUnavailableScreen()
+
+  const [wallet, earned, paid, latest] = await Promise.all([
+    db.walletAccount.findUnique({
+      where: { userId },
+      select: { availableMinor: true, reservedMinor: true },
+    }),
+    db.partnerCommission.aggregate({
+      where: { inviterUserId: userId, status: { not: "REVERSED" } },
+      _sum: { amountMinor: true },
+    }),
+    db.payoutRequest.aggregate({
+      where: { userId, status: "PAID" },
+      _sum: { amountMinor: true },
+    }),
+    db.partnerCommission.findFirst({
+      where: { inviterUserId: userId, status: { not: "REVERSED" } },
+      orderBy: { createdAt: "desc" },
+      select: {
+        amountMinor: true,
+        invited: {
+          select: {
+            telegramProfile: { select: { username: true } },
+            identities: {
+              select: { emailNormalized: true, telegramUsername: true },
+            },
+          },
+        },
+      },
+    }),
+  ])
+  const lines = [
+    "🤝 <b>Партнёрская программа</b>",
+    "",
+    `Ваша ставка: <b>${partnerRateLabel(enrollment.rateBps)}%</b>`,
+    "",
+    `💰 Доступно: <b>${formatRub(wallet?.availableMinor ?? 0)}</b>`,
+    `⏳ В резерве: <b>${formatRub(wallet?.reservedMinor ?? 0)}</b>`,
+    `📈 Заработано: <b>${formatRub(earned._sum.amountMinor ?? 0)}</b>`,
+    `✅ Выплачено: <b>${formatRub(paid._sum.amountMinor ?? 0)}</b>`,
+  ]
+  if (latest)
+    lines.push(
+      "",
+      "Последнее начисление:",
+      `${escapeHtml(partnerIdentityLabel(latest.invited))} · <b>+${formatRub(latest.amountMinor)}</b>`
+    )
+
+  return {
+    text: lines.join("\n"),
+    parseMode: "HTML",
+    replyMarkup: {
+      inline_keyboard: [
+        [{ text: "💳 Вывести средства", callback_data: "w:p" }],
+        [{ text: "📊 История начислений", callback_data: "p:h" }],
+        [{ text: "🎁 Пригласить друзей", callback_data: "m:f" }],
+        [backButton("m:h", "‹ Вернуться в главное меню")],
+      ],
+    },
+  }
+}
+
+export async function getTelegramPartnerHistoryScreen(
+  userId: string
+): Promise<TelegramScreen> {
+  const enrollment = await enabledPartnerEnrollment(userId)
+  if (!enrollment) return getPartnerUnavailableScreen()
+
+  const commissions = await db.partnerCommission.findMany({
+    where: { inviterUserId: userId },
+    orderBy: { createdAt: "desc" },
+    take: 10,
+    select: {
+      amountMinor: true,
+      status: true,
+      createdAt: true,
+      invited: {
+        select: {
+          telegramProfile: { select: { username: true } },
+          identities: {
+            select: { emailNormalized: true, telegramUsername: true },
+          },
+        },
+      },
+    },
+  })
+  const lines = ["📊 <b>История начислений</b>", "", "Последние 10 операций:"]
+  if (!commissions.length) lines.push("", "Начислений пока нет.")
+  else
+    commissions.forEach((commission, index) => {
+      const reversed = commission.status === "REVERSED"
+      lines.push(
+        "",
+        `${index + 1}. ${dateFormatter.format(commission.createdAt)} · ${escapeHtml(partnerIdentityLabel(commission.invited))}`,
+        reversed
+          ? `↩️ Отменено: <b>${formatRub(commission.amountMinor)}</b>`
+          : `💰 Начислено: <b>+${formatRub(commission.amountMinor)}</b>`
+      )
+    })
+
+  return {
+    text: lines.join("\n"),
+    parseMode: "HTML",
+    replyMarkup: {
+      inline_keyboard: [
+        [backButton("m:p", "‹ Назад к партнёрской программе")],
+        [homeButton()],
+      ],
+    },
   }
 }
 
@@ -878,12 +1053,13 @@ export function getTelegramTemporaryErrorScreen(
 
 export function getTelegramWebsiteScreen(
   url: string,
-  target: "home" | "instructions" | "support" = "home"
+  target: "home" | "instructions" | "support" | "partner" = "home"
 ): TelegramScreen {
   const labels = {
     home: ["Сайт", "🌐 Открыть личный кабинет ↗"],
     instructions: ["Подключение", "🔗 Открыть инструкции ↗"],
     support: ["Поддержка", "💬 Открыть поддержку ↗"],
+    partner: ["Партнёрская программа", "🤝 Открыть партнёрку ↗"],
   } as const
   const [title, button] = labels[target]
   return {
